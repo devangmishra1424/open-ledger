@@ -66,28 +66,31 @@ Everyone else (buyer, receiving clerk, treasury, tax, internal audit, vendor, ex
 
 ## 5. Database schema (accounting-correct, event-sourced ledger)
 
+**Naming note, corrected**: every table below uses a plain `id` as its primary key (matching BUILD.md §2's actual `schema.sql`) — an earlier draft of this section used table-specific PK names (`account_id`, `po_id`, `tax_code_id`, `entry_id`...) that don't match the real schema. Read `id` everywhere a table-specific name appears below; it's a naming artifact from an earlier draft, not a second convention.
+
 ### 5.1 Core reference / master data
-- **`chart_of_accounts`**: account_id, account_number, name, account_type (asset/liability/equity/revenue/expense), account_subtype, normal_balance (debit/credit), parent_account_id, is_control_account (bool — flags 2000 Accounts Payable and the GR/IR clearing account), currency (nullable), is_active.
+- **`chart_of_accounts`**: id, account_number, name, account_type (asset/liability/equity/revenue/expense), account_subtype, normal_balance (debit/credit), parent_account_id, is_control_account (bool — flags 2000 Accounts Payable and the GR/IR clearing account), currency (nullable), is_active.
   - Seeded per the standard 4-digit demo range: 1000s Assets (1000 Operating Checking, 1300 Prepaid Expenses, 1500s Fixed Assets), 2000s Liabilities (**2000 Accounts Payable — control account**, **2050 GR/IR Clearing**, 2200 VAT/Sales Tax Payable, 2210 VAT Recoverable), 3000s Equity, 4000s Revenue (unused in v1), 5000 COGS, 6000s Operating Expenses (6000 Office Supplies … 6900 Depreciation — where AP bills land), 7000s Other (7100 Interest Expense, 7200/7210 Realized/Unrealized FX Gain-Loss).
-- **`accounting_periods`**: period_id, name (e.g. "2026-09"), start_date, end_date, status (open/closed/permanently_closed).
-- **`vendors`**: vendor_id, name, remit_to_address, bank_account_last4, bank_account_changed_at (nullable), trust_tier (trusted/new/flagged), tax_id, w9_on_file (bool), payment_terms_code (e.g. "2/10 NET 30"), created_at.
+- **`accounting_periods`**: id, name (e.g. "2026-09"), start_date, end_date, status (open/closed/permanently_closed).
+- **`vendors`**: id, name, remit_to_address, bank_account_last4, bank_account_changed_at (nullable), trust_tier (trusted/new/flagged), tax_id, w9_on_file (bool), payment_terms_code (e.g. "2/10 NET 30"), created_at.
 - **`vendor_corrections`** (the learning-loop memory store): id, vendor_id, pattern, note, source_invoice_id, created_at.
-- **`tax_codes`**: tax_code_id, name, rate, tax_type (vat/gst/sales_tax/withholding), direction (input/output), tax_account_id (FK to chart_of_accounts), jurisdiction, effective_from, effective_to (nullable — never mutate a rate in place).
-- **`exchange_rates`** (only needed if the demo includes a foreign-currency vendor): from_currency, to_currency, rate, rate_date, rate_source.
+- **`vendor_bank_change_reviews`** (the `EXC-FRAUD_BANK` gated workflow, ALGORITHMS.md §6 — deliberately separate from `vendors.trust_tier`): id, vendor_id, old_bank_last4, new_bank_last4, status (callback_pending/callback_confirmed/callback_failed), callback_phone_used, callback_confirmed_by, callback_at, second_reviewer_name, source_invoice_id, created_at.
+- **`tax_codes`**: id, name, rate, tax_type (vat/gst/sales_tax/withholding), direction (input/output), tax_account_id (FK to chart_of_accounts), jurisdiction, effective_from, effective_to (nullable — never mutate a rate in place).
+- **`exchange_rates`** (only needed if the demo includes a foreign-currency vendor): id, from_currency, to_currency, rate, rate_date, rate_source.
 
 ### 5.2 The P2P subledger documents
-- **`purchase_orders`**: po_id, vendor_id, buyer_name, order_date, status (open/partial/closed), currency, exchange_rate.
+- **`purchase_orders`**: id, po_number (the vendor/human-facing natural key — distinct from `id`, matching how `vendor_bills.invoice_number` works and how the agent tools address a PO by `po_number`, never by internal `id`), vendor_id, buyer_name, order_date, status (open/partial/closed), po_type (standard/blanket — backs `EXC-BLANKET_EXCEEDED`), max_value_ceiling, max_qty_ceiling (nullable, only meaningful when po_type='blanket'), currency, exchange_rate.
 - **`purchase_order_lines`**: id, po_id, line_number, description, uom, qty_ordered, unit_price, gl_account_id, tolerance_pct (e.g. 2%), final_delivery (bool, set by the last goods receipt against this line).
 - **`goods_receipts`**: id, po_id, receipt_date, receiver_name, condition (accepted/damaged/rejected), final_delivery_indicator (bool).
 - **`goods_receipt_lines`**: id, goods_receipt_id, po_line_id, qty_received.
-- **`vendor_bills`** (the "invoice" object): id, vendor_id, po_id (nullable — null means non-PO), invoice_number, invoice_date, due_date, currency, exchange_rate, subtotal, tax_total, total_amount, raw_source (text — structured JSON or extracted PDF/email text), ap_account_id (FK to chart_of_accounts, normally 2000), journal_entry_id (nullable until posted), status (draft/matched/exception/approved/posted/paid/void), received_at.
-- **`vendor_bill_lines`**: id, vendor_bill_id, po_line_id (nullable), description, qty_invoiced, unit_price, tax_code_id, gl_account_id (for non-PO lines).
-- **`payments`**: id, method (ach/wire/check/virtual_card — stubbed), payment_date, bank_account_id, total_amount, journal_entry_id, positive_pay_reference (nullable).
+- **`vendor_bills`** (the "invoice" object): id, vendor_id, po_id (nullable — null means non-PO), invoice_number, invoice_date, due_date, currency, exchange_rate, subtotal, tax_total, total_amount, raw_source (text — structured JSON or extracted PDF/email text), ap_account_id (FK to chart_of_accounts, normally 2000), journal_entry_id (FK to journal_entries, nullable until posted), status (processing/matched/exception/approved/posted/paid/void — corrected from an earlier draft's 'draft', which doesn't match the real schema or ENGINE.md §2's own stage-0 description), received_at.
+- **`vendor_bill_lines`**: id, vendor_bill_id, po_line_id (nullable), description, qty_invoiced, unit_price, uom (needed for `EXC-UOM_MISMATCH` and the line-matching fallback's UOM check — an earlier draft omitted this), tax_code_id, gl_account_id (for non-PO lines).
+- **`payments`**: id, method (ach/wire/check/virtual_card — stubbed), payment_date, bank_account_id, total_amount, journal_entry_id (FK to journal_entries), positive_pay_reference (nullable).
 - **`payment_applications`**: id, payment_id, vendor_bill_id, applied_amount — the join table that supports partial/split payments in both directions.
 
 ### 5.3 The ledger (append-only, event-sourced)
-- **`journal_entries`**: entry_id, entry_number, entry_date, period_id, memo, source_type (vendor_bill/payment/manual/reversal), source_id, status (draft/posted/reversed/voided), posted_by, posted_at, reversal_of_entry_id (nullable, self-referential), currency, exchange_rate, created_at. **Insert-only once status='posted' — no UPDATE, no DELETE, enforced at the DB layer.**
-- **`journal_entry_lines`**: line_id, entry_id, line_number, account_id, debit_amount, credit_amount (two non-negative columns, not a signed amount — matches the T-account mental model and makes `SUM(debit)=SUM(credit)` a literal query), currency_amount, base_currency_amount, department/class/location (optional dimensions), vendor_id (nullable, carried on AP-touching lines for subledger tie-out).
+- **`journal_entries`**: id, entry_number, entry_date, period_id, memo, source_type (vendor_bill/payment/manual/reversal), source_id, status (draft/posted/reversed/voided), posted_by, posted_at, reversal_of_entry_id (nullable, self-referential), currency, exchange_rate, idempotency_key, created_at. **Insert-only once status='posted' — no UPDATE, no DELETE, enforced at the DB layer.**
+- **`journal_entry_lines`**: id, entry_id, line_number, account_id, debit_amount, credit_amount (two non-negative columns, not a signed amount — matches the T-account mental model and makes `SUM(debit)=SUM(credit)` a literal query), currency_amount, base_currency_amount, department/class/location (optional dimensions), vendor_id (nullable, carried on AP-touching lines for subledger tie-out).
 
 **The two AP journal entries, always separate, never one mutable status flag:**
 - Entry 1 (bill approval): Dr 6xxx Expense — Cr 2000 Accounts Payable.
@@ -97,9 +100,10 @@ Everyone else (buyer, receiving clerk, treasury, tax, internal audit, vendor, ex
 **Idempotency**: every posting action carries a deterministic `idempotency_key` (hash of source_type+source_id+action), unique-indexed — an autonomous agent retry is far more likely than a human double-click, so this isn't optional.
 
 ### 5.4 The accountability layer (decision ledger + agent memory — carried over from the contestability design, now bound to the concrete schema)
-- **`decisions`**: id, invoice_id (FK vendor_bills), node_id (extract/investigate/policy/audit), parent_decision_id, agent_id + model + model_version, started_at, ended_at, inputs_consumed (json: [{source, retrieved_at, content_hash, relied_on_span}]), tool_calls (json: [{name, args, raw_result, result_hash}]), claims (json: [{text, tag: grounded|ungrounded|contradicted, evidence_pointer}]), policy_evaluation (json: [{rule_id, threshold, actual_value, verdict}]), confidence, action_taken, reason_code (FK to `reason_codes`, never free text), forwarded_to, what_was_forwarded, prev_hash, hash. **Append-only.**
-- **`reason_codes`**: a small seed table (R00_CLEAN_MATCH, R01_QUANTITY_VARIANCE, R02_PRICE_VARIANCE, R03_MISSING_PO, R04_DUPLICATE_SUSPECTED, R05_VENDOR_BANK_CHANGE, … one per exception type in §6) with a human-readable description. Agents and humans reference codes from here, never invent inline strings — this is what makes ECOA-style "specific reasons" real rather than aspirational.
-- **`reviews`**: id, invoice_id, reviewer_name (from the fixed demo list), action (approve/reject/request_info/contest), reason_code, note (optional free text), created_at — itself a new, linked `decisions`-chain entry, not a side table conceptually.
+- **`decisions`**: id, invoice_id (FK vendor_bills), node_id — **all 8 values**: extract/validate/match/investigate/verify/policy/audit/audit_assemble (an earlier draft of this line only listed 4; BUILD.md §2's schema is the authoritative full list), parent_decision_id, reconsideration_of_id, superseded_by_id, agent_id + model + model_version, started_at, ended_at, inputs_consumed (json: [{source, retrieved_at, content_hash, relied_on_span}]), tool_calls (json: [{name, args, raw_result, result_hash}]), claims (json: [{text, tag: grounded|ungrounded|contradicted, evidence_pointer}]), policy_evaluation (json: [{rule_id, threshold, actual_value, verdict}]), confidence, action_taken, reason_code (FK to `reason_codes`, never free text), forwarded_to, what_was_forwarded, triggered_by_actor, triggered_by_question, idempotency_key, prev_hash, hash. **Append-only.**
+- **`reason_codes`**: a small seed table, one row per exception code — **standardized on the adopted spec file's own `EXC-*` codes** (`EXC-NO_PO`, `EXC-PRICE_VAR`, `EXC-DUPLICATE`, … the full 12 in `docs/ap-three-way-match-spec.md`'s Appendix, plus `EXC-BLANKET_EXCEEDED`/`EXC-UOM_MISMATCH` per ALGORITHMS.md §7) — never a separate `R0x` scheme; that naming was an earlier draft and is retired. Add two more not in the spec file: `CLEAN_MATCH` (the required non-null reason code on every Tier-0 auto-approval, since a decision must always cite a code, even a clean one) and `R99_AGENT_ERROR` (ENGINE.md §5). Agents and humans reference codes from here, never invent inline strings — this is what makes ECOA-style "specific reasons" real rather than aspirational.
+- **`reviews`**: id, invoice_id, reviewer_name (from the fixed demo list), action (approve/reject/request_info/contest), reason_code, note (optional free text), decision_id (FK, linking the review to the specific decision it responds to), created_at — itself a new, linked `decisions`-chain entry, not a side table conceptually.
+- **`vendor_bank_change_reviews`**: id, vendor_id, old_bank_last4, new_bank_last4, status (callback_pending/callback_confirmed/callback_failed), callback_phone_used, callback_confirmed_by, callback_at, second_reviewer_name (must differ from whoever logged the callback — enforced in the UI, not the DB), source_invoice_id, created_at. This is `EXC-FRAUD_BANK`'s dedicated gated workflow (ALGORITHMS.md §6) — deliberately its own table, not an overload of `vendors.trust_tier`, which stays a simple 3-value enum.
 
 ### 5.5 Why event-sourced, not mutable-state (the load-bearing design call)
 Real double-entry bookkeeping *is* event sourcing — a journal entry is an immutable, timestamped event, and an account balance is a projection over those events, never itself the source of truth. This is why `journal_entries`/`journal_entry_lines` are insert-only once posted, corrections are new reversal entries (never edits), and derived numbers (AP aging, trial balance) are materialized/cached but always regenerable from the log. The same discipline applies to the `decisions` table for exactly the reason this whole redesign exists: an agent that could silently overwrite a bill's approved amount or delete a bad posting is not auditable by construction, and a human contesting a three-week-old agent decision needs something to actually inspect.
@@ -128,24 +132,26 @@ vendor_corrections.vendor_id → vendors.id
 
 Research surfaced 30+ real, named AP exception types. Building all of them would dilute the demo and blow the time budget on long-tail cases a judge won't recognize as impressive anyway. **v1 build list (14, chosen for taxonomy breadth × demo legibility × real fraud/compliance weight):**
 
-1. Missing or invalid PO reference.
-2. Invoice received before goods receipt posted.
-3. Price variance beyond tolerance.
-4. Quantity variance beyond tolerance.
-5. Partial shipment / multi-receipt matching.
-6. Duplicate invoice (exact + embedding-similarity near-duplicate).
-7. Non-PO invoice (different approval path).
-8. Credit memo netting.
-9. Partial/short payment.
-10. Currency or tax mismatch.
-11. Non-standard invoice layout / low-confidence extraction (subject to the learning-loop override).
-12. Vendor master-data fraud flag (bank account changed recently) — **routed to the separate gated vendor-change workflow, never the ordinary invoice screen**, per the real-world pattern research found (a mandatory outbound callback + two-person sign-off, deliberately not bundled with routine invoice approval).
-13. Blanket/standing PO consumption exceeding the remaining ceiling (new — from the extended research; concretely demonstrates we understand PO cardinality beyond one-PO-one-invoice).
-14. Unit-of-measure mismatch (PO in cases, invoice in eaches — new, cheap to implement, a real and commonly-cited gap).
+**Corrected to a strict 1:1 mapping against the adopted spec file's 12 codes (an earlier draft of this list accidentally split `EXC-08` across two entries and merged `EXC-09`/`EXC-10` into one — fixed now):**
+
+1. `EXC-NO_PO` — Missing or invalid PO reference.
+2. `EXC-BEFORE_RCV` — Invoice received before goods receipt posted.
+3. `EXC-PRICE_VAR` — Price variance beyond tolerance.
+4. `EXC-QTY_VAR` — Quantity variance beyond tolerance.
+5. `EXC-DUPLICATE` — Duplicate invoice (exact + embedding-similarity near-duplicate).
+6. `EXC-NON_PO` — Non-PO invoice (different approval path).
+7. `EXC-CREDIT_MEMO` — Credit memo netting.
+8. `EXC-PARTIAL` — Partial payment **or** partial shipment (one code, per the spec file — not two separate exception types).
+9. `EXC-CURRENCY` — Currency mismatch.
+10. `EXC-TAX_VAR` — Tax mismatch (a distinct code from currency, with its own severity table — not merged with #9).
+11. `EXC-LAYOUT` — Non-standard invoice layout / low-confidence extraction (subject to the learning-loop override).
+12. `EXC-FRAUD_BANK` — Vendor master-data fraud flag (bank account changed recently) — **routed to the separate gated vendor-change workflow** (`vendor_bank_change_reviews`, ALGORITHMS.md §6), never the ordinary invoice screen.
+13. `EXC-BLANKET_EXCEEDED` — Blanket/standing PO consumption exceeding the remaining ceiling (new, ALGORITHMS.md §7).
+14. `EXC-UOM_MISMATCH` — Unit-of-measure mismatch, PO vs. invoice (new, ALGORITHMS.md §7).
 
 **Explicitly deferred, and named as such in the README (this is a feature, not an omission — it shows deliberate scope discipline):** early-payment-discount timing, retention/holdback, drop-ship/three-party POs, consignment inventory, prepayment netting, FX rate-date mismatches beyond a single realized-gain entry, 1099/withholding edge cases, multi-entity routing errors, sanctions/OFAC screening, e-invoicing regional mandates (PEPPOL/CFDI), statement-vs-invoice reconciliation. Each of these is real (see the research) and worth a "roadmap" mention, but out of scope for a 30-hour build.
 
-**Design principle from the research, applied directly:** these 14 are two structurally different categories, and the UI must not conflate them — **document-mechanical exceptions** (1–5, 9, 10, 13, 14) are things a matching engine triages algorithmically with tolerance bands; **judgment/control exceptions** (6, 7, 8, 11, 12) must always route to a named human with authority and a mandatory reason code, never auto-clear regardless of confidence.
+**On severity/auto-clear, corrected**: an earlier draft of this doc claimed a clean "document-mechanical vs. judgment/control, judgment-control-never-auto-clears" split. That claim doesn't survive contact with the spec file's own Decision Matrix (§3.1) and is retired — `EXC-NON_PO` **can** auto-approve (≤$2,500, whitelisted vendor) and `EXC-CREDIT_MEMO` **can** auto-resolve (net ≥ $0), despite intuitively feeling like "judgment" categories. The spec file's Decision Matrix is the sole authority on what auto-clears and what doesn't, per exception type — there is no separate simplified rule layered on top of it, and `decision-matrix.ts` (ALGORITHMS.md §1) must implement it exactly as written, not this retired approximation.
 
 ---
 
@@ -171,7 +177,7 @@ Every node writes its `decisions` row at the moment it acts. The "ask it why" po
 
 **Design system baseline** (grounded directly in the observed Tipalti/Stampli/Ramp/FloQast/Vic.ai/BlackLine patterns, not invented): white/near-white background, near-black text, ONE brand accent color used only on the primary CTA and active states; status color is never decorative — green=clean/matched/approved, yellow/orange=needs review (not crisis), red=blocked/fraud/off-track, blue=in-progress/neutral — every color paired with an icon + text label, never color alone; when child statuses roll up to a parent badge, escalate to the worst color present; all numeric/currency columns right-aligned with tabular figures, all text columns left-aligned, never mixed in one column; "quiet chrome" — shrink borders/shadows, carry hierarchy via font-weight and spacing, no decorative gradients/illustration.
 
-**Screen A — Dashboard (landing).** Leads with a backlog/liability metric, not a vanity chart — "7 invoices need you right now" as the single dominant number (matches Bill.com/BlackLine/FloQast convention: lead with what needs a human, not cumulative success). Below it, in Maximor's own vocabulary: straight-through-processing rate, escalation rate, override/correction rate over time, exception-type breakdown, a visible "N vendor-specific corrections learned" counter (the learning loop, made visible), and a small "chain verified ✓" integrity indicator for the whole ledger. Nav is task-verb-scoped (Ramp's pattern): "Review invoices / Approve payments / Audit trail / Policy" — not data-noun-scoped ("Ledger," "Entities").
+**Screen A — Dashboard (landing).** Leads with a backlog/liability metric, not a vanity chart — "7 invoices need you right now" as the single dominant number (matches Bill.com/BlackLine/FloQast convention: lead with what needs a human, not cumulative success). Below it, in Maximor's own vocabulary: straight-through-processing rate, escalation rate, exception-type breakdown, a visible "N vendor-specific corrections learned" counter (the learning loop, made visible — this is a count, not a rate; `DashboardResponse.correctionsLearned` in BUILD.md §3 is exactly this and nothing more elaborate), and a small "chain verified ✓" integrity indicator for the whole ledger. Nav is task-verb-scoped (Ramp's pattern): "Review invoices / Approve payments / Audit trail / Policy" — not data-noun-scoped ("Ledger," "Entities").
 
 **Screen B — Invoice queue.** Dense list (Vic.ai/Bill.com/Ramp convention — reads credible/enterprise, not toy): columns vendor, amount (right-aligned, tabular), due date, a single status badge (using the 4-state Vic.ai-style vocabulary: no badge=clean/auto-cleared / yellow-or-red confidence label naming the specific uncertain field / a distinct "Autopilot ✓" icon for fully touchless items — not a flat 3-color badge), and a compact inline action. A row expands in place into the detail view (Stampli's approach) rather than routing to a separate page.
 

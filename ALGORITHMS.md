@@ -82,22 +82,32 @@ function reconsider(originalDecisionId, question, additionalContext, actor):
   if priorReconsiderations >= 3:
     return {error: "This has been reconsidered 3 times already — escalating to a senior reviewer instead of re-running the agent again.", action: "escalate_senior"}
 
-  newDecision = reinvokeNode(original.nodeId, {
-    ...original.originalPromptContext,
+  // Note, corrected: we do NOT store a raw "original prompt" blob anywhere (there's no such column in
+  // schema.sql, deliberately — storing prompt text would bloat the ledger and go stale the moment the
+  // underlying data changes). Instead, reinvokeNode() REBUILDS the node's context fresh from current
+  // DB state (the invoice, its current MatchResult, current vendor history, etc.) exactly the way the
+  // original pipeline run did, then appends the human's question on top. This is more correct anyway:
+  // a reconsideration should see the CURRENT state of the world, not a stale snapshot.
+  newDecision = reinvokeNode(original.nodeId, original.invoiceId, {
     humanQuestion: question,
     humanAdditionalContext: additionalContext,
   })
   writeDecision({...newDecision, reconsiderationOfId: originalDecisionId, triggeredByActor: actor, triggeredByQuestion: question})
 
+  supersededIds = []
   if newDecision.exceptionTypes != original.exceptionTypes or newDecision.actionTaken != original.actionTaken:
     // cascade: re-run the FULL precedence/decision-matrix logic (spec §4.1-4.3), not just "policy" in isolation —
     // a changed exception type can change which OTHER exceptions apply, per the spec's co-occurrence rules.
     downstreamDecisions = getDecisionsAfter(original, in same invoice)
-    for d in downstreamDecisions: markSuperseded(d.id, by: newDecision.id)
+    for d in downstreamDecisions:
+      markSuperseded(d.id, by: newDecision.id)
+      supersededIds.push(d.id)
     rerunFrom('verify', invoiceId, seedingWith: newDecision)   // re-enters the pipeline at the Verify stage,
                                                                  // which re-evaluates the FULL decision matrix
                                                                  // fresh, not a patched delta
-  return {newDecision, cascaded: newDecision.exceptionTypes != original.exceptionTypes}
+  return {newDecision, cascaded: newDecision.exceptionTypes != original.exceptionTypes, supersededDecisionIds: supersededIds}
+  // must populate all 3 fields — matches ReconsiderResponse in BUILD.md §3 exactly; an earlier draft of
+  // this pseudocode returned only 2 of the 3 required fields.
 ```
 
 ## 4. Agent prompts — the exact text (`lib/agent/prompts.ts`)
@@ -151,7 +161,7 @@ function reconsider(originalDecisionId, question, additionalContext, actor):
   },"required":["vendor_name","invoice_number","invoice_date","po_reference","line_items","subtotal","tax","total","currency","confidence","uncertain_fields"],"additionalProperties":false} }
 ```
 
-**Tool count, for the record**: 6 evidence-gathering tools (ENGINE.md §3) + 3 structured-output submission tools (this section) = 9 total across the three agent roles. `lib/agent/tools.ts` holds all 9.
+**Tool count, for the record**: 7 evidence-gathering tools (ENGINE.md §3, including `get_policy`) + 3 structured-output submission tools (this section) = 10 total across the three agent roles. `lib/agent/tools.ts` holds all 10.
 
 ## 5. SSE route — the actual pattern (`app/api/invoices/[id]/events/route.ts`)
 

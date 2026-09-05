@@ -23,7 +23,7 @@ Nothing else new. Every item type is answered by querying tables that already ex
   - `assembleInvoiceBundle(invoiceIds[])` — for each id, pulls the invoice + its matched PO + goods receipts + its full `decisions` chain (the same record #3 already writes) — this is the "PO, receipt, approval trail" an auditor asks for, already sitting in the ledger.
   - `assembleTieOutCheck(periodId)` — compares `SUM(vendor_bills.total_amount WHERE status != 'paid')` against the GL's Accounts Payable control-account balance; returns match/variance.
   - `assembleSurlCheck(periodId)` — flags `goods_receipts` dated near period-end with no corresponding `vendor_bills` row yet (the actual "search for unrecorded liabilities" test — a join + date filter, not a new capability).
-- `lib/audit/narrator.ts` — **not a new narrator**: it's the exact same explain/citation function from `lib/pipeline` (ENGINE.md §6a), called with a `pbc_request_id` scope instead of an `invoice_id` scope. One function, two callers.
+- `lib/audit/narrator.ts` — **not a new narrator**: it's the exact same explain/citation function from `lib/explain.ts` (a sibling of `lib/pipeline/`, not inside it — BUILD.md §1's repo tree; ENGINE.md §6a describes its logic), called with a `pbc_request_id` scope instead of an `invoice_id` scope. One function, two callers.
 
 ## 4. Pipeline (deliberately simple — no LLM agent stage required for most items)
 

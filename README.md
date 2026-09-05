@@ -6,7 +6,7 @@ An Accounts-Payable agent (3-way match: PO ↔ Goods Receipt ↔ Invoice) that h
 
 ## Start here, based on your role
 
-**If you're building the UI:** read `DESIGN.md` §9 (screens) → the [published mockup](https://claude.ai/code/artifact/df6f8464-5edc-4b92-beb2-4890a7c46a40) → `UI_DESIGN_BRIEF.md` (motion/interaction direction, what to avoid) → `BUILD.md` §7 (the API you're building against) and §9 (your exact file ownership).
+**If you're building the UI:** read `DESIGN.md` §9 (screens) → the [published mockup](https://claude.ai/code/artifact/df6f8464-5edc-4b92-beb2-4890a7c46a40) → `UI_DESIGN_BRIEF.md` (motion/interaction direction, what to avoid) → `ENGINE.md` §7 (the full API contract you're building against — this is the corrected pointer; an earlier draft of this README sent you to `BUILD.md` §7, which is actually the Dodo Payments section, not the API) → `BUILD.md` §9 (your exact file ownership).
 
 **If you're building the engine:** read `docs/ap-three-way-match-spec.md` (the exact matching/exception logic) → `ENGINE.md` (runtime architecture) → `ALGORITHMS.md` (every pseudocode/prompt detail, nothing left unspecified) → `BUILD.md` §1-§6 (repo structure, schema, types, API) and §9 (your file ownership).
 
