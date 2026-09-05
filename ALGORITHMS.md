@@ -173,7 +173,33 @@ This is the standard Web Streams pattern for App Router route handlers — verif
 
 Flagged during review as under-specified. Full states: `flagged` → `callback_pending` (system shows old vs. new bank details, requires a logged callback: phone number used, confirmed-by, date/time — all free-text fields, no integration needed for the demo) → `callback_confirmed` or `callback_failed`. If confirmed: requires a **second, different** reviewer's sign-off (maker/checker — enforce in the UI that the confirming reviewer_name cannot equal the callback-logging reviewer_name) before the vendor record's `bank_account_changed_at` is trusted and the invoice re-enters normal processing. If failed or abandoned after a timeout (demo-scaled, e.g. 15 minutes): invoice stays permanently blocked, vendor flips to `trust_tier='flagged'`.
 
-## 7. Explicit, honest limitations (say these in the README, don't let a judge discover them first)
+## 7. EXC-13 and EXC-14 — full spec, matching the adopted spec file's own format (these were only ever named, not specified, until now)
+
+### EXC-13: Blanket PO Ceiling Exceeded
+
+| Attribute | Detail |
+|---|---|
+| **Code** | `EXC-BLANKET_EXCEEDED` |
+| **Name** | Blanket/Standing PO Consumption Ceiling Exceeded |
+| **Detection Logic** | `po.po_type == 'blanket'` AND `(cumulative_invoiced_to_date + this_invoice.amount) > po.max_value_ceiling` (or the equivalent quantity ceiling) — checked against **cumulative** consumption across every prior invoice against this PO, not just this one. |
+| **Severity** | Overage ≤10% of ceiling: **Escalate L2**; >10%: **Block**. |
+| **Resolution Action** | Buyer issues a PO amendment/change-order raising the ceiling, or rejects the excess portion. Never auto-approved — it represents spend beyond the negotiated agreement. |
+| **Example** | Blanket PO-9001, "Office Supplies," annual ceiling $50,000. Cumulative invoiced to date: $48,500. Invoice #INV-7701 for $3,000 would bring the total to $51,500 (3% over). Escalated L2. Buyer issues a $5,000 ceiling amendment; invoice released. |
+
+### EXC-14: Unit-of-Measure Mismatch
+
+| Attribute | Detail |
+|---|---|
+| **Code** | `EXC-UOM_MISMATCH` |
+| **Name** | Unit-of-Measure Mismatch Between PO and Invoice |
+| **Detection Logic** | `invoice_line.uom != po_line.uom` AND no valid conversion factor is on file for this UOM pair for this vendor/item (e.g., PO in "case," invoice in "each," no case-to-each conversion registered). |
+| **Severity** | A plausible conversion exists but isn't on file (system can compute a candidate): **Escalate L1**. Units are fundamentally incompatible (e.g., "hours" vs. "each"): **Block**. |
+| **Resolution Action** | AP clerk or buyer confirms/enters the conversion factor; system re-runs the match with it applied. Optionally save the confirmed factor for this vendor/item to prevent recurrence — this is a natural, cheap extension of the existing `vendor_corrections` learning-loop mechanism. |
+| **Example** | PO-5502 line 2: 10 cases of widgets (1 case = 24 units) at $2.00/unit. Invoice #INV-8801 bills 240 "each" at $2.00/unit. No conversion on file. Escalated L1. Clerk confirms 1 case = 24 each; 240 each = 10 cases; matches cleanly; released. |
+
+These two extend `docs/ap-three-way-match-spec.md`'s own Decision Matrix (§3.1) and Quick Reference Appendix — add both rows there when implementing `decision-matrix.ts`, in the same shape as `EXC-01` through `EXC-12`.
+
+## 8. Explicit, honest limitations (say these in the README, don't let a judge discover them first)
 
 - The "explain" groundedness check (ENGINE.md §6a) is a simple citation-presence check, not a rigorous entailment/NLI verifier — sufficient to prevent obvious fabrication, not research-grade.
 - Duplicate-detection similarity thresholds (0.90-0.97 used in examples) are reasonable placeholders, not empirically tuned — say so if asked.

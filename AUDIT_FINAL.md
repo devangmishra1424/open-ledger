@@ -34,6 +34,7 @@ Found on review, not previously flagged:
 - The vendor-bank-change gated workflow was under-specified as a state machine — fixed now (ALGORITHMS.md §6).
 - Co-occurring exceptions interacting with a reconsideration cascade needed an explicit fix: a changed conclusion must re-run the *full* precedence/decision-matrix logic, not patch one field — specified now (ALGORITHMS.md §3).
 - Duplicate-detection similarity thresholds are reasonable placeholders, not empirically validated — acceptable for a demo, worth saying so rather than overclaiming precision.
+- EXC-13/EXC-14 had only ever been named, not specified — no detection logic, severity, or resolution action, unlike the other 12 which came fully specified from the adopted spec file. Fixed now (ALGORITHMS.md §7), matching the spec file's own format exactly so they read as one taxonomy, not an afterthought bolted on.
 - Not yet designed, and lower priority: what happens if a `reconsider` call itself fails (LLM timeout mid-reconsideration) — should follow the same bounded-retry/visible-failure pattern as the main pipeline (ENGINE.md §5), but this specific interaction wasn't traced end-to-end. Worth 15 minutes of attention during build, not a blocker to starting.
 
 ## 5. Resource usage and the honest question: is AO an irreplaceable core engine?

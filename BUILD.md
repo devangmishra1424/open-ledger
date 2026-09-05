@@ -10,7 +10,7 @@ This is the final, implementation-ready document. Read order for a newcomer: `DE
 open-ledger/
 ├── .env.example / .env (gitignored)
 ├── package.json, tsconfig.json, next.config.js, tailwind.config.ts
-├── README.md, SPEC.md, DESIGN.md, ENGINE.md, AUDIT.md, BUILD.md
+├── README.md, SPEC.md (superseded), DESIGN.md, ENGINE.md, AUDIT.md, BUILD.md, ALGORITHMS.md, UI_DESIGN_BRIEF.md, AUDIT_FINAL.md
 ├── docs/ap-three-way-match-spec.md
 ├── db/
 │   ├── schema.sql          # §2 below — copy verbatim as your first commit
