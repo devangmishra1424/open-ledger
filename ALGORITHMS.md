@@ -118,10 +118,40 @@ function reconsider(originalDecisionId, question, additionalContext, actor):
 ```
 
 **Verifier system prompt:**
-> You are the independent Verifier for a Tier-2-eligible decision on invoice `{invoice_id}`. You're given the same `MatchResult` and the Investigator's evidence and conclusion — but you must reach your own independent judgment, not defer to their stated confidence. Explicitly flag disagreement if your assessment of the exception type, fraud likelihood, or recommended action differs from theirs. Respond only via `submit_verification`: `{agrees: boolean, exception_types, confidence, notes}`.
+> You are the independent Verifier for a Tier-2-eligible decision on invoice `{invoice_id}`. You're given the same `MatchResult` and the Investigator's evidence and conclusion — but you must reach your own independent judgment, not defer to their stated confidence. Explicitly flag disagreement if your assessment of the exception type, fraud likelihood, or recommended action differs from theirs. Respond only via `submit_verification`.
+
+```jsonc
+// submit_verification
+{ "type":"function", "name":"submit_verification", "strict":true,
+  "description":"Submit your independent verification verdict. This must be your last action in this turn.",
+  "parameters":{"type":"object","properties":{
+    "agrees":{"type":"boolean","description":"Whether you agree with the Investigator's conclusion"},
+    "exception_types":{"type":"array","items":{"type":"string"}},
+    "confidence":{"type":"number"},
+    "notes":{"type":"string","description":"Required if agrees=false: state specifically what you assessed differently and why"}
+  },"required":["agrees","exception_types","confidence","notes"],"additionalProperties":false} }
+```
 
 **Extractor system prompt (only invoked for the 1-2 unstructured PDF/email samples):**
 > Extract these fields from the invoice text below: vendor name, invoice number, invoice date, PO reference (if present), line items (description, quantity, unit price), subtotal, tax, total, currency. If a field is missing or illegible, return null rather than guessing. Report overall confidence (0-1), and flag any specific field you're uncertain about. Respond only via `submit_extraction`.
+
+```jsonc
+// submit_extraction
+{ "type":"function", "name":"submit_extraction", "strict":true,
+  "description":"Submit the extracted invoice fields. This must be your last action in this turn.",
+  "parameters":{"type":"object","properties":{
+    "vendor_name":{"type":["string","null"]}, "invoice_number":{"type":["string","null"]},
+    "invoice_date":{"type":["string","null"]}, "po_reference":{"type":["string","null"]},
+    "line_items":{"type":"array","items":{"type":"object","properties":{
+      "description":{"type":"string"},"quantity":{"type":"number"},"unit_price":{"type":"number"}
+    },"required":["description","quantity","unit_price"],"additionalProperties":false}},
+    "subtotal":{"type":["number","null"]}, "tax":{"type":["number","null"]},
+    "total":{"type":["number","null"]}, "currency":{"type":["string","null"]},
+    "confidence":{"type":"number"}, "uncertain_fields":{"type":"array","items":{"type":"string"}}
+  },"required":["vendor_name","invoice_number","invoice_date","po_reference","line_items","subtotal","tax","total","currency","confidence","uncertain_fields"],"additionalProperties":false} }
+```
+
+**Tool count, for the record**: 6 evidence-gathering tools (ENGINE.md §3) + 3 structured-output submission tools (this section) = 9 total across the three agent roles. `lib/agent/tools.ts` holds all 9.
 
 ## 5. SSE route — the actual pattern (`app/api/invoices/[id]/events/route.ts`)
 

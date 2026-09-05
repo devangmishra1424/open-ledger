@@ -34,7 +34,7 @@ open-ledger/
 │   │   ├── decision-matrix.ts        # spec §3 (the EXC-* → action table + $ overrides)
 │   │   └── precedence.ts             # spec §4.1-4.3 (cascade/stop, co-occurring exceptions)
 │   ├── agent/                 # Layer 2 — LLM tool-calling
-│   │   ├── tools.ts          # the 6 tool schemas — §4 below
+│   │   ├── tools.ts          # 9 tool schemas total: 6 evidence-gathering (§4 below) + 3 structured-output submission tools (ALGORITHMS.md §4)
 │   │   ├── investigator.ts   # multi-turn tool-calling loop (OpenAI Responses API)
 │   │   ├── verifier.ts       # TensorMux second-opinion call
 │   │   ├── extractor.ts      # LLM extraction, only for the 1-2 unstructured samples
@@ -270,7 +270,7 @@ export interface DashboardResponse {
 
 ## 4. Agent tool schemas (`lib/agent/tools.ts`) — verified current OpenAI Responses API syntax, ready to paste
 
-See ENGINE.md §3 for the complete 6-tool JSON with descriptions — copy that block directly into `tools.ts`. Nothing new to add here; ENGINE.md's version is final.
+See ENGINE.md §3 for the 6 evidence-gathering tools, and ALGORITHMS.md §4 for the 3 structured-output submission tools (`submit_investigation`, `submit_verification`, `submit_extraction`) added during the final review pass — copy all 9 into `tools.ts`. Both blocks together are final.
 
 ---
 
@@ -313,6 +313,7 @@ Covered in full in `AUDIT.md` §5 — same table shape, four stages instead of n
 ## 8. Agent Orchestrator integration — Kanban, sessions, and how two humans + AO coexist on one repo
 
 - **AO's job**: track real, isolated-worktree sessions per unit of work, each becoming a PR reviewed and merged — this is what the "AO Usage & Build Process" score is judging. Recommended session split (each `ao spawn --project open-ledger --harness claude-code --name "<x>" --branch "<y>"`): `db-schema-seed`, `matching-engine`, `ledger-hashchain`, `agent-investigator`, `pipeline-orchestrator`, `api-routes`, `audit-extension`, `eval-harness`. Each lands its own PR on the AO Kanban (Working → Needs You → In Review → Ready to Merge), giving a real, inspectable session count for the demo video.
+- **What makes AO's role substantive rather than cosmetic**: spawning 8 sessions and walking away isn't the thing being graded — the orchestrator actually *supervising* is. Concretely: the orchestrator session should (a) sequence dependent work correctly (the `matching-engine` session must land before `agent-investigator` starts, since the agent imports its output — don't spawn both blind and hope), (b) actually read each worker's PR diff and leave real review comments before merging, not rubber-stamp, (c) redirect a worker with corrected context if their first attempt is wrong, rather than letting a bad PR merge and fixing it later, (d) if a worker stalls (as one of ours did earlier this session — worth learning from), diagnose why via the daemon API/logs rather than silently respawning. This is what turns "we used AO" into "AO genuinely orchestrated a multi-part engineering effort" — the literal thing the 25% is grading.
 - **Your own direct work**: since you and your teammate are committing straight to the same branch, the file split in §9 below is deliberately **disjoint** — you should almost never touch the same file in the same sitting. `lib/types.ts` and `db/schema.sql` (§2, §3 above) are already fully specified — copy them in as your very first shared commit, before either of you branches into your own half, so neither of you is inventing a competing shape for the other to reconcile later. Pull before you push; if you do collide, it'll almost always be in `lib/types.ts`, and the fix is "whoever's change is additive wins, discuss the rest."
 
 ## 9. Team split — final, rebalanced (you on Claude Code + AO; your friend on UI + a fair share of wiring)
