@@ -10,7 +10,7 @@ An Accounts-Payable agent (3-way match: PO ↔ Goods Receipt ↔ Invoice) that h
 
 **If you're building the engine:** read `docs/ap-three-way-match-spec.md` (the exact matching/exception logic) → `ENGINE.md` (runtime architecture) → `ALGORITHMS.md` (every pseudocode/prompt detail, nothing left unspecified) → `BUILD.md` §1-§6 (repo structure, schema, types, API) and §9 (your file ownership).
 
-**If you want the full picture first:** `DESIGN.md` → `docs/ap-three-way-match-spec.md` → `ENGINE.md` → `AUDIT.md` → `BUILD.md` → `ALGORITHMS.md` → `AUDIT_FINAL.md` (honest winnability audit) → `UI_DESIGN_BRIEF.md`. `SPEC.md` is superseded, kept for history only.
+**If you want the full picture first:** `DESIGN.md` → `docs/ap-three-way-match-spec.md` → `ENGINE.md` → `AUDIT.md` → `BUILD.md` → `ALGORITHMS.md` → `AUDIT_FINAL.md` (honest winnability audit) → `CITATIONS.md` (sources for every specific factual claim, including one correction) → `UI_DESIGN_BRIEF.md`. `SPEC.md` is superseded, kept for history only.
 
 ## First two commits, before anyone branches into their own half
 
