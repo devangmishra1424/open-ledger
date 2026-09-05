@@ -344,3 +344,13 @@ Neither track touches `components/` (your friend's UI, built against `lib/types.
 - [ ] Audit extension reuses `decisions`/`explain.ts` — no duplicated logic
 - [ ] `/api/audit/verify` genuinely recomputes and confirms the hash chain
 - [ ] README states track, how to run, what improved across iterations, how AO was used
+
+---
+
+## 12. Policy vocabulary reconciliation (resolves a real gap found on doc review)
+
+`DESIGN.md` §7 and this doc's own checklist use "Tier 0/1/2" as informal, UI-facing grouping language (what the Policy Matrix screen shows a human). `docs/ap-three-way-match-spec.md` §3 defines the actual, precise action vocabulary — **Auto-Approve / Auto-Reject / Escalate L1 / Escalate L2 / Block / Block+Fraud-Flag** — with per-exception-type dollar thresholds (its §3.2 table), which is materially more precise than one universal amount boundary. These were never formally mapped onto each other. Resolution, final: `lib/matching/decision-matrix.ts` implements the spec file's table exactly, verbatim, per exception type — that's the only logic that runs. "Tier 0/1/2" is purely a display grouping in the UI (`Tier 0 label = Auto-Approve`, `Tier 1 label = Escalate L1`, `Tier 2 label = {Escalate L2, Block, Block+Fraud-Flag}`), computed by looking at what the engine actually returned — it is never itself a decision input. Don't implement a separate "Tier" threshold check anywhere in `lib/matching/`; if you're tempted to, that's the sign the reconciliation is being violated.
+
+## 13. Sponsor tooling note (dropped from later docs, re-surfacing deliberately)
+
+Neatlogs (hackathon venue/debugging sponsor) was specified in the original SPEC.md and never carried forward. Still worth doing, still cheap: instrument `lib/agent/investigator.ts` and `lib/agent/verifier.ts` with the Neatlogs SDK (~1-2 lines: init + wrap the model-calling functions) for genuine sponsor-tool credit and its free root-cause/trend-over-time dashboard. Add this to Track B's scope (§9) — it's isolated, additive, and skippable under time pressure without breaking anything.

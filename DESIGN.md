@@ -183,7 +183,7 @@ Every node writes its `decisions` row at the moment it acts. The "ask it why" po
 
 **Screen F — Policy matrix.** The tiered policy table (§7) rendered as a visible, human-readable, editable settings page — never hidden logic.
 
-**Screen G — "Where this fits" ecosystem map.** A simple diagram: Procure-to-Pay (lit up, functional) → Record-to-Report / Treasury / Audit (greyed out, labeled "next"), with the three real handoff points from §2 called out with one line each. Cheap to build, directly answers "how well grounded is this in the real Office of the CFO" without having to build four more workflows.
+**Screen G — "Where this fits" ecosystem map.** *Updated: Audit support is no longer a stub — see AUDIT.md.* A simple diagram: Procure-to-Pay (lit up, functional) and Audit support (lit up, thin but real — reuses the same ledger) → Record-to-Report / Treasury (still greyed out, labeled "next"), with the real handoff points from §2 called out with one line each.
 
 **Screen H — Vendor memory view.** For a given vendor: its trust tier, its correction history (`vendor_corrections`), and a visible before/after moment — "first invoice from Acme Co. with this PO format: escalated. After one correction: auto-recognized." This is the single most concrete, demoable proof of the learning loop.
 
@@ -215,5 +215,7 @@ Proposed division once confirmed: one person owns the ledger/schema/agent-pipeli
 
 - Does the 14-exception v1 cut (§6) strike the right breadth-vs-buildability balance, or should any deferred item be pulled in / any v1 item be cut?
 - Is the event-sourced ledger design (§5.5) worth its complexity for a 30-hour build, or should posted-entry immutability be relaxed for time (with the tradeoff stated honestly)?
-- Is Screen G (ecosystem map) worth the build time relative to hardening the core 14 exceptions further?
-- Any gap between this document and what SPEC.md's build-process instructions should say once we resume building?
+- ~~Is Screen G (ecosystem map) worth the build time~~ — **resolved**: yes, and it's now a real thin feature (AUDIT.md), not just a diagram.
+- ~~Any gap between this document and SPEC.md~~ — **resolved**: SPEC.md is marked superseded; BUILD.md is now the authoritative build reference.
+- **Open, not yet resolved**: this doc's own Tier 0/1/2 policy language was never formally reconciled with `docs/ap-three-way-match-spec.md`'s own action vocabulary (Auto-Approve/Auto-Reject/Escalate L1/Escalate L2/Block/Block+Fraud-Flag) and its per-exception-type dollar thresholds — see BUILD.md §12 for the resolution: Tier 0/1/2 is the UI-facing grouping label; the spec file's precise table is what `lib/matching/decision-matrix.ts` actually implements.
+- This doc's `decisions` table field list (§5.4) is a subset of BUILD.md §2's real schema (missing `reconsideration_of_id`, `superseded_by_id`, `triggered_by_actor/question`) — treat BUILD.md's schema.sql as authoritative, this section as the narrative explanation of it.

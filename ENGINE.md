@@ -155,4 +155,4 @@ This is explicitly a *better* version of the human process it mirrors: a real co
 | Demo & Usability (15%) | Live SSE-driven swimlane (not a canned animation); the reconsideration mechanic is a genuinely novel, demoable "wow" moment |
 | Innovation (10%) | The closed-loop, genuinely-interrogable, contest-and-reconsider architecture — still real whitespace per the competitive research; nobody else shows this as a working interface |
 
-**Open item, deliberately deferred per your instruction:** integrating workflow #6 (audit-evidence/PBC gathering) as a second workflow. Not started — flagged for after this engine is built and working, not before.
+**Update:** workflow #6 (audit-evidence/PBC gathering) is no longer deferred — see `AUDIT.md`. It's a thin extension reusing this file's `decisions` table and `explain.ts`, not a second pipeline, so nothing in §1-§9 above changes.
