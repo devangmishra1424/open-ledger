@@ -2,6 +2,17 @@
 
 Written as a judge would read it, using what we actually know about this specific hackathon and this specific judging panel (Maximor's own team). Honest throughout — including where the answer isn't flattering.
 
+**Revision note, added after an independent verification pass caught this document being too generous with itself**: everything below was originally written evaluating *design quality*, and several ratings ("Strong") read as more optimistic than the checkable repo state actually supports. Corrected now. The concrete, checkable facts as of this revision:
+
+## 0. Where this actually stands, right now — checked, not asserted
+
+- **Zero application code exists anywhere in the repo.** Every file is a markdown spec (`SPEC.md`, `DESIGN.md`, `ENGINE.md`, `AUDIT.md`, `BUILD.md`, `ALGORITHMS.md`, `UI_DESIGN_BRIEF.md`, `AUDIT_FINAL.md`, `README.md`) plus the adopted `docs/ap-three-way-match-spec.md`. No `package.json`, no `lib/`, no `app/`, no `db/`, no tests. "Technical Execution & Reliability: Strong" in §2 below describes the *design's* reliability properties (idempotency, bounded retries, the deterministic/LLM split) — none of it has been built or run, so it cannot yet be true in the sense a judge would test it. Read every "Strong" rating below as "the design, if implemented as specified, would be strong" — not as a completed, verified fact.
+- **The one real AO session attempt is currently stalled, not merged, not progressed.** `open-ledger-1` was spawned against `SPEC.md`'s seed prompt (which explicitly instructed it to `ao spawn` real build-worker sessions and start committing code) and instead sat idle after a couple of documentation-adjacent turns — it never spawned the matching-engine/db-schema/etc. workers this doc's own §8 (BUILD.md) prescribes. This was diagnosed mid-session (daemon was found to have restarted, project re-registered) but never actually resolved — the session needs to be either revived with the now-final spec or abandoned in favor of a fresh spawn. **This is the literal first concrete action before any of the "AO Usage" scoring can start accumulating**, not a future risk — it's a present, open task.
+- **All commits so far are from a single author.** Expected at this stage — there's no code yet for a second person to split off and commit — but it means the "two-person, AO-mediated collaboration" plan in §9 of `BUILD.md` hasn't actually started operating yet either. Worth tracking once code exists: if commits stay single-author much longer, that's a real signal, not a false alarm.
+- **Specific research citations (Ardent Partners' 18.4% exception-rate figure, the ECOA/Reg B and CFPB-circular claims, the Brex/BlackLine/Fieldguide competitive-landscape claims) exist only in this conversation's history, not as a checked-in artifact.** A skeptical judge (or teammate) currently has no way to verify "sourced, not invented" from what's actually in the repo. Worth adding a short citations file before the demo, not a blocker to building.
+
+None of this changes the underlying design assessment in §1-§5 below — the design is still genuinely strong. It changes what claiming that design *means* right now: it's a well-verified blueprint, not yet a verified building.
+
 ---
 
 ## 1. Track-following and problem-statement-following
@@ -15,8 +26,8 @@ Written as a judge would read it, using what we actually know about this specifi
 | Criterion | Literal ask | What it pragmatically rewards | Where we stand |
 |---|---|---|---|
 | AO Usage & Build Process (25%) | show session count in the video | *genuine, deliberate orchestration* — multiple real sessions doing real parallel work, reviewed and merged, not one session opened for a screenshot | **Design-ready, execution-dependent.** The plan (§8 of BUILD.md) is real; whether it scores depends entirely on actually running it that way over the build, which is a discipline risk, not a design gap. |
-| Technical Execution & Reliability (25%) | it works | it doesn't silently fail, handles the exception space it claims to, and the reliability story is demonstrable, not asserted | **Strong.** The deterministic/LLM split, bounded retries with visible failure states, idempotency, and the reconsideration bound (just added) are exactly what a technically literate judge checks for. |
-| Track Fit & Real-World Value (25%) | picked a real workflow | would a real controller recognize this as *their* process | **Strong**, per §1 above. |
+| Technical Execution & Reliability (25%) | it works | it doesn't silently fail, handles the exception space it claims to, and the reliability story is demonstrable, not asserted | **Strong design, unverified execution (§0).** The deterministic/LLM split, bounded retries with visible failure states, idempotency, and the reconsideration bound are exactly what a technically literate judge checks for — *if built as specified*. Zero of it has been run yet. |
+| Track Fit & Real-World Value (25%) | picked a real workflow | would a real controller recognize this as *their* process | **Strong**, per §1 above — this one holds regardless of build progress, since it's a property of the domain choice and schema design, not runtime behavior. |
 | Demo & Usability (15%) | a 3-5 min video | does the interface make the mechanism legible in seconds, not minutes | **Depends on UI_DESIGN_BRIEF.md actually being executed** — the brief is right; nothing guarantees the build matches it under time pressure. |
 | Innovation (10%) | something novel | genuinely still-open ground, per the competitive research, not a reskinned claim every competitor already makes | **Real, but correctly weighted low** — this was never the plan to win on, and shouldn't be over-invested relative to the 25%-weighted categories. |
 

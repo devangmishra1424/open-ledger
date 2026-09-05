@@ -21,8 +21,8 @@ An Accounts-Payable agent (3-way match: PO ↔ Goods Receipt ↔ Invoice) that h
 
 | Owner | Scope |
 |---|---|
-| Engine + AO | `db/`, `lib/matching/`, `lib/ledger/`, `lib/agent/`, `lib/pipeline/`, matching/pipeline tests, driving the AO sessions |
-| UI + Wiring | `components/`, `app/*/page.tsx`, `app/api/*`, `lib/audit/`, `lib/embeddings.ts`, `lib/explain.ts`, `scripts/`, `lib/voice.ts`, `lib/payments/dodo.ts` |
+| Engine + AO | `db/` (except `schema.sql`, shared), `lib/matching/`, `lib/ledger/`, `lib/agent/`, `lib/pipeline/`, matching/pipeline tests, driving the AO sessions |
+| UI + Wiring | `components/`, `app/**/page.tsx`, `app/api/*`, `lib/audit/`, `lib/embeddings.ts`, `lib/explain.ts`, `scripts/`, `lib/voice.ts`, `lib/payments/dodo.ts`, `tests/eval.test.ts` |
 | Shared | `lib/types.ts`, `db/schema.sql` — agree before changing |
 
 ## Run it (once code exists)

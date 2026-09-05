@@ -9,9 +9,9 @@ This is the final, implementation-ready document. Read order for a newcomer: `DE
 ```
 open-ledger/
 ├── .env.example / .env (gitignored)
-├── package.json, tsconfig.json, next.config.js, tailwind.config.ts
-├── README.md, SPEC.md (superseded), DESIGN.md, ENGINE.md, AUDIT.md, BUILD.md, ALGORITHMS.md, UI_DESIGN_BRIEF.md, AUDIT_FINAL.md
-├── docs/ap-three-way-match-spec.md
+├── package.json, tsconfig.json, next.config.js, tailwind.config.ts   — owner: whoever sets up the scaffold first (§10 step 1); one-time, not a build-ownership concern
+├── README.md, SPEC.md (superseded), DESIGN.md, ENGINE.md, AUDIT.md, BUILD.md, ALGORITHMS.md, UI_DESIGN_BRIEF.md, AUDIT_FINAL.md   — already written, not owned by either builder
+├── docs/ap-three-way-match-spec.md   — already written, not owned by either builder
 ├── db/
 │   ├── schema.sql          # §2 below — copy verbatim as your first commit
 │   ├── migrate.ts          # runs schema.sql + seeds reason_codes/chart_of_accounts against a fresh .sqlite file
@@ -229,8 +229,22 @@ export type PbcItemType = 'trial_balance'|'ap_aging'|'invoice_bundle'|'tie_out_c
 export type PbcStatus = 'open'|'assembled'|'submitted'|'accepted'|'exception';
 
 export interface Vendor {
-  id: string; name: string; bankAccountLast4?: string; bankAccountChangedAt?: string;
-  trustTier: 'trusted'|'new'|'flagged'; paymentTermsCode?: string;
+  id: string; name: string; remitToAddress?: string; bankAccountLast4?: string; bankAccountChangedAt?: string;
+  trustTier: 'trusted'|'new'|'flagged'; taxId?: string; w9OnFile: boolean; paymentTermsCode?: string; createdAt: string;
+}
+
+export interface VendorCorrection { id: string; vendorId: string; pattern: string; note?: string; sourceInvoiceId?: string; createdAt: string; }
+
+export interface TaxCode {
+  id: string; name: string; rate: number; taxType: 'vat'|'gst'|'sales_tax'|'withholding';
+  direction: 'input'|'output'; taxAccountId?: string; jurisdiction?: string; effectiveFrom: string; effectiveTo?: string;
+}
+
+export interface VendorBankChangeReview {
+  id: string; vendorId: string; oldBankLast4?: string; newBankLast4?: string;
+  status: 'callback_pending'|'callback_confirmed'|'callback_failed';
+  callbackPhoneUsed?: string; callbackConfirmedBy?: string; callbackAt?: string;
+  secondReviewerName?: string; sourceInvoiceId?: string; createdAt: string;
 }
 
 export interface VendorBill {
@@ -252,14 +266,15 @@ export interface Decision {
   confidence?: number; actionTaken?: string; reasonCode?: string;
   forwardedTo?: string; whatWasForwarded?: string;
   triggeredByActor?: string; triggeredByQuestion?: string;
-  prevHash?: string; hash: string; createdAt: string;
+  idempotencyKey?: string; prevHash?: string; hash: string; createdAt: string;
 }
 
 export interface ReviewInput { reviewerName: string; action: ReviewAction; reasonCode: string; note?: string; }
+export interface Review extends ReviewInput { id: string; invoiceId: string; decisionId?: string; createdAt: string; }
 
 export interface PbcRequest {
   id: string; itemType: PbcItemType; description: string; dueDate?: string;
-  ownerName?: string; status: PbcStatus; linkedInvoiceIds?: string[];
+  coveredPeriodId?: string; ownerName?: string; status: PbcStatus; linkedInvoiceIds?: string[];
 }
 
 // --- API request/response shapes ---
@@ -333,7 +348,7 @@ Since you're driving this through Claude Code and AO directly, the engine and ev
 **You — "the Engine + AO":**
 | Folder/file | What it is |
 |---|---|
-| `db/` | schema, migrations |
+| `db/` | `migrate.ts`, `client.ts`, and day-to-day schema changes — except `db/schema.sql` itself, which is joint-owned (see "Shared" below); don't change it solo |
 | `lib/matching/` | Layer 1 — deterministic, implements the spec file exactly |
 | `lib/ledger/` | hash chain, journal postings, append-only decisions writer |
 | `lib/agent/` | tool-calling, prompts (ALGORITHMS.md §4), investigator/verifier/extractor |
@@ -345,7 +360,7 @@ Since you're driving this through Claude Code and AO directly, the engine and ev
 | Folder/file | What it is |
 |---|---|
 | `components/` | all UI, per `UI_DESIGN_BRIEF.md` |
-| `app/*/page.tsx` | every page |
+| `app/**/page.tsx`, `app/layout.tsx` | every page at any depth, including the root layout/page — the literal `app/*/page.tsx` glob used in an earlier draft only matched one level deep and missed `app/layout.tsx`/`app/page.tsx` and `app/invoices/[id]/page.tsx`; this corrected pattern is what's actually meant |
 | `app/api/*` | route handlers — thin glue calling into your `lib/` functions; this is real integration work, not busywork, and it's what unblocks their own UI fastest since they own both ends of the wire |
 | `lib/audit/` | the #6 extension — self-contained, reuses your `decisions`/`explain.ts`, doesn't touch your matching/ledger code |
 | `lib/embeddings.ts`, `lib/explain.ts` | self-contained utilities |
