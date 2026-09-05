@@ -315,13 +315,34 @@ Covered in full in `AUDIT.md` §5 — same table shape, four stages instead of n
 - **AO's job**: track real, isolated-worktree sessions per unit of work, each becoming a PR reviewed and merged — this is what the "AO Usage & Build Process" score is judging. Recommended session split (each `ao spawn --project open-ledger --harness claude-code --name "<x>" --branch "<y>"`): `db-schema-seed`, `matching-engine`, `ledger-hashchain`, `agent-investigator`, `pipeline-orchestrator`, `api-routes`, `audit-extension`, `eval-harness`. Each lands its own PR on the AO Kanban (Working → Needs You → In Review → Ready to Merge), giving a real, inspectable session count for the demo video.
 - **Your own direct work**: since you and your teammate are committing straight to the same branch, the file split in §9 below is deliberately **disjoint** — you should almost never touch the same file in the same sitting. `lib/types.ts` and `db/schema.sql` (§2, §3 above) are already fully specified — copy them in as your very first shared commit, before either of you branches into your own half, so neither of you is inventing a competing shape for the other to reconcile later. Pull before you push; if you do collide, it'll almost always be in `lib/types.ts`, and the fix is "whoever's change is additive wins, discuss the rest."
 
-## 9. Team split (two people, same branch)
+## 9. Team split — final, rebalanced (you on Claude Code + AO; your friend on UI + a fair share of wiring)
 
-**Track A — the Engine (precision-critical, algorithmic):** `db/`, `lib/matching/`, `lib/ledger/`, `lib/pipeline/orchestrator.ts` + `events.ts`, `tests/matching.test.ts`, `tests/pipeline.test.ts`. This is a direct, careful translation of `docs/ap-three-way-match-spec.md` into code — good fit for whichever of you is more comfortable writing precise, testable logic without leaning on an AI to invent the rules (the rules are already fully specified; this track is about correct implementation, not creative design).
+Since you're driving this through Claude Code and AO directly, the engine and everything AO-orchestrated stays with you — that's the part that benefits most from AO's session/Kanban model and from Claude Code doing heavy, precise implementation work. Your friend gets the UI *and* enough real, non-decorative engineering (API glue, the #6 extension, the data/eval scripts, the stretch adapters) that the split isn't "hard stuff vs. just buttons" — both halves are genuine engineering, just different kinds.
 
-**Track B — the Agent, Extensions, API, and Data:** `lib/agent/`, `lib/audit/`, `lib/embeddings.ts`, `lib/explain.ts`, `lib/pipeline/reconsider.ts`, `lib/voice.ts`, `lib/payments/dodo.ts`, all of `app/api/*`, `scripts/seed.ts`, `scripts/eval.ts`. This track leans harder on AI-assisted prompt engineering and glue code — a good fit if you're moving faster with heavy AI assistance and want lots of small, independently-testable pieces.
+**You — "the Engine + AO":**
+| Folder/file | What it is |
+|---|---|
+| `db/` | schema, migrations |
+| `lib/matching/` | Layer 1 — deterministic, implements the spec file exactly |
+| `lib/ledger/` | hash chain, journal postings, append-only decisions writer |
+| `lib/agent/` | tool-calling, prompts (ALGORITHMS.md §4), investigator/verifier/extractor |
+| `lib/pipeline/` | orchestrator, SSE event bus, the reconsideration cascade |
+| `tests/matching.test.ts`, `tests/pipeline.test.ts` | |
+| Driving real AO sessions | spawning/reviewing/merging per §8 — this is explicitly your lane since you hold the AO/Claude Code seat |
 
-Neither track touches `components/` (your friend's UI, built against `lib/types.ts` + the API contract in ENGINE.md §7) or the other track's folder, by design.
+**Your friend — "UI + Wiring":**
+| Folder/file | What it is |
+|---|---|
+| `components/` | all UI, per `UI_DESIGN_BRIEF.md` |
+| `app/*/page.tsx` | every page |
+| `app/api/*` | route handlers — thin glue calling into your `lib/` functions; this is real integration work, not busywork, and it's what unblocks their own UI fastest since they own both ends of the wire |
+| `lib/audit/` | the #6 extension — self-contained, reuses your `decisions`/`explain.ts`, doesn't touch your matching/ledger code |
+| `lib/embeddings.ts`, `lib/explain.ts` | self-contained utilities |
+| `scripts/seed.ts`, `scripts/eval.ts` | demo dataset + metrics — genuinely creative/data work, and it directly shapes what they're building UI for |
+| `lib/voice.ts`, `lib/payments/dodo.ts` | the two stretch adapters, isolated by design so they can't destabilize your engine |
+| `tests/eval.test.ts` | |
+
+**Shared, agree on these together before either of you branches off into your own half:** `lib/types.ts` and `db/schema.sql` (§2, §3) — copy them in verbatim as your first joint commit. If either of you needs to add a field later, say so before changing it; it's the one file both halves import from.
 
 ## 10. Production pipeline (conception → deployed demo)
 
