@@ -27,4 +27,15 @@ export default defineConfig({
       "@": path.resolve(__dirname, "."),
     },
   },
+  test: {
+    // Vitest runs different test FILES in parallel worker processes by default. Several
+    // suites here write real rows into the shared `decisions` table (the global, sequential
+    // hash chain) against one live Supabase DB — no isolated per-worker test database exists.
+    // Running files in parallel lets one file's afterAll delete rows out from under another
+    // file's still-in-flight verifyChain() check, breaking a chain-integrity assertion that
+    // has nothing wrong with it — reproduced and confirmed multiple times, not a guess.
+    // Sequential file execution is the real fix; a to-DO comment wouldn't have caught the
+    // next person's new DB-writing test suite hitting the exact same race.
+    fileParallelism: false,
+  },
 });
