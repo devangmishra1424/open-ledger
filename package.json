@@ -6,9 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "migrate": "tsx db/migrate.ts",
-    "seed": "tsx scripts/seed.ts",
-    "eval": "tsx scripts/eval.ts",
+    "migrate": "tsx --env-file=.env db/migrate.ts",
+    "seed": "tsx --env-file=.env scripts/seed.ts",
+    "eval": "tsx --env-file=.env scripts/eval.ts",
     "test": "vitest run"
   },
   "dependencies": {
