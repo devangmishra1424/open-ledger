@@ -3,20 +3,26 @@ import { matchLines, descriptionSimilarity, type InvoiceLineInput, type PoLineIn
 import { classifyDateGap, classifyTaxRateVariance } from "@/lib/matching/tolerance-zones";
 import { computePoLineFulfillment } from "@/lib/matching/partial-handling";
 import { isPlausibleUomConversion } from "@/lib/matching/uom-dimension";
+import { detectBankChangeGate, getOrCreateBankChangeReview } from "@/lib/ledger/bank-change-review";
 import {
   evaluateNoPo, evaluateNonPo, evaluateBeforeReceipt, evaluatePriceVariance, evaluateQuantityVariance,
   evaluateCurrency, evaluateBlanketExceeded, evaluateTaxVariance, evaluateCreditMemo, evaluateUomMismatch,
-  combineExceptions, type ExceptionFinding, type CombinedDecision,
+  evaluateFraudBank, combineExceptions, type ExceptionFinding, type CombinedDecision,
 } from "@/lib/matching/decision-matrix";
 
 /**
  * The "match" pipeline stage (ENGINE.md §2.3) — Layer 1, deterministic, no LLM. Assembles
  * every exception finding from PO/GRN/invoice data and combines them via decision-matrix.ts.
  *
- * SCOPE, stated honestly rather than silently gapped: this covers 11 of 14 taxonomy codes —
+ * SCOPE, stated honestly rather than silently gapped: this covers 12 of 14 taxonomy codes —
  * EXC-NON_PO, EXC-NO_PO, EXC-CURRENCY, EXC-BEFORE_RCV, EXC-PRICE_VAR, EXC-QTY_VAR,
- * EXC-BLANKET_EXCEEDED, EXC-CREDIT_MEMO, EXC-TAX_VAR, EXC-UOM_MISMATCH, and (always, trivially)
- * EXC-PARTIAL. Quantity checking goes through lib/matching/partial-handling.ts's
+ * EXC-BLANKET_EXCEEDED, EXC-CREDIT_MEMO, EXC-TAX_VAR, EXC-UOM_MISMATCH, EXC-FRAUD_BANK, and
+ * (always, trivially) EXC-PARTIAL. EXC-DUPLICATE and EXC-LAYOUT are validate-stage findings
+ * (pre-match-validation.ts), not this stage's concern. EXC-FRAUD_BANK is detected here (via
+ * lib/ledger/bank-change-review.ts's detectBankChangeGate()) but its own gated state machine
+ * (callback logging, second-reviewer sign-off) lives entirely in that module, called from
+ * wherever the human review actions happen — this stage only detects and cascade-stops.
+ * Quantity checking goes through lib/matching/partial-handling.ts's
  * computePoLineFulfillment(), which tracks cumulative received-vs-invoiced state per
  * po_line_id ACROSS invoices (spec §1.6 A/B/C) — not just this one invoice in isolation, so a
  * second partial invoice against an already-partly-consumed line is judged correctly.
@@ -30,13 +36,6 @@ import {
  * never fired because it only looked at already-matched lines).
  * EXC-CREDIT_MEMO is handled in its own early branch (see below) since a credit memo isn't a
  * 3-way-match document at all — it nets against a prior invoice, not a PO.
- *
- * Deliberately NOT implemented here:
- *   - EXC-FRAUD_BANK: has its own dedicated gated state machine (ALGORITHMS.md §6,
- *     vendor_bank_change_reviews) — a separate workflow, not a match-stage finding. Wiring its
- *     detection in here is a planned follow-up once lib/ledger/bank-change-review.ts lands.
- * That one still has a ready evaluate*() function in decision-matrix.ts already — wiring it in
- * later is additive, not a rewrite.
  */
 
 export interface MatchStageResult {
@@ -66,6 +65,24 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     // than getting one from context, then stalled instead of ever reaching submit_investigation.
     vendorId: bill.vendor_id,
   };
+
+  // EXC-FRAUD_BANK (ALGORITHMS.md §6) — checked FIRST and unconditionally, ahead of even the
+  // credit-memo/non-PO/no-PO branches: it's the highest-precedence cascade-stop code (rank 1
+  // in decision-matrix.ts's PRECEDENCE_RANK), and a vendor with an unresolved bank-change gate
+  // is exactly as suspect for a credit memo or non-PO invoice as for a normal 3-way-match one.
+  const bankGate = await detectBankChangeGate(bill.vendor_id);
+  if (bankGate.gating) {
+    // Idempotent: creates the review row only if this specific change has no row yet (e.g. the
+    // vendor's own trust_tier/bank_account_changed_at flagged it before any invoice arrived to
+    // trigger detection) — match-stage's own resolved output being saved, same precedent as
+    // the po_line_id persistence below, not a business judgment call.
+    if (!bankGate.review) {
+      await getOrCreateBankChangeReview({ vendorId: bill.vendor_id, newBankLast4: vendor.bank_account_last4, sourceInvoiceId: bill.id });
+    }
+    detail.bankChangeGateStatus = bankGate.status;
+    findings.push({ code: "EXC-FRAUD_BANK", action: evaluateFraudBank() });
+    return { findings, combined: combineExceptions(findings), detail };
+  }
 
   if (bill.invoice_type === "credit_memo") {
     // A credit memo isn't a 3-way-match document — it nets against a prior invoice, not a PO

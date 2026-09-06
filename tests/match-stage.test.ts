@@ -14,6 +14,7 @@ const sql = getSql();
 let vendorId: string;
 let trustedVendorId: string;
 let taxCodeId: string;
+const fraudBankVendorIds: string[] = [];
 const poIds: string[] = [];
 const billIds: string[] = [];
 
@@ -73,7 +74,10 @@ afterAll(async () => {
   await sql`DELETE FROM purchase_orders WHERE id = ANY(${poIds})`;
   await sql`DELETE FROM tax_codes WHERE id = ${taxCodeId}`;
   await sql`DELETE FROM vendor_corrections WHERE vendor_id = ANY(${[vendorId, trustedVendorId]})`;
-  await sql`DELETE FROM vendors WHERE id = ANY(${[vendorId, trustedVendorId]})`;
+  // Must come after the vendor_bills/purchase_orders deletes above — these vendors are only
+  // referenced by rows already cleaned up by then, avoiding an FK violation on delete.
+  await sql`DELETE FROM vendor_bank_change_reviews WHERE vendor_id = ANY(${fraudBankVendorIds})`;
+  await sql`DELETE FROM vendors WHERE id = ANY(${[vendorId, trustedVendorId, ...fraudBankVendorIds]})`;
 });
 
 describe("runMatchStage", () => {
@@ -378,6 +382,57 @@ describe("runMatchStage", () => {
       await addBillLine(billId, { qty: 10, unitPrice: 2, uom: "each" });
       const r = await runMatchStage(billId);
       expect(r.findings.some((f) => f.code === "EXC-UOM_MISMATCH")).toBe(false);
+    });
+  });
+
+  describe("EXC-FRAUD_BANK (ALGORITHMS.md §6, via lib/ledger/bank-change-review.ts)", () => {
+    async function makeBankChangeVendor(name: string, bankLast4: string) {
+      const id = crypto.randomUUID();
+      fraudBankVendorIds.push(id); // cleaned up in the shared afterAll, after bills/POs are gone
+      await sql`
+        INSERT INTO vendors (id, name, trust_tier, bank_account_last4, bank_account_changed_at)
+        VALUES (${id}, ${name}, 'new', ${bankLast4}, ${new Date().toISOString()})`;
+      return id;
+    }
+
+    it("cascade-stops on a vendor with a recent, unresolved bank change — no other findings computed", async () => {
+      const bankVendorId = await makeBankChangeVendor(PREFIX + " Bank Change Vendor", "4321");
+      const billId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-FRAUDBANK-1", totalAmount: 500, vendorId: bankVendorId });
+
+      const r = await runMatchStage(billId);
+      expect(r.findings).toEqual([{ code: "EXC-FRAUD_BANK", action: "block_fraud_flag" }]);
+      expect(r.detail.bankChangeGateStatus).toBe("flagged");
+
+      const reviewRows = await sql`SELECT * FROM vendor_bank_change_reviews WHERE vendor_id = ${bankVendorId}`;
+      expect(reviewRows).toHaveLength(1);
+      expect(reviewRows[0].new_bank_last4).toBe("4321");
+    });
+
+    it("does not gate a vendor whose bank change was already confirmed and signed off", async () => {
+      const bankVendorId = await makeBankChangeVendor(PREFIX + " Cleared Bank Vendor", "9999");
+      const reviewId = crypto.randomUUID();
+      await sql`
+        INSERT INTO vendor_bank_change_reviews (id, vendor_id, new_bank_last4, status, callback_confirmed_by, second_reviewer_name)
+        VALUES (${reviewId}, ${bankVendorId}, '9999', 'callback_confirmed', 'alice', 'bob')`;
+
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-BANKCLEARED", unitPrice: 10, qtyOrdered: 10 });
+      await sql`UPDATE purchase_orders SET vendor_id = ${bankVendorId} WHERE id = ${poId}`;
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-FRAUDBANK-2", totalAmount: 100, vendorId: bankVendorId });
+      await addBillLine(billId, { qty: 10, unitPrice: 10 });
+
+      const r = await runMatchStage(billId);
+      expect(r.findings.some((f) => f.code === "EXC-FRAUD_BANK")).toBe(false);
+      expect(r.combined.overallAction).toBe("auto_approve");
+    });
+
+    it("takes precedence over every other exception — even a credit memo or non-PO invoice from the same vendor", async () => {
+      const bankVendorId = await makeBankChangeVendor(PREFIX + " Precedence Vendor", "1111");
+      const billId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-FRAUDBANK-3", totalAmount: 15000, vendorId: bankVendorId });
+
+      const r = await runMatchStage(billId);
+      expect(r.combined.dominantException).toBe("EXC-FRAUD_BANK");
+      expect(r.combined.cascaded).toBe(true);
     });
   });
 });
