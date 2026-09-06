@@ -43,7 +43,8 @@ const SEVERITY_RANK: Record<Action, number> = {
  * 2 and a cascade-stop condition (§4.3), so it's essentially never competing numerically against
  * a simultaneously-fired block from another exception — precedence already decided the outcome.
  */
-function moreRestrictive(a: Action, b: Action): Action {
+/** Exported so lib/pipeline/orchestrator.ts can apply "more restrictive wins" when the Verifier disagrees (ENGINE.md §2.5). */
+export function moreRestrictive(a: Action, b: Action): Action {
   return SEVERITY_RANK[a] >= SEVERITY_RANK[b] ? a : b;
 }
 
