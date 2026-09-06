@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { TransactionSql } from "postgres";
 import { getSql } from "@/db/client";
-import { computeHash } from "./hash-chain";
+import { computeHash, type ChainableRecord } from "./hash-chain";
 import type { Decision, NodeId } from "@/lib/types";
 
 /**
@@ -39,13 +39,20 @@ export interface WriteDecisionInput {
 
 /**
  * The exact shape that gets hashed. Exported deliberately: anything that verifies a decision's
- * hash later (verifyChain(), /api/audit/verify) MUST call `hashableRow(fromRow(dbRow))` — i.e.
- * go through this same function on a reconstructed Decision object — never hash a raw DB row
- * directly. The raw row uses snake_case keys (prev_hash); this function's output uses
- * camelCase (prevHash). Hashing the wrong shape produces a different canonicalized string and
- * would make every decision falsely appear tampered — this is exactly the class of bug that
- * broke `superseded_by_id` earlier, caught the same way: trace the shapes by hand before
+ * hash later (verifyChain(), /api/audit/verify) needs this same canonicalization — never hash
+ * a raw DB row directly. The raw row uses snake_case keys (prev_hash); this function's output
+ * uses camelCase (prevHash). Hashing the wrong shape produces a different canonicalized string
+ * and would make every decision falsely appear tampered — this is exactly the class of bug
+ * that broke `superseded_by_id` earlier, caught the same way: trace the shapes by hand before
  * trusting them.
+ *
+ * NOTE this deliberately has no `.hash` field of its own (hash is computed FROM this shape,
+ * not part of it — canonicalize() would just strip it again anyway). Passing this object's
+ * output directly to verifyChain() is a trap: verifyChain checks `record.hash`, which is
+ * `undefined` here, so every record "fails" immediately at the first one — not a subtle
+ * mismatch, an always-false-comparison. Caught exactly this way while building the pipeline
+ * orchestrator's own integration test. Use `toChainableRecord()` below for verification, not
+ * this function directly.
  */
 export function hashableRow(d: Decision) {
   return {
@@ -75,6 +82,11 @@ export function hashableRow(d: Decision) {
     prevHash: d.prevHash ?? null,
     created_at: d.createdAt,
   };
+}
+
+/** The correct way to prepare a real Decision for verifyChain() — see the warning on hashableRow() above. */
+export function toChainableRecord(d: Decision): ChainableRecord {
+  return { ...hashableRow(d), hash: d.hash };
 }
 
 function fromRow(row: any): Decision {
