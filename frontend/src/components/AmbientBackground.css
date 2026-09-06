@@ -1,0 +1,88 @@
+.ambient-bg-container {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  background-color: #0d1120;
+}
+
+.ambient-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
+/* Requirement 7: Spectrum color palette (Warm Amber/Gold, Teal, Electric Blue) */
+
+/* Warm Amber/Gold blob - Top & Left */
+.blob-amber {
+  width: 750px;
+  height: 650px;
+  top: -120px;
+  left: 15%;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.32) 0%, rgba(217, 119, 6, 0.18) 45%, transparent 75%);
+  animation: floatAmber 20s ease-in-out infinite alternate;
+}
+
+/* Vibrant Teal blob - Center Right */
+.blob-teal {
+  width: 800px;
+  height: 750px;
+  top: 15%;
+  right: -100px;
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.35) 0%, rgba(14, 165, 233, 0.2) 50%, transparent 75%);
+  animation: floatTeal 22s ease-in-out infinite alternate;
+}
+
+/* Deep Blue/Indigo blob - Bottom Left */
+.blob-blue {
+  width: 850px;
+  height: 800px;
+  bottom: -200px;
+  left: -150px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.38) 0%, rgba(99, 102, 241, 0.22) 50%, transparent 80%);
+  animation: floatBlue 18s ease-in-out infinite alternate;
+}
+
+/* Soft Warm Amber Glow - Bottom Right */
+.blob-gold {
+  width: 600px;
+  height: 600px;
+  bottom: -100px;
+  right: 20%;
+  background: radial-gradient(circle, rgba(234, 179, 8, 0.28) 0%, rgba(245, 158, 11, 0.12) 50%, transparent 75%);
+  animation: floatGold 24s ease-in-out infinite alternate;
+}
+
+.prism-overlay {
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+@keyframes floatAmber {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(40px, 30px) scale(1.1); }
+}
+
+@keyframes floatTeal {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-40px, -30px) scale(1.08); }
+}
+
+@keyframes floatBlue {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(50px, -40px) scale(1.12); }
+}
+
+@keyframes floatGold {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-30px, -20px) scale(0.95); }
+}

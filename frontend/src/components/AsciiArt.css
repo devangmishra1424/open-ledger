@@ -1,0 +1,44 @@
+.ascii-art-container {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(4, 6, 14, 0.65);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.ascii-art-pre {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 8.5px;
+  line-height: 0.82;
+  letter-spacing: 1px;
+  margin: 0;
+  padding: 0;
+  white-space: pre;
+  user-select: none;
+  text-align: center;
+  font-weight: 700;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--ascii-color, #94a3b8) 40%, transparent);
+}
+
+.ascii-fade-in {
+  animation: asciiFadeIn var(--ascii-duration, 1.5s) ease-out forwards;
+}
+
+@keyframes asciiFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

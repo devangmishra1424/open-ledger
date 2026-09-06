@@ -1,0 +1,30 @@
+.ecosystem-canvas-card {
+  padding: 0;
+  height: 480px;
+  position: relative;
+  overflow: hidden;
+}
+
+.ecosystem-svg {
+  width: 100%;
+  height: 100%;
+}
+
+.network-link-line {
+  stroke: rgba(255, 255, 255, 0.15);
+  stroke-width: 2;
+  stroke-dasharray: 6;
+  animation: dash 20s linear infinite;
+}
+
+@keyframes dash {
+  to { stroke-dashoffset: -100; }
+}
+
+.ecosystem-node-circle {
+  transition: all 0.25s ease;
+}
+
+.ecosystem-node-circle:hover {
+  filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.6));
+}
