@@ -1,38 +1,42 @@
 import { getSql } from "@/db/client";
-import { matchLines, type InvoiceLineInput, type PoLineInput } from "@/lib/matching/line-match";
-import { classifyDateGap } from "@/lib/matching/tolerance-zones";
+import { matchLines, descriptionSimilarity, type InvoiceLineInput, type PoLineInput } from "@/lib/matching/line-match";
+import { classifyDateGap, classifyTaxRateVariance } from "@/lib/matching/tolerance-zones";
 import { computePoLineFulfillment } from "@/lib/matching/partial-handling";
+import { isPlausibleUomConversion } from "@/lib/matching/uom-dimension";
 import {
   evaluateNoPo, evaluateNonPo, evaluateBeforeReceipt, evaluatePriceVariance, evaluateQuantityVariance,
-  evaluateCurrency, evaluateBlanketExceeded, combineExceptions, type ExceptionFinding, type CombinedDecision,
+  evaluateCurrency, evaluateBlanketExceeded, evaluateTaxVariance, evaluateCreditMemo, evaluateUomMismatch,
+  combineExceptions, type ExceptionFinding, type CombinedDecision,
 } from "@/lib/matching/decision-matrix";
 
 /**
  * The "match" pipeline stage (ENGINE.md §2.3) — Layer 1, deterministic, no LLM. Assembles
  * every exception finding from PO/GRN/invoice data and combines them via decision-matrix.ts.
  *
- * SCOPE, stated honestly rather than silently gapped: this covers EXC-NON_PO, EXC-NO_PO,
- * EXC-CURRENCY, EXC-BEFORE_RCV, EXC-PRICE_VAR, EXC-QTY_VAR, and EXC-BLANKET_EXCEEDED (7 of 14
- * taxonomy codes) — the common, high-volume path. Quantity checking goes through
- * lib/matching/partial-handling.ts's computePoLineFulfillment(), which tracks cumulative
- * received-vs-invoiced state per po_line_id ACROSS invoices (spec §1.6 A/B/C) — not just this
- * one invoice in isolation, so a second partial invoice against an already-partly-consumed
- * line is judged correctly. Deliberately NOT implemented here, each for a real data reason
- * rather than time pressure alone:
- *   - EXC-TAX_VAR: vendor_bill_lines has no per-line tax_amount column, only a header-level
- *     tax_total aggregate — there's no non-fabricated way to compute a per-line "actual rate
- *     applied" from what's actually stored. Would need a schema change (a real one, flagged
- *     here rather than smuggled in as a silent migration).
- *   - EXC-CREDIT_MEMO: vendor_bills has no invoice_type flag distinguishing a credit memo
- *     from a standard bill, so there's no way to detect "this invoice IS a credit memo" from
- *     current schema at all. (EXC-PARTIAL itself IS handled — see above.)
- *   - EXC-UOM_MISMATCH: needs a conversion-factor table that doesn't exist yet (ALGORITHMS.md
- *     §14's own resolution action assumes one gets built as a vendor_corrections extension).
+ * SCOPE, stated honestly rather than silently gapped: this covers 11 of 14 taxonomy codes —
+ * EXC-NON_PO, EXC-NO_PO, EXC-CURRENCY, EXC-BEFORE_RCV, EXC-PRICE_VAR, EXC-QTY_VAR,
+ * EXC-BLANKET_EXCEEDED, EXC-CREDIT_MEMO, EXC-TAX_VAR, EXC-UOM_MISMATCH, and (always, trivially)
+ * EXC-PARTIAL. Quantity checking goes through lib/matching/partial-handling.ts's
+ * computePoLineFulfillment(), which tracks cumulative received-vs-invoiced state per
+ * po_line_id ACROSS invoices (spec §1.6 A/B/C) — not just this one invoice in isolation, so a
+ * second partial invoice against an already-partly-consumed line is judged correctly.
+ * EXC-UOM_MISMATCH needs its own second pass over whatever's left unmatched after the real
+ * matching runs: line-match.ts's fuzzy and Hungarian passes both REQUIRE UoM agreement as a
+ * precondition to match at all, so a genuinely UoM-mismatched line can never appear in
+ * lineMatchReport.matched in the first place — it's always left in both unmatched lists. The
+ * pass below re-checks those specifically via UoM-insensitive description similarity, purely
+ * to identify "probably the same item, measured differently," not to resolve quantity/price
+ * agreement (found by testing this, not assumed — the first version of this code silently
+ * never fired because it only looked at already-matched lines).
+ * EXC-CREDIT_MEMO is handled in its own early branch (see below) since a credit memo isn't a
+ * 3-way-match document at all — it nets against a prior invoice, not a PO.
+ *
+ * Deliberately NOT implemented here:
  *   - EXC-FRAUD_BANK: has its own dedicated gated state machine (ALGORITHMS.md §6,
  *     vendor_bank_change_reviews) — a separate workflow, not a match-stage finding. Wiring its
  *     detection in here is a planned follow-up once lib/ledger/bank-change-review.ts lands.
- * Each of these has a ready evaluate*() function in decision-matrix.ts already — wiring them
- * in later is additive, not a rewrite.
+ * That one still has a ready evaluate*() function in decision-matrix.ts already — wiring it in
+ * later is additive, not a rewrite.
  */
 
 export interface MatchStageResult {
@@ -62,6 +66,40 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     // than getting one from context, then stalled instead of ever reaching submit_investigation.
     vendorId: bill.vendor_id,
   };
+
+  if (bill.invoice_type === "credit_memo") {
+    // A credit memo isn't a 3-way-match document — it nets against a prior invoice, not a PO
+    // (spec §2 EXC-07). Handled as its own early, isolated branch rather than flowing through
+    // the rest of this function: a credit memo's total_amount is stored as a positive
+    // magnitude (the credit value), with invoice_type carrying the sign meaning — letting a
+    // literal negative amount flow through the PO-matching logic below risks corrupting every
+    // other ABS-based computation in this file that assumes a normal positive invoice amount.
+    detail.creditMemo = true;
+    if (!bill.related_invoice_id) {
+      // Spec's own detection condition requires a related invoice reference to net against;
+      // without one there's nothing to compute "net_amount" from. Not fabricating a finding
+      // for malformed data — this is a data-quality gap for a human to fix at intake, not a
+      // matching exception this stage can meaningfully classify.
+      detail.creditMemoNote = "no related_invoice_id set — cannot compute netting";
+      return { findings, combined: combineExceptions(findings), detail };
+    }
+    const relatedRows = await sql`SELECT total_amount, status FROM vendor_bills WHERE id = ${bill.related_invoice_id}`;
+    const related = relatedRows[0];
+    if (!related) {
+      detail.creditMemoNote = `related_invoice_id '${bill.related_invoice_id}' does not exist`;
+      return { findings, combined: combineExceptions(findings), detail };
+    }
+    // Simplification, stated honestly: "remaining open amount" is treated as binary (0 once
+    // 'paid', else the full total_amount) rather than tracking partial payments via
+    // payment_applications — nothing in this codebase currently posts partial payments either
+    // (see INTEGRATION.md's note on lib/ledger/journal.ts's postPayment being unwired), so
+    // finer-grained tracking here would be precision this system can't yet back up elsewhere.
+    const remainingOpenAmount = related.status === "paid" ? 0 : related.total_amount;
+    const netAmount = remainingOpenAmount - bill.total_amount;
+    detail.creditMemoNetAmount = netAmount;
+    findings.push({ code: "EXC-CREDIT_MEMO", action: evaluateCreditMemo(netAmount) });
+    return { findings, combined: combineExceptions(findings), detail };
+  }
 
   if (!bill.po_id) {
     // No PO reference at all — spec §2 EXC-06's own detection condition covers exactly this
@@ -183,12 +221,63 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     await sql`UPDATE vendor_bill_lines SET po_line_id = ${m.poLineId} WHERE id = ${m.invoiceLineId} AND po_line_id IS NULL`;
   }
 
+  // EXC-UOM_MISMATCH (ALGORITHMS.md §14): a real architectural tension, found while testing
+  // this, not assumed — line-match.ts's own fuzzy and Hungarian passes both REQUIRE UoM
+  // agreement as a precondition to match a line at all (see line-match.ts's own uomCompatible
+  // gate), so a genuinely UoM-mismatched line can never appear in lineMatchReport.matched in
+  // the first place; it surfaces here as an unmatched line on both sides instead. Detecting
+  // it therefore means a second, UoM-INSENSITIVE description-similarity pass over what's left
+  // unmatched after the real matching already ran — reusing the same >=85% threshold, but
+  // purely to identify "this is probably the same line item, measured differently," never to
+  // resolve quantity/price agreement (that stays undecided until a conversion factor exists).
+  const stillUnmatchedPoLines = [...lineMatchReport.unmatchedPoLines];
+  for (const invLine of lineMatchReport.unmatchedInvoiceLines) {
+    const line = invoiceLines.find((l) => l.id === invLine.invoiceLineId)!;
+    const candidateIdx = stillUnmatchedPoLines.findIndex(
+      (p) => p.uom !== line.uom && descriptionSimilarity(p.description, line.description) >= 0.85,
+    );
+    if (candidateIdx === -1) continue;
+    const poLine = stillUnmatchedPoLines[candidateIdx];
+    stillUnmatchedPoLines.splice(candidateIdx, 1);
+
+    const conversionRows = await sql`
+      SELECT id FROM vendor_corrections
+      WHERE vendor_id = ${bill.vendor_id}
+        AND ((uom_from = ${line.uom} AND uom_to = ${poLine.uom}) OR (uom_from = ${poLine.uom} AND uom_to = ${line.uom}))`;
+    if (conversionRows.length === 0) {
+      findings.push({ code: "EXC-UOM_MISMATCH", action: evaluateUomMismatch(isPlausibleUomConversion(line.uom, poLine.uom)) });
+    }
+    // A factor ON FILE resolves the mismatch without raising an exception (spec: "system
+    // re-runs the match with it applied") — re-deriving quantity/price agreement through the
+    // conversion itself is additional scope beyond clearing the exception, not done here.
+  }
+
   for (const m of lineMatchReport.matched) {
     const invLine = invoiceLines.find((l) => l.id === m.invoiceLineId)!;
+    const poLine = poLines.find((p) => p.id === m.poLineId)!;
     const lineAmountImpact = m.lineAmountVariance.varianceAbs;
 
     if (m.priceVariance.zone !== "green") {
       findings.push({ code: "EXC-PRICE_VAR", action: evaluatePriceVariance(m.priceVariance.variancePct, lineAmountImpact) });
+    }
+
+    // EXC-TAX_VAR: needs this line's ACTUAL tax (only present when the extraction/intake step
+    // populated it — see lib/types.ts's VendorBillLine.taxAmount) and its tax code's EXPECTED
+    // rate. Silently skipped when either is absent — nothing to compare, not an exception.
+    const rawLine = billLineRows.find((r: any) => r.id === m.invoiceLineId);
+    if (rawLine?.tax_amount != null && rawLine?.tax_code_id != null) {
+      const taxCodeRows = await sql`SELECT rate FROM tax_codes WHERE id = ${rawLine.tax_code_id}`;
+      const expectedRate = taxCodeRows[0]?.rate;
+      const lineAmount = invLine.qty * invLine.unitPrice;
+      if (expectedRate != null && lineAmount > 0) {
+        const actualRate = rawLine.tax_amount / lineAmount;
+        const taxZone = classifyTaxRateVariance(actualRate, expectedRate);
+        if (taxZone.zone !== "green") {
+          const expectedTaxAmount = lineAmount * expectedRate;
+          const amountDiff = Math.abs(rawLine.tax_amount - expectedTaxAmount);
+          findings.push({ code: "EXC-TAX_VAR", action: evaluateTaxVariance(taxZone.varianceAbs, amountDiff) });
+        }
+      }
     }
 
     // spec §1.4.2 + §1.6: quantity is checked against GRN ACCEPTED qty, not the PO's ordered
@@ -198,7 +287,6 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     // B), via lib/matching/partial-handling.ts. Without qtyInvoicedPrior, a second partial
     // invoice could over-claim quantity a first invoice already consumed without being caught
     // — a real correctness gap, not a hypothetical one, closed by wiring this in.
-    const poLine = poLines.find((p) => p.id === m.poLineId)!;
     const acceptedRows = await sql`
       SELECT COALESCE(SUM(grl.qty_received), 0) as accepted
       FROM goods_receipt_lines grl JOIN goods_receipts gr ON gr.id = grl.goods_receipt_id

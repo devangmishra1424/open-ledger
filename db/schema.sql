@@ -30,7 +30,11 @@ CREATE TABLE vendor_bank_change_reviews (
 );
 CREATE TABLE vendor_corrections (
   id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL REFERENCES vendors(id), pattern TEXT NOT NULL,
-  note TEXT, source_invoice_id TEXT, created_at TEXT NOT NULL DEFAULT now()::text
+  note TEXT, source_invoice_id TEXT, created_at TEXT NOT NULL DEFAULT now()::text,
+  -- UOM-conversion extension (ALGORITHMS.md §14: "a natural, cheap extension of the existing
+  -- vendor_corrections learning-loop mechanism" rather than a parallel table). Only populated
+  -- when this correction records a confirmed unit-of-measure conversion factor; NULL otherwise.
+  uom_from TEXT, uom_to TEXT, conversion_factor REAL
 );
 CREATE TABLE tax_codes (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, rate REAL NOT NULL,
@@ -88,13 +92,24 @@ CREATE TABLE vendor_bills (
   subtotal REAL NOT NULL, tax_total REAL NOT NULL DEFAULT 0, total_amount REAL NOT NULL,
   raw_source TEXT, ap_account_id TEXT REFERENCES chart_of_accounts(id), journal_entry_id TEXT REFERENCES journal_entries(id),
   status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing','matched','exception','approved','posted','paid','void')),
+  -- EXC-CREDIT_MEMO extension (spec §2 EXC-07): invoice_type distinguishes a credit memo from
+  -- a standard bill; related_invoice_id is the original invoice it nets against (spec's own
+  -- detection logic: "credit_memo.related_invoice_number references an existing... invoice").
+  -- Both NULL/'standard' for every ordinary bill — additive, no existing row changes meaning.
+  invoice_type TEXT NOT NULL DEFAULT 'standard' CHECK (invoice_type IN ('standard', 'credit_memo')),
+  related_invoice_id TEXT REFERENCES vendor_bills(id),
   received_at TEXT NOT NULL DEFAULT now()::text, UNIQUE(vendor_id, invoice_number)
 );
 CREATE TABLE vendor_bill_lines (
   id TEXT PRIMARY KEY, vendor_bill_id TEXT NOT NULL REFERENCES vendor_bills(id),
   po_line_id TEXT REFERENCES purchase_order_lines(id), description TEXT NOT NULL,
   qty_invoiced REAL NOT NULL, unit_price REAL NOT NULL, uom TEXT NOT NULL DEFAULT 'each',
-  tax_code_id TEXT REFERENCES tax_codes(id), gl_account_id TEXT REFERENCES chart_of_accounts(id)
+  tax_code_id TEXT REFERENCES tax_codes(id), gl_account_id TEXT REFERENCES chart_of_accounts(id),
+  -- EXC-TAX_VAR extension: the tax actually charged on THIS line, vs tax_codes.rate (the
+  -- expected rate for tax_code_id) — tax_total on vendor_bills is only a header aggregate and
+  -- can't be broken down per line when a bill has lines under different tax codes. Nullable:
+  -- most demo/seed lines won't set it, and no tax comparison fires without it (see match-stage.ts).
+  tax_amount REAL
 );
 CREATE TABLE payments (
   id TEXT PRIMARY KEY, method TEXT NOT NULL DEFAULT 'ach' CHECK (method IN ('ach','wire','check','virtual_card')),

@@ -9,7 +9,11 @@ export interface Vendor {
   trustTier: 'trusted'|'new'|'flagged'; taxId?: string; w9OnFile: boolean; paymentTermsCode?: string; createdAt: string;
 }
 
-export interface VendorCorrection { id: string; vendorId: string; pattern: string; note?: string; sourceInvoiceId?: string; createdAt: string; }
+export interface VendorCorrection {
+  id: string; vendorId: string; pattern: string; note?: string; sourceInvoiceId?: string; createdAt: string;
+  /** Only set when this correction records a confirmed UOM conversion factor (ALGORITHMS.md §14). */
+  uomFrom?: string; uomTo?: string; conversionFactor?: number;
+}
 
 export interface TaxCode {
   id: string; name: string; rate: number; taxType: 'vat'|'gst'|'sales_tax'|'withholding';
@@ -42,11 +46,15 @@ export interface GoodsReceipt {
 export interface VendorBill {
   id: string; vendorId: string; poId?: string; invoiceNumber: string; invoiceDate: string;
   totalAmount: number; currency: string; status: BillStatus; rawSource?: string;
+  /** EXC-CREDIT_MEMO extension (spec §2 EXC-07) — 'standard' and no relatedInvoiceId for every ordinary bill. */
+  invoiceType: 'standard'|'credit_memo'; relatedInvoiceId?: string;
 }
 
 export interface VendorBillLine {
   id: string; vendorBillId: string; poLineId?: string; description: string;
   qtyInvoiced: number; unitPrice: number; uom: string; taxCodeId?: string; glAccountId?: string;
+  /** EXC-TAX_VAR extension — the tax actually charged on this line; undefined means no tax comparison fires. */
+  taxAmount?: number;
 }
 
 export interface ToolCallLog { name: string; args: Record<string, unknown>; rawResult: unknown; resultHash: string; }

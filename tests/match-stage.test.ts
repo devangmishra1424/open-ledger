@@ -13,6 +13,7 @@ const sql = getSql();
 
 let vendorId: string;
 let trustedVendorId: string;
+let taxCodeId: string;
 const poIds: string[] = [];
 const billIds: string[] = [];
 
@@ -35,19 +36,19 @@ async function acceptGoodsReceipt(poId: string, lineId: string, qtyAccepted: num
   await sql`INSERT INTO goods_receipt_lines (id, goods_receipt_id, po_line_id, qty_received) VALUES (${crypto.randomUUID()}, ${receiptId}, ${lineId}, ${qtyAccepted})`;
 }
 
-async function makeBill(opts: { poId: string | null; invoiceNumber: string; invoiceDate?: string; currency?: string; exchangeRate?: number; totalAmount: number; vendorId?: string }) {
+async function makeBill(opts: { poId: string | null; invoiceNumber: string; invoiceDate?: string; currency?: string; exchangeRate?: number; totalAmount: number; vendorId?: string; invoiceType?: string; relatedInvoiceId?: string }) {
   const billId = crypto.randomUUID();
   billIds.push(billId);
   await sql`
-    INSERT INTO vendor_bills (id, vendor_id, po_id, invoice_number, invoice_date, currency, exchange_rate, subtotal, total_amount)
-    VALUES (${billId}, ${opts.vendorId ?? vendorId}, ${opts.poId}, ${opts.invoiceNumber}, ${opts.invoiceDate ?? "2026-08-15"}, ${opts.currency ?? "USD"}, ${opts.exchangeRate ?? 1.0}, ${opts.totalAmount}, ${opts.totalAmount})`;
+    INSERT INTO vendor_bills (id, vendor_id, po_id, invoice_number, invoice_date, currency, exchange_rate, subtotal, total_amount, invoice_type, related_invoice_id)
+    VALUES (${billId}, ${opts.vendorId ?? vendorId}, ${opts.poId}, ${opts.invoiceNumber}, ${opts.invoiceDate ?? "2026-08-15"}, ${opts.currency ?? "USD"}, ${opts.exchangeRate ?? 1.0}, ${opts.totalAmount}, ${opts.totalAmount}, ${opts.invoiceType ?? "standard"}, ${opts.relatedInvoiceId ?? null})`;
   return billId;
 }
 
-async function addBillLine(billId: string, opts: { description?: string; uom?: string; qty: number; unitPrice: number }) {
+async function addBillLine(billId: string, opts: { description?: string; uom?: string; qty: number; unitPrice: number; taxAmount?: number; taxCodeId?: string }) {
   await sql`
-    INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, uom)
-    VALUES (${crypto.randomUUID()}, ${billId}, ${opts.description ?? "Widget"}, ${opts.qty}, ${opts.unitPrice}, ${opts.uom ?? "each"})`;
+    INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, uom, tax_amount, tax_code_id)
+    VALUES (${crypto.randomUUID()}, ${billId}, ${opts.description ?? "Widget"}, ${opts.qty}, ${opts.unitPrice}, ${opts.uom ?? "each"}, ${opts.taxAmount ?? null}, ${opts.taxCodeId ?? null})`;
 }
 
 beforeAll(async () => {
@@ -55,6 +56,10 @@ beforeAll(async () => {
   await sql`INSERT INTO vendors (id, name, trust_tier) VALUES (${vendorId}, ${PREFIX + " Vendor Co"}, 'new')`;
   trustedVendorId = crypto.randomUUID();
   await sql`INSERT INTO vendors (id, name, trust_tier) VALUES (${trustedVendorId}, ${PREFIX + " Trusted Vendor Co"}, 'trusted')`;
+  taxCodeId = crypto.randomUUID();
+  await sql`
+    INSERT INTO tax_codes (id, name, rate, tax_type, direction, effective_from)
+    VALUES (${taxCodeId}, ${PREFIX + " Sales Tax"}, 0.0825, 'sales_tax', 'input', '2026-01-01')`;
 });
 
 afterAll(async () => {
@@ -66,6 +71,8 @@ afterAll(async () => {
     await sql`DELETE FROM purchase_order_lines WHERE po_id = ${id}`;
   }
   await sql`DELETE FROM purchase_orders WHERE id = ANY(${poIds})`;
+  await sql`DELETE FROM tax_codes WHERE id = ${taxCodeId}`;
+  await sql`DELETE FROM vendor_corrections WHERE vendor_id = ANY(${[vendorId, trustedVendorId]})`;
   await sql`DELETE FROM vendors WHERE id = ANY(${[vendorId, trustedVendorId]})`;
 });
 
@@ -249,6 +256,128 @@ describe("runMatchStage", () => {
       await addBillLine(bill, { qty: 1100, unitPrice: 1 }); // 10% over the 1000-unit ceiling
       const r = await runMatchStage(bill);
       expect(r.findings.find((f) => f.code === "EXC-BLANKET_EXCEEDED")?.action).toBe("escalate_l2");
+    });
+  });
+
+  describe("EXC-TAX_VAR (spec §2 EXC-10)", () => {
+    it("matches the spec's own worked example: 8.25% expected vs 10.00% actual = 1.75pp escalates L1", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-TAX-1", unitPrice: 10, qtyOrdered: 50 });
+      await acceptGoodsReceipt(poId, lineId, 50);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-TAX-1", totalAmount: 500 });
+      // lineAmount = 50*10 = 500; actual tax charged = 50 (10.00%) vs expected 8.25% (41.25)
+      await addBillLine(billId, { qty: 50, unitPrice: 10, taxAmount: 50, taxCodeId });
+      const r = await runMatchStage(billId);
+      expect(r.findings.find((f) => f.code === "EXC-TAX_VAR")?.action).toBe("escalate_l1");
+    });
+
+    it("a tax rate within tolerance raises no exception", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-TAX-2", unitPrice: 10, qtyOrdered: 50 });
+      await acceptGoodsReceipt(poId, lineId, 50);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-TAX-2", totalAmount: 500 });
+      // exactly the expected 8.25% rate
+      await addBillLine(billId, { qty: 50, unitPrice: 10, taxAmount: 41.25, taxCodeId });
+      const r = await runMatchStage(billId);
+      expect(r.findings.some((f) => f.code === "EXC-TAX_VAR")).toBe(false);
+    });
+
+    it("a line with no tax_amount set raises no exception — nothing to compare", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-TAX-3", unitPrice: 10, qtyOrdered: 50 });
+      await acceptGoodsReceipt(poId, lineId, 50);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-TAX-3", totalAmount: 500 });
+      await addBillLine(billId, { qty: 50, unitPrice: 10 });
+      const r = await runMatchStage(billId);
+      expect(r.findings.some((f) => f.code === "EXC-TAX_VAR")).toBe(false);
+    });
+
+    it("a large rate diff (>2pp) blocks", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-TAX-4", unitPrice: 10, qtyOrdered: 50 });
+      await acceptGoodsReceipt(poId, lineId, 50);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-TAX-4", totalAmount: 500 });
+      await addBillLine(billId, { qty: 50, unitPrice: 10, taxAmount: 70, taxCodeId }); // 14% actual vs 8.25% expected
+      const r = await runMatchStage(billId);
+      expect(r.findings.find((f) => f.code === "EXC-TAX_VAR")?.action).toBe("block");
+    });
+  });
+
+  describe("EXC-CREDIT_MEMO (spec §2 EXC-07)", () => {
+    it("matches the spec's own worked example: a credit against an already-paid invoice nets negative, escalates L1", async () => {
+      const originalId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-ORIGINAL-1", totalAmount: 10000 });
+      await sql`UPDATE vendor_bills SET status = 'paid' WHERE id = ${originalId}`;
+
+      const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-1", totalAmount: 1500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
+      const r = await runMatchStage(creditId);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1" }]);
+      expect(r.detail.creditMemoNetAmount).toBe(-1500);
+    });
+
+    it("auto-approves when the related invoice is still open and the credit doesn't exceed it (net >= 0)", async () => {
+      const originalId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-ORIGINAL-2", totalAmount: 10000 });
+      // status stays 'processing' — still "open" for this simplified netting check
+
+      const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-2", totalAmount: 1500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
+      const r = await runMatchStage(creditId);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "auto_approve" }]);
+      expect(r.detail.creditMemoNetAmount).toBe(8500);
+    });
+
+    it("skips the check (no fabricated finding) when related_invoice_id isn't set", async () => {
+      const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-3", totalAmount: 1500, invoiceType: "credit_memo" });
+      const r = await runMatchStage(creditId);
+      expect(r.findings).toEqual([]);
+      expect(r.detail.creditMemoNote).toMatch(/no related_invoice_id/);
+    });
+
+    it("a credit memo never goes through normal PO 3-way matching, even if a po_id happens to be set", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-CM-4", unitPrice: 10, qtyOrdered: 50 });
+      await acceptGoodsReceipt(poId, lineId, 50);
+      const originalId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-ORIGINAL-4", totalAmount: 500 });
+      await sql`UPDATE vendor_bills SET status = 'paid' WHERE id = ${originalId}`;
+
+      const creditId = await makeBill({ poId, invoiceNumber: PREFIX + "-CM-4", totalAmount: 500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
+      await addBillLine(creditId, { qty: 999, unitPrice: 10 }); // would be a wild EXC-QTY_VAR if 3-way matching ran
+      const r = await runMatchStage(creditId);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1" }]);
+    });
+  });
+
+  describe("EXC-UOM_MISMATCH (ALGORITHMS.md §14)", () => {
+    it("matches the spec's own worked example: no conversion on file, but case<->each is plausible, escalates L1", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-1", unitPrice: 2, qtyOrdered: 10, uom: "case" });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-1", totalAmount: 480 });
+      await addBillLine(billId, { qty: 240, unitPrice: 2, uom: "each" });
+      const r = await runMatchStage(billId);
+      expect(r.findings.find((f) => f.code === "EXC-UOM_MISMATCH")?.action).toBe("escalate_l1");
+    });
+
+    it("fundamentally incompatible units (hours vs each) block instead of escalating", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-2", unitPrice: 2, qtyOrdered: 10, uom: "hours" });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-2", totalAmount: 20 });
+      await addBillLine(billId, { qty: 10, unitPrice: 2, uom: "each" });
+      const r = await runMatchStage(billId);
+      expect(r.findings.find((f) => f.code === "EXC-UOM_MISMATCH")?.action).toBe("block");
+    });
+
+    it("a confirmed conversion factor on file resolves the mismatch — no exception raised", async () => {
+      await sql`
+        INSERT INTO vendor_corrections (id, vendor_id, pattern, note, uom_from, uom_to, conversion_factor)
+        VALUES (${crypto.randomUUID()}, ${vendorId}, 'uom_conversion', '1 case = 24 each, confirmed by AP clerk', 'case', 'each', 24)`;
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-3", unitPrice: 2, qtyOrdered: 10, uom: "case" });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-3", totalAmount: 480 });
+      await addBillLine(billId, { qty: 240, unitPrice: 2, uom: "each" });
+      const r = await runMatchStage(billId);
+      expect(r.findings.some((f) => f.code === "EXC-UOM_MISMATCH")).toBe(false);
+    });
+
+    it("matching units raise no exception at all", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-4", unitPrice: 2, qtyOrdered: 10, uom: "each" });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-4", totalAmount: 20 });
+      await addBillLine(billId, { qty: 10, unitPrice: 2, uom: "each" });
+      const r = await runMatchStage(billId);
+      expect(r.findings.some((f) => f.code === "EXC-UOM_MISMATCH")).toBe(false);
     });
   });
 });

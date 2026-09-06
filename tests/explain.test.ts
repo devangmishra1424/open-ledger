@@ -60,7 +60,7 @@ describe("explain() — real grounded Q&A over a real pipeline run's decisions",
     // fabricate a cited decision id to support an answer about something never captured.
     expect(typeof result.answer).toBe("string");
     expect(result.answer.length).toBeGreaterThan(0);
-  }, 30_000);
+  }, 60_000); // same generous margin as the test above — real API latency, not a hang
 
   it("throws a clear error for a decisionId that doesn't belong to the given invoice", async () => {
     await expect(explain(billId, "not-a-real-decision-id", "why?")).rejects.toThrow(/not found/);
