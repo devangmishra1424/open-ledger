@@ -1,0 +1,25 @@
+.animated-gradient-text {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 1.25rem;
+  font-weight: 700;
+}
+
+.animated-gradient-text .text-content {
+  display: inline-block;
+  position: relative;
+  z-index: 2;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  background-size: 300% 100%;
+  background-repeat: repeat;
+  animation: gradientMove var(--gradient-speed, 7s) linear infinite;
+}
+
+@keyframes gradientMove {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}

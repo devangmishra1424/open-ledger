@@ -1,0 +1,88 @@
+/* App Root Layout: Fixed Viewport Layout without Page Scrollbar */
+.app-root-layout {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  width: 100vw;
+  position: relative;
+  z-index: 1;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: hidden !important;
+}
+
+/* Master Glassmorphic Shell wrapping all components inside one big glass box per wireframe */
+.master-glass-shell {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  column-gap: 20px;
+  width: 95vw;
+  max-width: 95vw;
+  height: calc(100vh - 24px);
+  max-height: calc(100vh - 24px);
+  background: rgba(13, 17, 32, 0.42);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 28px;
+  padding: 16px 20px;
+  box-sizing: border-box;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.65), inset 0 1px 1px rgba(255, 255, 255, 0.18);
+  position: relative;
+  z-index: 10;
+  overflow: visible !important;
+}
+
+/* Inner Darker Cards with Lower Opacity */
+.inner-dark-card {
+  background: rgba(6, 10, 20, 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45) !important;
+  backdrop-filter: blur(12px) !important;
+}
+
+.app-main-viewport {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
+  overflow: hidden !important;
+}
+
+.app-content-columns {
+  display: flex;
+  gap: 24px;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  height: calc(100% - 62px);
+  overflow: hidden;
+}
+
+.app-page-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (max-width: 1280px) {
+  .master-glass-shell {
+    grid-template-columns: 72px 1fr;
+  }
+  .app-content-columns {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .right-panel-container {
+    width: 100%;
+    min-width: 100%;
+  }
+}

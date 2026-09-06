@@ -1,0 +1,143 @@
+.topbar-container {
+  height: 48px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 0 4px;
+  margin-bottom: 14px;
+  position: relative;
+  z-index: 40;
+}
+
+.topbar-left-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.bc-home {
+  color: var(--text-dim);
+}
+
+.bc-sep {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.bc-current {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.chain-pill {
+  font-size: 10px;
+  font-weight: 600;
+  color: #a7c957;
+  background: rgba(167, 201, 87, 0.12);
+  border: 1px solid rgba(167, 201, 87, 0.3);
+  padding: 2px 7px;
+  border-radius: 9999px;
+  margin-left: 4px;
+}
+
+/* Centered Company Name Wordmark in Header */
+.topbar-company-name-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-content: flex-end;
+}
+
+.avatar-stack {
+  display: flex;
+  align-items: center;
+  margin-right: 4px;
+}
+
+.avatar-bubble {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid #0d1120;
+  margin-left: -8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.avatar-bubble:first-child {
+  margin-left: 0;
+}
+
+.avatar-bubble.more-bubble {
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.icon-action-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-glass);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.icon-action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.notification-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d00000;
+  border: 1.5px solid #0d1120;
+}
+
+.user-profile-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.user-avatar-main {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #232733;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #ffffff;
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+}
