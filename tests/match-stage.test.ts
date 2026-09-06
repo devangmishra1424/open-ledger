@@ -16,12 +16,12 @@ let trustedVendorId: string;
 const poIds: string[] = [];
 const billIds: string[] = [];
 
-async function makePoWithLine(opts: { poNumber: string; status?: string; currency?: string; exchangeRate?: number; unitPrice: number; qtyOrdered: number; uom?: string }) {
+async function makePoWithLine(opts: { poNumber: string; status?: string; currency?: string; exchangeRate?: number; unitPrice: number; qtyOrdered: number; uom?: string; poType?: string; maxValueCeiling?: number; maxQtyCeiling?: number }) {
   const poId = crypto.randomUUID();
   poIds.push(poId);
   await sql`
-    INSERT INTO purchase_orders (id, po_number, vendor_id, order_date, status, currency, exchange_rate)
-    VALUES (${poId}, ${opts.poNumber}, ${vendorId}, '2026-08-01', ${opts.status ?? "open"}, ${opts.currency ?? "USD"}, ${opts.exchangeRate ?? 1.0})`;
+    INSERT INTO purchase_orders (id, po_number, vendor_id, order_date, status, currency, exchange_rate, po_type, max_value_ceiling, max_qty_ceiling)
+    VALUES (${poId}, ${opts.poNumber}, ${vendorId}, '2026-08-01', ${opts.status ?? "open"}, ${opts.currency ?? "USD"}, ${opts.exchangeRate ?? 1.0}, ${opts.poType ?? "standard"}, ${opts.maxValueCeiling ?? null}, ${opts.maxQtyCeiling ?? null})`;
   const lineId = crypto.randomUUID();
   await sql`
     INSERT INTO purchase_order_lines (id, po_id, line_number, description, uom, qty_ordered, unit_price)
@@ -193,5 +193,62 @@ describe("runMatchStage", () => {
     await addBillLine(bill2, { qty: 50, unitPrice: 10 });
     const r2 = await runMatchStage(bill2);
     expect(r2.findings.some((f) => f.code === "EXC-QTY_VAR")).toBe(true);
+  });
+
+  describe("EXC-BLANKET_EXCEEDED (ALGORITHMS.md §7, PO-header-level cumulative ceiling)", () => {
+    it("matches the spec's own worked example: $48,500 prior + $3,000 = $51,500 against a $50,000 ceiling (3% over) escalates L2", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-BLANKET-1", unitPrice: 1, qtyOrdered: 100000, poType: "blanket", maxValueCeiling: 50000 });
+      await acceptGoodsReceipt(poId, lineId, 100000);
+
+      const priorBill = await makeBill({ poId, invoiceNumber: PREFIX + "-BLANKET-PRIOR", totalAmount: 48500 });
+      await addBillLine(priorBill, { qty: 48500, unitPrice: 1 });
+      await runMatchStage(priorBill);
+      await sql`UPDATE vendor_bills SET status = 'approved' WHERE id = ${priorBill}`;
+
+      const currentBill = await makeBill({ poId, invoiceNumber: PREFIX + "-BLANKET-CURRENT", totalAmount: 3000 });
+      await addBillLine(currentBill, { qty: 3000, unitPrice: 1 });
+      const r = await runMatchStage(currentBill);
+      expect(r.findings.find((f) => f.code === "EXC-BLANKET_EXCEEDED")?.action).toBe("escalate_l2");
+    });
+
+    it("an overage beyond 10% of the ceiling blocks instead of escalating", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-BLANKET-2", unitPrice: 1, qtyOrdered: 100000, poType: "blanket", maxValueCeiling: 10000 });
+      await acceptGoodsReceipt(poId, lineId, 100000);
+
+      const bill = await makeBill({ poId, invoiceNumber: PREFIX + "-BLANKET-OVER", totalAmount: 12000 }); // 20% over
+      await addBillLine(bill, { qty: 12000, unitPrice: 1 });
+      const r = await runMatchStage(bill);
+      expect(r.findings.find((f) => f.code === "EXC-BLANKET_EXCEEDED")?.action).toBe("block");
+    });
+
+    it("staying within the ceiling raises no exception at all", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-BLANKET-3", unitPrice: 1, qtyOrdered: 100000, poType: "blanket", maxValueCeiling: 50000 });
+      await acceptGoodsReceipt(poId, lineId, 100000);
+
+      const bill = await makeBill({ poId, invoiceNumber: PREFIX + "-BLANKET-WITHIN", totalAmount: 40000 });
+      await addBillLine(bill, { qty: 40000, unitPrice: 1 });
+      const r = await runMatchStage(bill);
+      expect(r.findings.some((f) => f.code === "EXC-BLANKET_EXCEEDED")).toBe(false);
+    });
+
+    it("a standard (non-blanket) PO's max_value_ceiling, if ever set, is ignored — the check only applies to po_type='blanket'", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-BLANKET-4", unitPrice: 1, qtyOrdered: 100000, poType: "standard", maxValueCeiling: 100 });
+      await acceptGoodsReceipt(poId, lineId, 100000);
+
+      const bill = await makeBill({ poId, invoiceNumber: PREFIX + "-BLANKET-STANDARD", totalAmount: 5000 });
+      await addBillLine(bill, { qty: 5000, unitPrice: 1 });
+      const r = await runMatchStage(bill);
+      expect(r.findings.some((f) => f.code === "EXC-BLANKET_EXCEEDED")).toBe(false);
+    });
+
+    it("the quantity ceiling is checked independently of the value ceiling", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-BLANKET-5", unitPrice: 1, qtyOrdered: 100000, poType: "blanket", maxQtyCeiling: 1000 });
+      await acceptGoodsReceipt(poId, lineId, 100000);
+
+      const bill = await makeBill({ poId, invoiceNumber: PREFIX + "-BLANKET-QTY", totalAmount: 1100 });
+      await addBillLine(bill, { qty: 1100, unitPrice: 1 }); // 10% over the 1000-unit ceiling
+      const r = await runMatchStage(bill);
+      expect(r.findings.find((f) => f.code === "EXC-BLANKET_EXCEEDED")?.action).toBe("escalate_l2");
+    });
   });
 });

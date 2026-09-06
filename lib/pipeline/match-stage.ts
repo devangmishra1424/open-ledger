@@ -4,7 +4,7 @@ import { classifyDateGap } from "@/lib/matching/tolerance-zones";
 import { computePoLineFulfillment } from "@/lib/matching/partial-handling";
 import {
   evaluateNoPo, evaluateNonPo, evaluateBeforeReceipt, evaluatePriceVariance, evaluateQuantityVariance,
-  evaluateCurrency, combineExceptions, type ExceptionFinding, type CombinedDecision,
+  evaluateCurrency, evaluateBlanketExceeded, combineExceptions, type ExceptionFinding, type CombinedDecision,
 } from "@/lib/matching/decision-matrix";
 
 /**
@@ -12,8 +12,8 @@ import {
  * every exception finding from PO/GRN/invoice data and combines them via decision-matrix.ts.
  *
  * SCOPE, stated honestly rather than silently gapped: this covers EXC-NON_PO, EXC-NO_PO,
- * EXC-CURRENCY, EXC-BEFORE_RCV, EXC-PRICE_VAR, and EXC-QTY_VAR (6 of 14 taxonomy codes) —
- * the common, high-volume path. Quantity checking goes through
+ * EXC-CURRENCY, EXC-BEFORE_RCV, EXC-PRICE_VAR, EXC-QTY_VAR, and EXC-BLANKET_EXCEEDED (7 of 14
+ * taxonomy codes) — the common, high-volume path. Quantity checking goes through
  * lib/matching/partial-handling.ts's computePoLineFulfillment(), which tracks cumulative
  * received-vs-invoiced state per po_line_id ACROSS invoices (spec §1.6 A/B/C) — not just this
  * one invoice in isolation, so a second partial invoice against an already-partly-consumed
@@ -26,12 +26,11 @@ import {
  *   - EXC-CREDIT_MEMO: vendor_bills has no invoice_type flag distinguishing a credit memo
  *     from a standard bill, so there's no way to detect "this invoice IS a credit memo" from
  *     current schema at all. (EXC-PARTIAL itself IS handled — see above.)
- *   - EXC-BLANKET_EXCEEDED: needs a cumulative-consumption-to-date query across every prior
- *     invoice against a blanket PO — straightforward to add, just not done in this pass.
  *   - EXC-UOM_MISMATCH: needs a conversion-factor table that doesn't exist yet (ALGORITHMS.md
  *     §14's own resolution action assumes one gets built as a vendor_corrections extension).
  *   - EXC-FRAUD_BANK: has its own dedicated gated state machine (ALGORITHMS.md §6,
- *     vendor_bank_change_reviews) — a separate workflow, not a match-stage finding.
+ *     vendor_bank_change_reviews) — a separate workflow, not a match-stage finding. Wiring its
+ *     detection in here is a planned follow-up once lib/ledger/bank-change-review.ts lands.
  * Each of these has a ready evaluate*() function in decision-matrix.ts already — wiring them
  * in later is additive, not a rewrite.
  */
@@ -87,6 +86,10 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
 
   detail.poReference = po.po_number;
 
+  // Fetched here (rather than just before line-matching, where it's also used) because the
+  // blanket-PO quantity-ceiling check below needs this invoice's own line quantities too.
+  const billLineRows = await sql`SELECT * FROM vendor_bill_lines WHERE vendor_bill_id = ${bill.id}`;
+
   // Header-level currency: a literal currency mismatch, or the same currency at a different
   // exchange rate than the PO locked in. evaluateCurrency's `unsupported` param means "block,
   // no judgment" either way — a genuine currency mismatch is just as non-negotiable as an
@@ -98,6 +101,42 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
   } else if (bill.exchange_rate !== po.exchange_rate) {
     const rateVariancePct = Math.abs(bill.exchange_rate - po.exchange_rate) / po.exchange_rate;
     findings.push({ code: "EXC-CURRENCY", action: evaluateCurrency(false, rateVariancePct, bill.total_amount * rateVariancePct) });
+  }
+
+  // EXC-BLANKET_EXCEEDED (ALGORITHMS.md §7): a PO-header-level ceiling, not per-line — checked
+  // against CUMULATIVE consumption across every prior invoice against this whole PO, not just
+  // this one. Both the dollar and quantity ceilings use the same evaluateBlanketExceeded()
+  // severity function (spec doesn't distinguish overage-by-dollars from overage-by-units); both
+  // are checked independently when the PO has that ceiling set, and combineExceptions() below
+  // already picks the worse one via highest-severity-wins if both somehow fire together.
+  if (po.po_type === "blanket") {
+    if (po.max_value_ceiling != null) {
+      const priorValueRows = await sql`
+        SELECT COALESCE(SUM(vb.total_amount), 0) as prior
+        FROM vendor_bills vb WHERE vb.po_id = ${po.id} AND vb.id != ${bill.id}
+          AND vb.status NOT IN ('processing', 'exception', 'void')`;
+      const cumulativeValue = Number(priorValueRows[0]?.prior ?? 0) + bill.total_amount;
+      if (cumulativeValue > po.max_value_ceiling) {
+        const overagePct = (cumulativeValue - po.max_value_ceiling) / po.max_value_ceiling;
+        findings.push({ code: "EXC-BLANKET_EXCEEDED", action: evaluateBlanketExceeded(overagePct) });
+      }
+    }
+    if (po.max_qty_ceiling != null) {
+      const priorQtyRows = await sql`
+        SELECT COALESCE(SUM(vbl.qty_invoiced), 0) as prior
+        FROM vendor_bill_lines vbl
+        JOIN vendor_bills vb ON vb.id = vbl.vendor_bill_id
+        JOIN purchase_order_lines pol ON pol.id = vbl.po_line_id
+        WHERE pol.po_id = ${po.id} AND vb.id != ${bill.id}
+          AND vb.status NOT IN ('processing', 'exception', 'void')`;
+      const currentInvoiceQty = billLineRows.reduce((s: number, r: any) => s + r.qty_invoiced, 0);
+      const cumulativeQty = Number(priorQtyRows[0]?.prior ?? 0) + currentInvoiceQty;
+      if (cumulativeQty > po.max_qty_ceiling) {
+        const overagePct = (cumulativeQty - po.max_qty_ceiling) / po.max_qty_ceiling;
+        findings.push({ code: "EXC-BLANKET_EXCEEDED", action: evaluateBlanketExceeded(overagePct) });
+      }
+    }
+    detail.blanketPo = { maxValueCeiling: po.max_value_ceiling, maxQtyCeiling: po.max_qty_ceiling };
   }
 
   // EXC-BEFORE_RCV (header-level, spec §2 EXC-02): only fires when the condition is actually
@@ -118,7 +157,6 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
   }
 
   const poLineRows = await sql`SELECT * FROM purchase_order_lines WHERE po_id = ${po.id} ORDER BY line_number`;
-  const billLineRows = await sql`SELECT * FROM vendor_bill_lines WHERE vendor_bill_id = ${bill.id}`;
 
   const poLines: PoLineInput[] = poLineRows.map((r: any) => ({
     id: r.id, lineNumber: r.line_number, description: r.description, uom: r.uom, qtyOrdered: r.qty_ordered, unitPrice: r.unit_price,
