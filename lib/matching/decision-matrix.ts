@@ -58,7 +58,8 @@ function dollarThresholdAction(code: ExceptionCode, amountImpact: number): Actio
   return bands.over50000;
 }
 
-const DOLLAR_THRESHOLD_TABLE: Partial<Record<ExceptionCode, { upTo100: Action; upTo1000: Action; upTo10000: Action; upTo50000: Action; over50000: Action }>> = {
+/** Exported so lib/agent/tools.ts's get_policy tool can serialize the real table, not a duplicate of it. */
+export const DOLLAR_THRESHOLD_TABLE: Partial<Record<ExceptionCode, { upTo100: Action; upTo1000: Action; upTo10000: Action; upTo50000: Action; over50000: Action }>> = {
   "EXC-PRICE_VAR": { upTo100: "auto_approve", upTo1000: "escalate_l1", upTo10000: "escalate_l1", upTo50000: "escalate_l2", over50000: "block" },
   "EXC-QTY_VAR": { upTo100: "auto_approve", upTo1000: "escalate_l1", upTo10000: "escalate_l1", upTo50000: "escalate_l2", over50000: "block" },
   "EXC-TAX_VAR": { upTo100: "auto_approve", upTo1000: "escalate_l1", upTo10000: "escalate_l2", upTo50000: "block", over50000: "block" },
@@ -180,7 +181,8 @@ export interface ExceptionFinding {
  * "narrates" the decision when cascade-stop logic applies or severities tie; the invoice's
  * overall ACTION is otherwise just the highest-severity action among all findings (§4.1).
  */
-const PRECEDENCE_RANK: Record<ExceptionCode, number> = {
+/** Exported for the same reason as DOLLAR_THRESHOLD_TABLE above — get_policy's single source of truth. */
+export const PRECEDENCE_RANK: Record<ExceptionCode, number> = {
   "EXC-FRAUD_BANK": 1,
   "EXC-DUPLICATE": 2,
   "EXC-LAYOUT": 3,

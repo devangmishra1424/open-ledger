@@ -12,23 +12,23 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "next": "15.5.25",
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
-    "postgres": "3.4.9",
-    "openai": "4.79.1",
     "fast-json-stable-stringify": "2.1.0",
-    "munkres-js": "1.2.2"
+    "munkres-js": "1.2.2",
+    "next": "15.5.25",
+    "openai": "^7.10.0",
+    "postgres": "3.4.9",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
   },
   "devDependencies": {
-    "typescript": "5.7.3",
     "@types/node": "22.10.7",
     "@types/react": "19.0.7",
     "@types/react-dom": "19.0.3",
-    "tailwindcss": "3.4.17",
-    "postcss": "8.5.23",
     "autoprefixer": "10.4.20",
+    "postcss": "8.5.23",
+    "tailwindcss": "3.4.17",
     "tsx": "4.23.13",
+    "typescript": "5.7.3",
     "vitest": "3.2.7"
   },
   "overrides": {
