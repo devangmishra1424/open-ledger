@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import './SplitFlapText.css';
 
-const DEFAULT_WORDS = ['OPEN LEDGER', 'SYNC ONLINE', 'SIGNAL LIVE'];
+const DEFAULT_WORDS = ['VERIBOOK', 'SYNC ONLINE', 'SIGNAL LIVE'];
 
 const CHARSETS = {
   alpha: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
@@ -59,7 +59,7 @@ const usePrefersReducedMotion = () => {
 };
 
 const SplitFlapText = ({
-  words = ['OPEN LEDGER', 'SYNC ONLINE', 'SIGNAL LIVE'],
+  words = ['VERIBOOK', 'SYNC ONLINE', 'SIGNAL LIVE'],
   text,
   flipDuration = 0.12,
   stagger = 0.06,

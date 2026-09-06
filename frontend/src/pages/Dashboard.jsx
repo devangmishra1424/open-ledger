@@ -1,52 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import GlassCard from '../components/GlassCard';
 import SpecularButton from '../components/SpecularButton';
 import PixelTransition from '../components/PixelTransition';
 import Shuffle from '../components/Shuffle';
 import { LedgerSummaryWidget, PendingSealsWidget, ActivityWidget } from '../components/RightPanel';
-import { mockInvoices, mockPendingSeals } from '../data/mockData';
 import { api } from '../services/api';
-import { 
-  Plus, 
-  Filter, 
+import {
+  Plus,
+  Filter,
   ArrowRight,
   Sparkles,
-  Construction
+  Construction,
+  Upload
 } from 'lucide-react';
 import './Dashboard.css';
 
 const Dashboard = ({ onSelectInvoice }) => {
-  const [invoices, setInvoices] = useState(mockInvoices);
-  const [seals, setSeals] = useState(mockPendingSeals);
+  const [invoices, setInvoices] = useState([]);
+  const [seals, setSeals] = useState([]);
   const [allReviewed, setAllReviewed] = useState(false);
   const [statusFilter, setStatusFilter] = useState('All');
   const [priorityFilter, setPriorityFilter] = useState('All');
-  const [backlogCount, setBacklogCount] = useState(0);
+  const [isIngesting, setIsIngesting] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
-    // Fetch live data from backend with automatic mock fallback
-    api.getInvoices().then((data) => {
-      if (data && data.length > 0) setInvoices(data);
-    });
-    api.getPendingSeals().then((data) => {
-      if (data) setSeals(data);
-    });
+    let cancelled = false;
+    const fetchAll = () => {
+      api.getInvoices().then((data) => { if (!cancelled && data) setInvoices(data); });
+      api.getPendingSeals().then((data) => { if (!cancelled && data) setSeals(data); });
+    };
+    fetchAll();
+    const interval = setInterval(fetchAll, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
-
-  useEffect(() => {
-    let start = 0;
-    const end = invoices.length || 17;
-    const duration = 600;
-    const stepTime = Math.abs(Math.floor(duration / (end || 1)));
-    
-    const timer = setInterval(() => {
-      start += 1;
-      setBacklogCount(start);
-      if (start >= end) clearInterval(timer);
-    }, stepTime);
-
-    return () => clearInterval(timer);
-  }, [invoices]);
 
   const filteredInvoices = invoices.filter((inv) => {
     if (statusFilter !== 'All' && inv.status !== statusFilter) return false;
@@ -55,39 +42,65 @@ const Dashboard = ({ onSelectInvoice }) => {
   });
 
   const handleAddNewInvoice = async () => {
-    const newId = `INV-2024-0${855 + invoices.length}`;
-    const newInv = {
-      id: newId,
-      vendor: 'Nexus Dynamics',
-      vendorLogo: 'ND',
-      amount: 15400.00,
-      currency: 'USD',
-      terms: 'Net 30',
-      poNumber: `PO-2024-${1165 + invoices.length}`,
-      status: 'In Progress',
-      priority: 'High',
-      receivedDate: '2026-09-06',
-      dueDate: '2026-10-06',
-      progress: 25,
-      taxId: 'US-88192043',
-      confidenceScore: 92.5,
-      processedByAgents: ['Format Agent'],
-      riskFlags: [],
-      hash: '0x38d92a1049581a029e4821a94820194810293847',
-      items: [
-        { description: 'Cloud Edge Hosting Cluster', qty: 1, rate: 15400.00, amount: 15400.00 }
-      ]
-    };
-    await api.createInvoice(newInv);
-    setInvoices([newInv, ...invoices]);
-    alert(`Created new Invoice #${newId}! Format Agent initialized.`);
+    const vendor = window.prompt('Vendor name for the new invoice:', 'Acme Corp');
+    if (!vendor) return;
+    const amountStr = window.prompt('Invoice amount (USD):', '1000');
+    const amount = Number(amountStr);
+    if (!amountStr || Number.isNaN(amount) || amount <= 0) {
+      alert('Enter a valid positive amount.');
+      return;
+    }
+    const description = window.prompt('Line item description:', 'Services rendered') || 'Services rendered';
+
+    const created = await api.createInvoice({
+      vendor,
+      items: [{ description, qty: 1, rate: amount }],
+    });
+
+    if (created && created.id) {
+      setInvoices([created, ...invoices]);
+      alert(`Created invoice #${created.id} for ${vendor} — the real pipeline is now running against it.`);
+    } else {
+      alert('Could not create the invoice — the backend did not confirm it.');
+    }
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setIsIngesting(true);
+    try {
+      const rawText = await file.text();
+      const created = await api.ingestInvoice(rawText);
+      if (created && created.id) {
+        setInvoices([created, ...invoices]);
+        const conf = created.extraction?.confidence != null ? `${Math.round(created.extraction.confidence * 100)}%` : 'n/a';
+        alert(`Ingested "${file.name}" as invoice #${created.id} — Extraction Agent confidence: ${conf}. Real pipeline is now running against it.`);
+      } else {
+        alert(`Could not ingest "${file.name}" — the backend did not confirm it.`);
+      }
+    } catch (err) {
+      alert(`Could not read or ingest "${file.name}": ${err.message}`);
+    } finally {
+      setIsIngesting(false);
+    }
   };
 
   const handleSealAll = async () => {
     if (seals.length === 0) return;
-    await api.sealAllInvoices();
-    alert(`Successfully committed cryptographic seal for ${seals.length} invoices! Hash verified on-chain.`);
-    setSeals([]);
+    const result = await api.sealAllInvoices();
+    if (result?.success) {
+      alert(`Chain integrity verified for all ${result.sealedCount} pending invoice(s).`);
+      setSeals([]);
+    } else {
+      alert(`Seal check failed for ${result?.failedIds?.length ?? 'some'} invoice(s) — chain is broken.`);
+    }
   };
 
   const handleMarkReviewed = async () => {
@@ -132,7 +145,8 @@ const Dashboard = ({ onSelectInvoice }) => {
           <div className="dashboard-hero-header">
             <h1 className="hero-headline-compact">
               <Shuffle
-                text={`${backlogCount || 17} INVOICES`}
+                key={invoices.length}
+                text={`${invoices.length} INVOICES`}
                 shuffleDirection="right"
                 duration={0.35}
                 animationMode="evenodd"
@@ -180,6 +194,23 @@ const Dashboard = ({ onSelectInvoice }) => {
                   <span>Filters</span>
                 </button>
               </div>
+
+              <input
+                type="file"
+                accept=".txt,text/plain"
+                ref={fileInputRef}
+                style={{ display: 'none' }}
+                onChange={handleFileSelected}
+              />
+              <button
+                className="btn-glass"
+                style={{ fontSize: '12px', padding: '6px 14px', fontWeight: 600 }}
+                onClick={handleUploadClick}
+                disabled={isIngesting}
+              >
+                <Upload size={14} />
+                <span>{isIngesting ? 'Extracting…' : 'Upload Invoice'}</span>
+              </button>
 
               <SpecularButton
                 size="md"

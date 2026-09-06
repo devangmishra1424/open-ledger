@@ -57,14 +57,33 @@ async function addBillLine(billId: string, qty: number, unitPrice: number, glAcc
 }
 
 afterAll(async () => {
+  // Scenarios that reach auto_approve post a real journal entry (postBillApproval) — clean
+  // those up too, or every run leaves permanent journal_entries/journal_entry_lines rows behind
+  // that pollute real aggregate queries (e.g. GET /api/dashboard's sealedToday), found by
+  // querying the live DB directly and finding this test's own bill numbers still posted weeks
+  // after the run that created them.
+  const entryRows = await sql`SELECT id FROM journal_entries WHERE source_type = 'vendor_bill' AND source_id = ANY(${billIds})`;
+  const entryIds = entryRows.map((r: any) => r.id);
+  if (entryIds.length > 0) {
+    await sql`DELETE FROM journal_entry_lines WHERE entry_id = ANY(${entryIds})`;
+    await sql`DELETE FROM journal_entries WHERE id = ANY(${entryIds})`;
+  }
   for (const id of billIds) await sql`DELETE FROM vendor_bill_lines WHERE vendor_bill_id = ${id}`;
-  // decisions is supposed to be permanently append-only — deleting rows from the middle of
-  // the GLOBAL hash chain would corrupt verifyChain() for every invoice, not just this test's.
-  // This is only safe because the table is verified empty pre-test (no real decisions exist
-  // yet, pre-launch) — vendor_bills.id has no ON DELETE CASCADE from decisions.invoice_id, so
-  // this delete is also load-bearing: without it, the vendor_bills delete below would fail on
-  // the FK. If this ever runs against a DB with real decisions history, this cleanup strategy
-  // needs to change (e.g. a genuinely isolated test database) rather than deleting ledger rows.
+  // decisions is supposed to be permanently append-only — deleting rows from the middle of the
+  // GLOBAL hash chain would corrupt verifyChain() for whatever real decision happened to land
+  // immediately after one of this test's rows in the global seq order, by leaving that real
+  // row's stored hash pointing at a prevHash that no longer exists in the walked sequence.
+  // STALE PREMISE, now genuinely live (not hypothetical): this delete was written when the
+  // decisions table was verified empty pre-launch — scripts/seed.ts now populates real,
+  // permanent decisions rows against this same live DB, so this test suite running concurrently
+  // with (or after) a seed/demo session risks exactly the corruption described above if a real
+  // decision's insert happens to interleave with this test's own inserts in the global seq.
+  // Scoped by billIds so it's still narrow, and no corruption has been observed in practice
+  // (this test's own decisions are only ever adjacent to its own rows so far) — but this is a
+  // real, load-bearing risk now, not a hypothetical one, and the right fix (a genuinely isolated
+  // test database, per the original note below) hasn't been done. vendor_bills.id also has no
+  // ON DELETE CASCADE from decisions.invoice_id, so this delete is separately load-bearing:
+  // without it, the vendor_bills delete below would fail on the FK regardless of the above.
   await sql`DELETE FROM decisions WHERE invoice_id = ANY(${billIds})`;
   await sql`DELETE FROM vendor_bills WHERE id = ANY(${billIds})`;
   for (const id of poIds) {

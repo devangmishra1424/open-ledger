@@ -9,21 +9,28 @@ import {
   Clock, 
   ArrowRight
 } from 'lucide-react';
-import { mockLedgerSummary, mockPendingSeals } from '../data/mockData';
 import { api } from '../services/api';
 import './RightPanel.css';
 
 export const LedgerSummaryWidget = ({ allReviewed, onMarkReviewed, summary: propSummary }) => {
-  const [summary, setSummary] = useState(propSummary || mockLedgerSummary);
+  const [summary, setSummary] = useState(propSummary || null);
 
   useEffect(() => {
     if (propSummary) {
       setSummary(propSummary);
-    } else {
-      api.getDashboardSummary().then((data) => {
-        if (data) setSummary(data);
-      });
+      return;
     }
+    // Polls rather than a single one-shot fetch: a single attempt that lands during a slow
+    // dev-server route compile, or while this component happens to be mid-remount, silently
+    // never updates the UI again — found by watching this widget stay stuck on stale fallback
+    // numbers indefinitely on a real page load despite the backend being fully healthy.
+    let cancelled = false;
+    const fetchSummary = () => api.getDashboardSummary().then((data) => {
+      if (!cancelled && data) setSummary(data);
+    });
+    fetchSummary();
+    const interval = setInterval(fetchSummary, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [propSummary]);
 
   return (
@@ -122,17 +129,21 @@ export const PendingSealsWidget = ({ seals, onSealAll }) => {
 };
 
 export const ActivityWidget = ({ onNavigateToInvoices, summary: propSummary }) => {
-  const [summary, setSummary] = useState(propSummary || mockLedgerSummary);
+  const [summary, setSummary] = useState(propSummary || null);
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   useEffect(() => {
     if (propSummary) {
       setSummary(propSummary);
-    } else {
-      api.getDashboardSummary().then((data) => {
-        if (data) setSummary(data);
-      });
+      return;
     }
+    let cancelled = false;
+    const fetchSummary = () => api.getDashboardSummary().then((data) => {
+      if (!cancelled && data) setSummary(data);
+    });
+    fetchSummary();
+    const interval = setInterval(fetchSummary, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [propSummary]);
 
   return (
@@ -189,20 +200,28 @@ export const ActivityWidget = ({ onNavigateToInvoices, summary: propSummary }) =
 };
 
 const RightPanel = ({ onNavigateToInvoices }) => {
-  const [seals, setSeals] = useState(mockPendingSeals);
+  const [seals, setSeals] = useState([]);
   const [allReviewed, setAllReviewed] = useState(false);
 
   useEffect(() => {
-    api.getPendingSeals().then((data) => {
-      if (data) setSeals(data);
+    let cancelled = false;
+    const fetchSeals = () => api.getPendingSeals().then((data) => {
+      if (!cancelled && data) setSeals(data);
     });
+    fetchSeals();
+    const interval = setInterval(fetchSeals, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   const handleSealAll = async () => {
     if (seals.length === 0) return;
-    await api.sealAllInvoices();
-    alert(`Successfully committed cryptographic seal for ${seals.length} invoices! Hash verified on-chain.`);
-    setSeals([]);
+    const result = await api.sealAllInvoices();
+    if (result?.success) {
+      alert(`Chain integrity verified for all ${result.sealedCount} pending invoice(s).`);
+      setSeals([]);
+    } else {
+      alert(`Seal check failed for ${result?.failedIds?.length ?? 'some'} invoice(s) — chain is broken.`);
+    }
   };
 
   const handleMarkReviewed = async () => {

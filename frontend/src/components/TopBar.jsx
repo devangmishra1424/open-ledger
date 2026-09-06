@@ -17,7 +17,7 @@ const TopBar = () => {
       {/* Column 2: Centered Company Name Wordmark */}
       <div className="topbar-company-name-center">
         <SplitFlapText
-          words={['OPEN LEDGER', 'AGENT MATRIX']}
+          words={['VERIBOOK', 'AGENT MATRIX']}
           cycleDelay={3200}
           fontSize={26}
           tileRadius={7}

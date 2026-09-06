@@ -212,7 +212,8 @@
   padding: 10px 16px;
   height: 100%;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .flow-header-row {
@@ -233,12 +234,15 @@
 }
 
 .vertical-chain-stage {
-  flex: 1;
+  flex: 1 0 auto;
   position: relative;
   width: 100%;
   max-width: 460px;
   margin: 0 auto;
-  height: 100%;
+  /* min-height is set inline per real stage count (InvoiceDetail.jsx) — a fixed 100% here
+     clipped the last node(s) whenever a real invoice had more than the ~5 stages this layout
+     was originally tuned for (found on a real 7-stage invoice, last node cut off at the
+     viewport edge with no way to scroll to it). */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -298,28 +302,21 @@
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Horizontal placement only — vertical `top` is set inline per node (InvoiceDetail.jsx),
+   computed from the node's index against however many real decision stages this invoice
+   actually has, rather than hardcoded for a fixed count of 5. A fixed 5-position CSS table
+   here previously left any 6th+ node with no position at all once the swimlane switched from
+   5 fake agents to the real (often 7-stage) decision trail — found from a real screenshot
+   showing nodes stacked on top of each other. */
 .dark-agent-node-v2.pos-left {
-  top: 15px;
   left: 30px;
 }
 
-.dark-agent-node-v2:nth-child(2).pos-right {
-  top: 120px;
+.dark-agent-node-v2.pos-right {
   right: 30px;
 }
 
-.dark-agent-node-v2:nth-child(3).pos-left {
-  top: 220px;
-  left: 30px;
-}
-
-.dark-agent-node-v2:nth-child(4).pos-right {
-  top: 320px;
-  right: 30px;
-}
-
-.dark-agent-node-v2:nth-child(5).pos-center {
-  top: 415px;
+.dark-agent-node-v2.pos-center {
   left: 50%;
   transform: translateX(-50%);
 }

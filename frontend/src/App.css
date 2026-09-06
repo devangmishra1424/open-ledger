@@ -1,15 +1,18 @@
-/* App Root Layout: Fixed Viewport Layout without Page Scrollbar */
+/* App Root Layout: fills the viewport when content fits; scrolls instead of clipping when a
+   browser zoom level makes the inner shell taller than the viewport (found by testing at
+   several zoom levels — content was getting cut off, not reflowing, at anything other than
+   the one zoom level this was originally tuned at). */
 .app-root-layout {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
+  min-height: 100vh;
   width: 100vw;
   position: relative;
   z-index: 1;
   padding: 12px;
   box-sizing: border-box;
-  overflow: hidden !important;
+  overflow: auto;
 }
 
 /* Master Glassmorphic Shell wrapping all components inside one big glass box per wireframe */
@@ -19,8 +22,8 @@
   column-gap: 20px;
   width: 95vw;
   max-width: 95vw;
+  min-height: calc(100vh - 24px);
   height: calc(100vh - 24px);
-  max-height: calc(100vh - 24px);
   background: rgba(13, 17, 32, 0.42);
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
@@ -70,18 +73,40 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* Was `overflow: hidden` — fine for Dashboard/InvoiceQueue, which build their own internal
+     scroll region, but any page that just renders a plain card grid directly (Agents,
+     Settings, Ecosystem) had no way to reach content taller than the viewport at all — found
+     live on the Agents page with real cards clipped at the bottom, no scrollbar anywhere.
+     auto here is a safe fallback: pages with their own inner scroll container still scroll
+     there first since it has its own explicit height. */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 @media (max-width: 1280px) {
   .master-glass-shell {
     grid-template-columns: 72px 1fr;
   }
+  /* Stacking the two columns without also letting them size to their own content meant
+     .app-page-main (whatever page you're on) and the right-hand widgets column were still
+     splitting one fixed shared height — when the widgets column's natural content was tall
+     enough, the page's own main content collapsed to ~0 height and effectively vanished
+     (found on a real screenshot of the Ecosystem page showing only the widgets column,
+     nothing above it, no matter how far up the page was scrolled). auto height + visible
+     overflow on both lets each size to its own content and the outer container scroll instead. */
   .app-content-columns {
     flex-direction: column;
+    height: auto;
     overflow-y: auto;
   }
+  .app-page-main {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    flex: none;
+  }
   .right-panel-container {
+    height: auto;
     width: 100%;
     min-width: 100%;
   }

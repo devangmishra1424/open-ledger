@@ -60,7 +60,7 @@ const Sidebar = ({ onHoverChange, title = 'Dashboard' }) => {
             <span className="status-badge-text">All 5 Agents Online</span>
           </div>
 
-          <button className="logout-button" onClick={() => alert('Logged out of Open Ledger session.')} title="Log Out">
+          <button className="logout-button" onClick={() => alert('Logged out of VeriBook session.')} title="Log Out">
             <LogOut size={16} style={{ flexShrink: 0 }} />
             <span className="logout-label-text">Log Out</span>
           </button>

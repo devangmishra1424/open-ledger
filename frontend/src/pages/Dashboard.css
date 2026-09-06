@@ -228,10 +228,22 @@
 }
 
 @media (max-width: 1180px) {
+  /* Stacking to one column without also fixing row sizing left both sections splitting the
+     available height equally (CSS grid's default auto-row behavior) — the invoice list needs
+     far more room than that, so it was rendering at ~0 usable height and looking "empty" or
+     "missing" below the fold. Found on a real narrow-viewport screenshot, not by inspection. */
   .dashboard-grid-layout {
     grid-template-columns: 1fr;
+    grid-auto-rows: min-content;
+    align-content: start;
+    height: auto;
+    min-height: 100%;
+    overflow-y: auto;
   }
+  .dashboard-middle-column,
   .dashboard-right-column {
     width: 100%;
+    height: auto;
+    overflow: visible;
   }
 }

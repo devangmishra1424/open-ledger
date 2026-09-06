@@ -1,28 +1,54 @@
 import React, { useState, useEffect } from 'react';
 import GlassCard from '../components/GlassCard';
-import { mockInvoices } from '../data/mockData';
 import { api } from '../services/api';
 import { Search, Filter, ArrowRight, Lock, CheckCircle2 } from 'lucide-react';
 import './InvoiceQueue.css';
 
 const InvoiceQueue = ({ onSelectInvoice }) => {
-  const [invoices, setInvoices] = useState(mockInvoices);
+  const [invoices, setInvoices] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [tab, setTab] = useState('All');
 
   useEffect(() => {
-    api.getInvoices().then((data) => {
-      if (data && data.length > 0) setInvoices(data);
+    let cancelled = false;
+    const fetchInvoices = () => api.getInvoices().then((data) => {
+      if (!cancelled && data) setInvoices(data);
     });
+    fetchInvoices();
+    const interval = setInterval(fetchInvoices, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   const filtered = invoices.filter((inv) => {
-    const matchesSearch = inv.vendor?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesSearch = inv.vendor?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           inv.id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           inv.poNumber?.toLowerCase().includes(searchTerm.toLowerCase());
     if (tab === 'All') return matchesSearch;
     return matchesSearch && inv.status === tab;
   });
+
+  const handleExportCsv = () => {
+    if (filtered.length === 0) {
+      alert('No invoices in the current view to export.');
+      return;
+    }
+    const headers = ['Invoice ID', 'Vendor', 'PO Number', 'Amount', 'Status', 'Progress %', 'Due Date', 'Risk Flags'];
+    const rows = filtered.map((inv) => [
+      inv.id, inv.vendor, inv.poNumber, inv.amount, inv.status, inv.progress, inv.dueDate,
+      (inv.riskFlags ?? []).join('; '),
+    ]);
+    const csv = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `veribook-invoices-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="invoice-queue-container">
@@ -46,7 +72,7 @@ const InvoiceQueue = ({ onSelectInvoice }) => {
               />
             </div>
 
-            <button className="btn-primary" onClick={() => alert('Exporting Accounts Payable report CSV...')}>
+            <button className="btn-primary" onClick={handleExportCsv}>
               <span>Export CSV</span>
             </button>
           </div>

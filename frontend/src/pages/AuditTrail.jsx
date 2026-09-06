@@ -1,34 +1,81 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import GlassCard from '../components/GlassCard';
-import { 
-  ShieldCheck, 
-  CheckCircle2, 
-  Construction, 
-  FileSearch, 
-  Tag, 
-  Check, 
-  CheckSquare
+import {
+  ShieldCheck,
+  CheckCircle2,
+  Construction,
+  FileSearch,
+  Tag,
+  Check,
+  CheckSquare,
+  Paperclip,
+  FileText
 } from 'lucide-react';
-import { mockPbcRequests, mockEvidenceRecords } from '../data/mockData';
 import { api } from '../services/api';
 import './AuditTrail.css';
 
 const AuditTrail = () => {
-  const [requests, setRequests] = useState(mockPbcRequests);
-  const [evidenceRecords, setEvidenceRecords] = useState(mockEvidenceRecords);
-  const [selectedRequestId, setSelectedRequestId] = useState('PBC-2026-001');
+  const [requests, setRequests] = useState([]);
+  const [evidenceRecords, setEvidenceRecords] = useState([]);
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
   const [tieOutFilter, setTieOutFilter] = useState('All');
   const [tagFilter, setTagFilter] = useState('All');
   const [minAmountFilter, setMinAmountFilter] = useState(0);
+  const [evidenceFiles, setEvidenceFiles] = useState([]);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [chainVerified, setChainVerified] = useState(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
-    api.getPbcRequests().then((data) => {
-      if (data && data.length > 0) setRequests(data);
-    });
-    api.getEvidenceRecords().then((data) => {
-      if (data && data.length > 0) setEvidenceRecords(data);
-    });
+    let cancelled = false;
+    const fetchAll = () => {
+      api.getPbcRequests().then((data) => {
+        if (cancelled || !data) return;
+        setRequests(data);
+        if (data.length > 0) setSelectedRequestId((current) => current ?? data[0].request_id);
+      });
+      api.getEvidenceRecords().then((data) => { if (!cancelled && data) setEvidenceRecords(data); });
+      api.verifyChain().then((data) => { if (!cancelled && data) setChainVerified(data.valid); });
+    };
+    fetchAll();
+    const interval = setInterval(fetchAll, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
+
+  useEffect(() => {
+    if (!selectedRequestId) return;
+    api.getEvidenceFiles(selectedRequestId).then((data) => setEvidenceFiles(data ?? []));
+  }, [selectedRequestId]);
+
+  const handleAttachFileClick = () => fileInputRef.current?.click();
+
+  const handleFileSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !selectedRequestId) return;
+
+    setIsUploadingFile(true);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const contentBase64 = dataUrl.split(',')[1] ?? '';
+      const result = await api.uploadEvidenceFile(selectedRequestId, file.name, contentBase64, file.type);
+      if (result?.success) {
+        const files = await api.getEvidenceFiles(selectedRequestId);
+        setEvidenceFiles(files ?? []);
+      } else {
+        alert(`Could not attach "${file.name}" — the backend did not confirm it.`);
+      }
+    } catch (err) {
+      alert(`Could not read "${file.name}": ${err.message}`);
+    } finally {
+      setIsUploadingFile(false);
+    }
+  };
 
   const selectedRequest = requests.find(r => r.request_id === selectedRequestId) || requests[0] || {};
 
@@ -42,9 +89,29 @@ const AuditTrail = () => {
   });
 
   const handleCloseRequest = async (reqId) => {
-    await api.closePbcRequest(reqId);
-    setRequests(prev => prev.map(r => r.request_id === reqId ? { ...r, status: 'closed' } : r));
-    alert(`PBC Request #${reqId} closed and committed to auditor attestation log!`);
+    const result = await api.closePbcRequest(reqId);
+    if (result?.success) {
+      setRequests(prev => prev.map(r => r.request_id === reqId ? { ...r, status: 'closed' } : r));
+      alert(`PBC Request #${reqId} closed.`);
+    } else {
+      alert(`Could not close PBC Request #${reqId}.`);
+    }
+  };
+
+  const handleCreateRequest = async () => {
+    const description = window.prompt('What is this auditor request for?', 'Q4 Vendor Invoice Sample');
+    if (!description) return;
+    const requestedBy = window.prompt('Requested by (auditor / team name):', 'Internal Audit') || 'Internal Audit';
+
+    const result = await api.createPbcRequest({ description, requestedBy, itemType: 'invoice_bundle' });
+    if (result?.success && result.id) {
+      const fresh = await api.getPbcRequests();
+      if (fresh) setRequests(fresh);
+      setSelectedRequestId(result.id);
+      alert(`Created PBC Request #${result.id}.`);
+    } else {
+      alert('Could not create the request — the backend did not confirm it.');
+    }
   };
 
   const getTieOutChip = (status) => {
@@ -82,11 +149,14 @@ const AuditTrail = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span className="status-chip review font-mono" style={{ padding: '6px 12px' }}>
               <Construction size={13} color="#ffd60a" />
-              4 PBC Requests Active
+              {requests.filter(r => r.status !== 'closed').length} PBC Requests Active
             </span>
-            <span className="status-chip clean font-mono" style={{ padding: '6px 12px' }}>
-              Block #19,284,019 Sealed
+            <span className={`status-chip ${chainVerified === false ? 'blocked' : 'clean'} font-mono`} style={{ padding: '6px 12px' }}>
+              {chainVerified === null ? 'Checking chain…' : chainVerified ? 'Hash Chain Verified ✓' : 'Chain Integrity Broken ⚠️'}
             </span>
+            <button className="btn-primary" style={{ fontSize: '12.5px', padding: '8px 14px' }} onClick={handleCreateRequest}>
+              <span>+ New PBC Request</span>
+            </button>
           </div>
         </div>
       </GlassCard>
@@ -134,8 +204,24 @@ const AuditTrail = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: 'none' }}
+              onChange={handleFileSelected}
+            />
+            <button
+              className="btn-glass"
+              style={{ fontSize: '12.5px', padding: '8px 14px' }}
+              onClick={handleAttachFileClick}
+              disabled={isUploadingFile}
+            >
+              <Paperclip size={14} />
+              <span>{isUploadingFile ? 'Uploading…' : 'Attach Audit File'}</span>
+            </button>
+
             {selectedRequest.status !== 'closed' ? (
-              <button 
+              <button
                 className="btn-primary"
                 onClick={() => handleCloseRequest(selectedRequest.request_id)}
               >
@@ -150,6 +236,22 @@ const AuditTrail = () => {
             )}
           </div>
         </div>
+
+        {evidenceFiles.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '-4px' }}>
+            {evidenceFiles.map((f) => (
+              <span
+                key={f.id}
+                className="status-chip review font-mono"
+                style={{ fontSize: '11px', padding: '4px 10px' }}
+                title={`Uploaded ${f.uploadedAt} by ${f.uploadedBy}`}
+              >
+                <FileText size={12} />
+                {f.filename}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Structured Query Filters over EvidenceRecord schema (Item 1e) */}
         <div className="pbc-filter-bar">

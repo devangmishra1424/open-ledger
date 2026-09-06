@@ -1,102 +1,88 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import GlassCard from '../components/GlassCard';
 import { api } from '../services/api';
-import { 
-  ArrowLeft, 
-  CheckCircle2, 
-  ShieldCheck, 
-  FileSearch, 
-  ThumbsUp, 
-  RotateCcw, 
+import {
+  ArrowLeft,
+  CheckCircle2,
+  ShieldCheck,
+  FileSearch,
+  ThumbsUp,
+  RotateCcw,
   XCircle,
   Copy,
   Check,
   Bot,
-  Construction
+  Construction,
+  ClipboardCheck,
+  GitCompare,
+  Scale,
+  HelpCircle
 } from 'lucide-react';
 import './InvoiceDetail.css';
 
+const NODE_ICONS = {
+  extract: FileSearch,
+  validate: ClipboardCheck,
+  match: GitCompare,
+  investigate: ShieldCheck,
+  verify: Bot,
+  policy: Scale,
+  audit: CheckCircle2,
+};
+
 const InvoiceDetail = ({ invoice, onBack }) => {
+  const { id: routeId } = useParams();
+  const [inv, setInv] = useState(invoice ?? null);
   const [activePopoverNode, setActivePopoverNode] = useState(null);
   const [streamedText, setStreamedText] = useState('');
+  const [isExplainLoading, setIsExplainLoading] = useState(false);
   const [isSealed, setIsSealed] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [invoiceStatus, setInvoiceStatus] = useState(invoice?.status || 'In Review');
-  
-  // Real-time simulated SSE agent execution step progress (1..5)
+
+  // Reveals real, already-recorded decision nodes one at a time — a presentation animation
+  // over real history, not a simulated live run (this invoice already finished processing).
   const [completedStepCount, setCompletedStepCount] = useState(1);
   const [segments, setSegments] = useState([]);
 
   const containerRef = useRef(null);
   const nodeRefs = useRef([]);
 
-  const inv = invoice || {
-    id: 'INV-2024-0847',
-    vendor: 'Acme Corp',
-    amount: 12450.00,
-    terms: 'Net 30',
-    poNumber: 'PO-2024-1138',
-    receivedDate: '2026-09-04',
-    dueDate: '2026-10-04',
-    taxId: 'US-94820193',
-    hash: '0x38d92a1049581a029e4821a94820194810293847'
-  };
+  const targetId = invoice?.id ?? routeId;
 
-  const rawAgentNodes = [
-    {
-      id: 'format',
-      title: 'Format Agent',
-      icon: FileSearch,
-      confidence: '99.6%',
-      explanation: 'Format Agent extracted all 4 header parameters and 2 table items with 99.6% visual OCR confidence using Vision-LLM 2.4.'
-    },
-    {
-      id: 'duplicate',
-      title: 'Duplicate Agent',
-      icon: Copy,
-      confidence: '100%',
-      explanation: 'Duplicate Agent queried 14,200 historical ledger records. No matching hash or PO/Amount collision was detected.'
-    },
-    {
-      id: 'fraud',
-      title: 'Fraud Agent',
-      icon: ShieldCheck,
-      confidence: inv.status === 'Blocked' ? '68.5%' : '98.9%',
-      explanation: inv.status === 'Blocked' 
-        ? 'ALERT: Fraud Agent detected a new bank account routing number that has not been whitelisted by Acme Corp procurement.'
-        : 'Bank routing number matched Acme Corp primary JP Morgan Chase operating account.'
-    },
-    {
-      id: 'compliance',
-      title: 'Compliance Agent',
-      icon: CheckCircle2,
-      confidence: inv.status === 'Blocked' ? 'Pending' : '99.2%',
-      explanation: 'Compliance Agent cross-referenced Purchase Order PO-2024-1138 and verified tax exemption ID US-94820193.'
-    },
-    {
-      id: 'manager',
-      title: 'Manager Agent',
-      icon: Bot,
-      confidence: '99.8%',
-      explanation: 'Manager Agent aggregated all 4 agent attestations and generated SHA-256 Merkle root seal.'
-    }
-  ];
+  useEffect(() => {
+    if (!targetId) return;
+    api.getInvoiceById(targetId).then((data) => {
+      if (data) {
+        setInv(data);
+        setInvoiceStatus(data.status);
+      }
+    });
+  }, [targetId]);
 
-  // Item 2c: Simulated SSE real-time agent execution pipeline sequence
+  const rawAgentNodes = (inv?.decisions ?? []).map((d) => ({
+    id: d.id,
+    decisionId: d.id,
+    title: d.label,
+    icon: NODE_ICONS[d.nodeId] ?? HelpCircle,
+    confidence: d.confidence != null ? `${d.confidence}%` : (d.actionTaken ?? '—'),
+    reasonCode: d.reasonCode,
+    actionTaken: d.actionTaken,
+  }));
+
+  // Reveals the real, already-recorded decision nodes one at a time as a presentation
+  // animation — this invoice already finished processing, so there is nothing to simulate;
+  // the count itself (rawAgentNodes.length) is entirely real.
   useEffect(() => {
     setCompletedStepCount(1);
-    const t1 = setTimeout(() => setCompletedStepCount(2), 700);
-    const t2 = setTimeout(() => setCompletedStepCount(3), 1400);
-    const t3 = setTimeout(() => setCompletedStepCount(4), 2100);
-    const t4 = setTimeout(() => setCompletedStepCount(5), 2800);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-      clearTimeout(t4);
-    };
-  }, [invoice]);
+    const total = rawAgentNodes.length || 1;
+    const timers = [];
+    for (let step = 2; step <= total; step++) {
+      timers.push(setTimeout(() => setCompletedStepCount(step), (step - 1) * 250));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [inv?.id, rawAgentNodes.length]);
 
   // Item 2a, 2b & Monitor Screen Fix: Calculate exact SVG path coordinates from node DOM bounding rects
   const calculatePaths = () => {
@@ -157,17 +143,18 @@ const InvoiceDetail = ({ invoice, onBack }) => {
     const node = rawAgentNodes.find(n => n.id === activePopoverNode);
     if (!node) return;
 
-    const fullText = node.explanation;
-    let currentIdx = 0;
+    let cancelled = false;
     setStreamedText('');
+    setIsExplainLoading(true);
+    const question = `Why did the ${node.title} stage reach action "${node.actionTaken ?? 'this outcome'}"${node.reasonCode ? ` (${node.reasonCode})` : ''}?`;
 
-    const interval = setInterval(() => {
-      currentIdx += 2;
-      setStreamedText(fullText.slice(0, currentIdx));
-      if (currentIdx >= fullText.length) clearInterval(interval);
-    }, 20);
+    api.explainInvoice(inv.id, question, node.decisionId).then((result) => {
+      if (cancelled) return;
+      setIsExplainLoading(false);
+      setStreamedText(result?.answer ?? 'No explanation was returned.');
+    });
 
-    return () => clearInterval(interval);
+    return () => { cancelled = true; };
   }, [activePopoverNode]);
 
   const handleCopyHash = () => {
@@ -177,30 +164,63 @@ const InvoiceDetail = ({ invoice, onBack }) => {
   };
 
   const handleSealNow = async () => {
-    await api.sealInvoice(inv.id);
-    setIsSealed(true);
-    setInvoiceStatus('Clean');
-    alert('Cryptographic seal committed to Ethereum L2 / Open Ledger block #19,284,019!');
+    const result = await api.sealInvoice(inv.id);
+    if (result?.success) {
+      setIsSealed(true);
+      alert(`Chain integrity verified across ${result.decisionsVerified} decision(s). Hash: ${result.hash?.slice(0, 16)}...`);
+    } else {
+      alert(`Seal check failed — the hash chain is broken${result?.brokenAt ? ` at decision ${result.brokenAt}` : ''}.`);
+    }
   };
 
   const handleApprove = async () => {
-    await api.approveInvoice(inv.id);
-    setInvoiceStatus('Clean');
-    setIsSealed(true);
-    alert(`Invoice #${inv.id} approved for payment processing!`);
+    const result = await api.approveInvoice(inv.id);
+    if (result?.success && result.invoice) {
+      setInv(result.invoice);
+      setInvoiceStatus(result.invoice.status);
+      alert(`Invoice #${inv.id} approved and posted.`);
+    } else {
+      alert(`Could not approve invoice #${inv.id}${result?.error ? `: ${result.error}` : ''}.`);
+    }
   };
 
   const handleContest = async () => {
-    await api.contestInvoice(inv.id, 'User flagged for manual audit review');
-    setInvoiceStatus('In Review');
-    alert(`Invoice #${inv.id} flagged as contested.`);
+    const result = await api.contestInvoice(inv.id, 'User flagged for manual audit review');
+    if (result?.success && result.invoice) {
+      setInv(result.invoice);
+      setInvoiceStatus(result.invoice.status);
+      alert(result.reconsider?.escalatedToSenior
+        ? `Invoice #${inv.id} contested — escalated to a senior reviewer.`
+        : `Invoice #${inv.id} contested — reconsideration re-ran the pipeline.`);
+    } else {
+      alert(`Could not contest invoice #${inv.id}.`);
+    }
   };
 
   const handleReject = async () => {
-    await api.rejectInvoice(inv.id, 'User rejected invoice authorization');
-    setInvoiceStatus('Blocked');
-    alert(`Invoice #${inv.id} rejected.`);
+    const result = await api.rejectInvoice(inv.id, 'User rejected invoice authorization');
+    if (result?.success && result.invoice) {
+      setInv(result.invoice);
+      setInvoiceStatus(result.invoice.status);
+      alert(`Invoice #${inv.id} rejected.`);
+    } else {
+      alert(`Could not reject invoice #${inv.id}.`);
+    }
   };
+
+  if (!inv) {
+    return (
+      <div className="invoice-detail-page-grid">
+        <GlassCard className="detail-summary-column-card inner-dark-card">
+          <button className="btn-glass back-btn-compact" onClick={onBack}>
+            <ArrowLeft size={14} />
+            <span>Back to Dashboard</span>
+          </button>
+          <p style={{ padding: '24px', color: 'var(--text-muted)' }}>Loading invoice…</p>
+        </GlassCard>
+      </div>
+    );
+  }
 
   return (
     <div className="invoice-detail-page-grid">
@@ -302,12 +322,14 @@ const InvoiceDetail = ({ invoice, onBack }) => {
             <span>Autonomous Agent Execution Chain</span>
           </div>
           <span className="status-chip clean" style={{ fontSize: '10.5px' }}>
-            Processing: Step {completedStepCount} of 5
+            Processing: Step {completedStepCount} of {rawAgentNodes.length}
           </span>
         </div>
 
-        {/* Staggered Vertical Stage (Bounded stage for all screen monitor types) */}
-        <div className="vertical-chain-stage" ref={containerRef}>
+        {/* Staggered Vertical Stage — min-height scales with the real stage count so the
+            container (now scrollable) has enough room for every node to fit without
+            overlapping, instead of clipping whatever didn't fit a fixed 100%. */}
+        <div className="vertical-chain-stage" ref={containerRef} style={{ minHeight: `${Math.max(500, rawAgentNodes.length * 110)}px` }}>
           {/* Programmatically computed SVG path segments */}
           <svg className="vertical-chain-svg">
             <filter id="neon-green-glow" x="-20%" y="-20%" width="140%" height="140%">
@@ -335,16 +357,21 @@ const InvoiceDetail = ({ invoice, onBack }) => {
             {rawAgentNodes.map((node, idx) => {
               const Icon = node.icon;
               const isRight = idx % 2 === 1;
-              const isCenter = idx === 4;
+              const isCenter = idx === rawAgentNodes.length - 1;
               const isOpen = activePopoverNode === node.id;
               const posClass = isCenter ? 'pos-center' : isRight ? 'pos-right' : 'pos-left';
               const isNodeDone = completedStepCount > idx;
+              // Evenly spaced regardless of how many real stages this invoice has (5, 7,
+              // whatever) — a fixed CSS table tuned for exactly 5 nodes previously left later
+              // nodes stacked with no position at all once real invoices with 7 stages showed up.
+              const topPct = rawAgentNodes.length > 1 ? (idx / (rawAgentNodes.length - 1)) * 88 + 4 : 4;
 
               return (
                 <div
                   key={node.id}
                   ref={el => nodeRefs.current[idx] = el}
                   className={`dark-agent-node-v2 ${posClass} ${isNodeDone ? 'node-done' : 'node-pending'}`}
+                  style={{ top: `${topPct}%` }}
                   onClick={() => setActivePopoverNode(isOpen ? null : node.id)}
                 >
                   <div className="dark-node-icon-box">
@@ -373,8 +400,8 @@ const InvoiceDetail = ({ invoice, onBack }) => {
                         </button>
                       </div>
                       <div className="popover-body-text">
-                        {streamedText}
-                        <span className="popover-cursor" />
+                        {isExplainLoading ? 'Asking the explain engine…' : streamedText}
+                        {isExplainLoading && <span className="popover-cursor" />}
                       </div>
                     </div>
                   )}

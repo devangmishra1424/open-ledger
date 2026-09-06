@@ -1,0 +1,20 @@
+INVOICE
+
+Meridian Analytics Inc.
+442 Harbor View Drive, Suite 220
+Seattle, WA 98101
+
+Bill To: VeriBook Client Operations
+Invoice #: MA-8831
+Invoice Date: 2026-09-06
+Currency: USD
+
+Description                                   Qty      Unit Price
+Q3 Vendor Risk Scoring — Data Subscription       1        4200.00
+
+Subtotal:                                                4200.00
+Tax:                                                         0.00
+Total Due:                                                4200.00
+
+Payment Terms: Net 30
+No purchase order was issued for this engagement — billed under our standing analytics services agreement.

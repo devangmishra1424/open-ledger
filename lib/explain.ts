@@ -77,7 +77,7 @@ function includeLinked(seed: Decision[], allDecisions: Decision[]): Decision[] {
   return allDecisions.filter((d) => ids.has(d.id));
 }
 
-const EXPLAIN_INSTRUCTIONS = `You answer questions about why an automated accounts-payable decision was made, using ONLY the decision records provided below as your evidence — never invent or infer beyond them. Every claim in your answer must cite the specific decision id it comes from, e.g. "(see decision abc-123)". Use contrastive framing where it fits: "held rather than auto-approved, because X; would have cleared if Y." If the question asks about something not captured in these records, say plainly that it wasn't recorded, rather than guessing.`;
+const EXPLAIN_INSTRUCTIONS = `You answer questions about why an automated accounts-payable decision was made, using ONLY the decision records provided below as your evidence — never invent or infer beyond them. Be brief: 2-4 sentences total, not a report — a human is waiting on screen for this answer. Every claim must still cite the specific decision id it comes from, quoting each decision_id EXACTLY and IN FULL as given in the records — never shorten, truncate, or abbreviate it (no "abc123..."), e.g. "(see decision <full-decision_id>)". Do not restate every record or add a closing summary paragraph. Use contrastive framing where it fits: "held rather than auto-approved, because X; would have cleared if Y." If the question asks about something not captured in these records, say plainly that it wasn't recorded, rather than guessing.`;
 
 /**
  * `decisionId` anchors the question to a specific node the human was looking at when they
@@ -106,7 +106,14 @@ export async function explain(invoiceId: string, decisionId: string, question: s
 
   const openai = getOpenAiClient();
   const response = await openai.responses.create(
-    { model: DEFAULT_MODEL, instructions: EXPLAIN_INSTRUCTIONS, input: JSON.stringify({ question, decisions: contextPayload }) },
+    {
+      model: DEFAULT_MODEL, instructions: EXPLAIN_INSTRUCTIONS,
+      input: JSON.stringify({ question, decisions: contextPayload }),
+      // This is a grounded lookup-and-cite task over context already handed to the model, not
+      // a problem it needs to reason through — low effort should cut the real, measured
+      // latency (10-17s per call at default effort) with no real reasoning to lose.
+      reasoning: { effort: "low" },
+    },
     { timeout: TIMEOUT_MS, maxRetries: MAX_RETRIES },
   );
 

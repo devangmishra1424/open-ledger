@@ -14,13 +14,12 @@ import AuditTrail from './pages/AuditTrail';
 import EcosystemMap from './pages/EcosystemMap';
 import SettingsPage from './pages/SettingsPage';
 
-import { mockInvoices } from './data/mockData';
 import './App.css';
 
 function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [selectedInvoice, setSelectedInvoice] = useState(mockInvoices[0]);
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
 
   const handleSelectInvoice = (invoice) => {
     setSelectedInvoice(invoice);

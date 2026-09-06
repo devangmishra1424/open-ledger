@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import GlassCard from '../components/GlassCard';
-import { mockAgents } from '../data/mockData';
 import { api } from '../services/api';
 import { Bot, Cpu } from 'lucide-react';
 
 const AgentsPage = () => {
-  const [agents, setAgents] = useState(mockAgents);
+  const [agents, setAgents] = useState([]);
 
   useEffect(() => {
-    api.getAgents().then((data) => {
-      if (data && data.length > 0) setAgents(data);
+    let cancelled = false;
+    const fetchAgents = () => api.getAgents().then((data) => {
+      if (!cancelled && data) setAgents(data);
     });
+    fetchAgents();
+    const interval = setInterval(fetchAgents, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   return (

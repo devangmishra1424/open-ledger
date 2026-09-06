@@ -150,7 +150,30 @@ CREATE TABLE pbc_requests (
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','assembled','submitted','accepted','exception')),
   linked_invoice_ids TEXT, created_at TEXT NOT NULL DEFAULT now()::text
 );
+-- PBC evidence file attachments (real auditor-facing files — a signed confirmation letter, a
+-- W-9, a bank statement — attached as supporting evidence for one PBC request). Content stored
+-- as base64 TEXT rather than an external object store: additive, no new infra dependency, fine
+-- at hackathon-demo file sizes; a real production system would put content_base64 in S3/blob
+-- storage and keep only a pointer here.
+CREATE TABLE pbc_evidence_files (
+  id TEXT PRIMARY KEY, pbc_request_id TEXT NOT NULL REFERENCES pbc_requests(id),
+  filename TEXT NOT NULL, content_type TEXT, content_base64 TEXT NOT NULL,
+  uploaded_by TEXT, uploaded_at TEXT NOT NULL DEFAULT now()::text
+);
+-- Single-row app settings, real persistence for the Settings page. NOT yet read by
+-- lib/matching/decision-matrix.ts (its thresholds are still real hardcoded constants) — this
+-- table makes "Save Configuration" a genuine, persisted write, not a fake alert; wiring these
+-- values into live policy evaluation is a separate, larger change (decision-matrix.ts's
+-- thresholds are unit-tested against the spec's own worked examples as fixed constants today).
+CREATE TABLE app_settings (
+  id TEXT PRIMARY KEY DEFAULT 'default',
+  auto_approval_confidence REAL NOT NULL DEFAULT 95.0,
+  max_auto_payment_amount REAL NOT NULL DEFAULT 50000.00,
+  erp_webhook_url TEXT,
+  updated_at TEXT NOT NULL DEFAULT now()::text
+);
 CREATE INDEX idx_decisions_invoice ON decisions(invoice_id);
 CREATE INDEX idx_decisions_seq ON decisions(seq);
 CREATE INDEX idx_vendor_bills_vendor ON vendor_bills(vendor_id);
 CREATE INDEX idx_jel_account ON journal_entry_lines(account_id);
+CREATE INDEX idx_pbc_evidence_files_request ON pbc_evidence_files(pbc_request_id);
