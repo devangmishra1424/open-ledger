@@ -50,10 +50,10 @@ async function makeBill(vendorId: string, opts: { poId?: string | null; invoiceN
   return billId;
 }
 
-async function addBillLine(billId: string, qty: number, unitPrice: number) {
+async function addBillLine(billId: string, qty: number, unitPrice: number, glAccountId?: string) {
   await sql`
-    INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price)
-    VALUES (${crypto.randomUUID()}, ${billId}, 'Widget', ${qty}, ${unitPrice})`;
+    INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, gl_account_id)
+    VALUES (${crypto.randomUUID()}, ${billId}, 'Widget', ${qty}, ${unitPrice}, ${glAccountId ?? null})`;
 }
 
 afterAll(async () => {
@@ -122,7 +122,7 @@ describe("runPipeline — clean full path (real LLM calls, not tier-2-eligible)"
     const { poId, lineId } = await makePoWithLine(vendorId, { poNumber: PREFIX + "-PO-CLEAN", unitPrice: 10, qtyOrdered: 50 });
     await acceptReceipt(poId, lineId, 50);
     const billId = await makeBill(vendorId, { poId, invoiceNumber: PREFIX + "-CLEAN", totalAmount: 500 });
-    await addBillLine(billId, 50, 10);
+    await addBillLine(billId, 50, 10, "6000"); // real GL account so the audit stage's postBillApproval() call can actually post
 
     await runPipeline(billId);
 
@@ -131,8 +131,17 @@ describe("runPipeline — clean full path (real LLM calls, not tier-2-eligible)"
     expect(decisions.find((d) => d.nodeId === "policy")?.actionTaken).toBe("auto_approve");
     expect(decisions.find((d) => d.nodeId === "policy")?.reasonCode).toBe("CLEAN_MATCH");
 
-    const billRows = await sql`SELECT status FROM vendor_bills WHERE id = ${billId}`;
-    expect(billRows[0].status).toBe("approved");
+    // postBillApproval() (lib/ledger/journal.ts) sets status to 'posted', not just 'approved' —
+    // the audit stage's real job is to actually post the journal entry, not just flag intent.
+    const billRows = await sql`SELECT status, journal_entry_id FROM vendor_bills WHERE id = ${billId}`;
+    expect(billRows[0].status).toBe("posted");
+    expect(billRows[0].journal_entry_id).not.toBeNull();
+
+    const jelRows = await sql`SELECT debit_amount, credit_amount FROM journal_entry_lines WHERE entry_id = ${billRows[0].journal_entry_id}`;
+    const totalDebits = jelRows.reduce((s: number, r: any) => s + Number(r.debit_amount), 0);
+    const totalCredits = jelRows.reduce((s: number, r: any) => s + Number(r.credit_amount), 0);
+    expect(totalDebits).toBeCloseTo(500, 2);
+    expect(totalDebits).toBeCloseTo(totalCredits, 2);
 
     // verifyChain walks the chain from genesis using its own running `prev` — it must be
     // called with the COMPLETE global sequence, not one invoice's slice, or the first

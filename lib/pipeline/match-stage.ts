@@ -51,6 +51,12 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
   const findings: ExceptionFinding[] = [];
   const detail: Record<string, unknown> = {
     invoiceNumber: bill.invoice_number, totalAmount: bill.total_amount, currency: bill.currency,
+    // vendorId is load-bearing, not just informational: the Investigator's own system prompt
+    // requires calling get_vendor_history before concluding on fraud/duplication, and that
+    // tool needs a real vendor_id to call meaningfully. Found missing via a real, if
+    // non-deterministic, test failure — the model fabricated a placeholder vendor_id rather
+    // than getting one from context, then stalled instead of ever reaching submit_investigation.
+    vendorId: bill.vendor_id,
   };
 
   if (!bill.po_id) {

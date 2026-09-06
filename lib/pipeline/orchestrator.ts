@@ -7,9 +7,29 @@ import { moreRestrictive, type Action, type CombinedDecision } from "@/lib/match
 import { investigate, type InvestigationSubmission } from "@/lib/agent/investigator";
 import { verify, type VerificationSubmission } from "@/lib/agent/verifier";
 import { extract } from "@/lib/agent/extractor";
+import { postBillApproval } from "@/lib/ledger/journal";
 import { hashJson } from "@/lib/agent/hash";
 import { publishPipelineEvent } from "@/lib/pipeline/events";
 import type { Decision, Claim } from "@/lib/types";
+import type { HumanReconsiderationContext } from "@/lib/agent/investigator";
+
+/**
+ * Carried through investigate/verify/policy/audit when a stage is being (re-)invoked as part
+ * of a reconsideration (lib/pipeline/reconsider.ts, ALGORITHMS.md §3) — either the node the
+ * human directly asked to reconsider, or a downstream node re-run because that reconsideration
+ * changed the outcome. `reconsiderationOfId` is only set on the DIRECTLY reconsidered node's
+ * new decision row (matching the spec's own pseudocode); downstream cascade re-runs pass
+ * `directlyReconsidered: false` so they get a fresh idempotency key without falsely claiming
+ * to BE the reconsideration of that original decision themselves.
+ */
+export interface ReconsiderationInput {
+  attemptTag: string; // e.g. "reconsider:3" — unique per reconsideration event, shared across every stage it re-runs
+  directlyReconsidered: boolean;
+  reconsiderationOfId?: string; // only meaningful when directlyReconsidered is true
+  triggeredByActor: string;
+  triggeredByQuestion: string;
+  additionalContext?: string;
+}
 
 /**
  * The 7-stage pipeline runner (ENGINE.md §2): extract -> validate -> match -> investigate ->
@@ -24,8 +44,15 @@ import type { Decision, Claim } from "@/lib/types";
  * so it computes its own distinct key rather than reusing this one.
  */
 
-function idemKey(vendorBillId: string, nodeId: string): string {
-  return crypto.createHash("sha256").update(`${vendorBillId}:${nodeId}`).digest("hex");
+/**
+ * `suffix` defaults to "" for the normal, once-only pipeline pass. Reconsideration
+ * (lib/pipeline/reconsider.ts) re-invokes investigate/verify/policy/audit as genuinely NEW
+ * decisions, not retries of the original — it passes a distinct suffix (the reconsideration
+ * attempt number) so each new invocation gets its own key instead of colliding with the
+ * original pass's.
+ */
+function idemKey(vendorBillId: string, nodeId: string, suffix = ""): string {
+  return crypto.createHash("sha256").update(`${vendorBillId}:${nodeId}${suffix}`).digest("hex");
 }
 
 async function publish(decision: Decision): Promise<void> {
@@ -145,9 +172,36 @@ export async function runMatchStageDecision(vendorBillId: string, parentDecision
 
 // --- investigate ---
 
-export async function runInvestigateStage(vendorBillId: string, matchDetail: unknown, parentDecisionId?: string): Promise<{ decision: Decision; submission: InvestigationSubmission }> {
+export async function runInvestigateStage(vendorBillId: string, matchDetail: unknown, parentDecisionId?: string, recon?: ReconsiderationInput): Promise<{ decision: Decision; submission?: InvestigationSubmission }> {
   const startedAt = new Date().toISOString();
-  const result = await investigate(vendorBillId, matchDetail);
+  const humanContext: HumanReconsiderationContext | undefined = recon
+    ? { question: recon.triggeredByQuestion, additionalContext: recon.additionalContext }
+    : undefined;
+  const idempotencyKey = idemKey(vendorBillId, "investigate", recon ? `:${recon.attemptTag}` : "");
+  const reconFields = {
+    reconsiderationOfId: recon?.directlyReconsidered ? recon.reconsiderationOfId : undefined,
+    triggeredByActor: recon?.triggeredByActor,
+    triggeredByQuestion: recon?.triggeredByQuestion,
+  };
+
+  let result;
+  try {
+    result = await investigate(vendorBillId, matchDetail, humanContext);
+  } catch (e) {
+    // A real, observed failure mode (not hypothetical): the model sometimes asks a plain-text
+    // clarifying question instead of ever calling submit_investigation, which runResponsesLoop
+    // correctly treats as a hard failure rather than guessing. ENGINE.md §5: never let this
+    // crash the whole pipeline run uncaught — surface it as an error-state decision instead.
+    const d = await writeDecision({
+      invoiceId: vendorBillId, nodeId: "investigate", agentId: process.env.OPENAI_MODEL || "gpt-5-nano", model: process.env.OPENAI_MODEL || "gpt-5-nano",
+      parentDecisionId, startedAt, endedAt: new Date().toISOString(),
+      actionTaken: "error", reasonCode: "R99_AGENT_ERROR",
+      claims: [{ text: `Investigator failed: ${e instanceof Error ? e.message : String(e)}`, tag: "grounded" }],
+      idempotencyKey, ...reconFields,
+    });
+    await publish(d);
+    return { decision: d };
+  }
 
   const d = await writeDecision({
     invoiceId: vendorBillId, nodeId: "investigate", agentId: process.env.OPENAI_MODEL || "gpt-5-nano", model: process.env.OPENAI_MODEL || "gpt-5-nano",
@@ -155,7 +209,7 @@ export async function runInvestigateStage(vendorBillId: string, matchDetail: unk
     confidence: result.submission.confidence, actionTaken: result.submission.recommended_action,
     toolCalls: result.toolCalls,
     claims: [{ text: result.submission.rationale, tag: "grounded" }],
-    idempotencyKey: idemKey(vendorBillId, "investigate"),
+    idempotencyKey, ...reconFields,
   });
   await publish(d);
   return { decision: d, submission: result.submission };
@@ -163,9 +217,35 @@ export async function runInvestigateStage(vendorBillId: string, matchDetail: unk
 
 // --- verify ---
 
-export async function runVerifyStage(vendorBillId: string, matchDetail: unknown, investigation: InvestigationSubmission, parentDecisionId?: string): Promise<{ decision: Decision; submission: VerificationSubmission }> {
+export async function runVerifyStage(vendorBillId: string, matchDetail: unknown, investigation: InvestigationSubmission, parentDecisionId?: string, recon?: ReconsiderationInput): Promise<{ decision: Decision; submission?: VerificationSubmission }> {
   const startedAt = new Date().toISOString();
-  const result = await verify(vendorBillId, matchDetail, investigation);
+  const humanContext: HumanReconsiderationContext | undefined = recon
+    ? { question: recon.triggeredByQuestion, additionalContext: recon.additionalContext }
+    : undefined;
+  const idempotencyKey = idemKey(vendorBillId, "verify", recon ? `:${recon.attemptTag}` : "");
+  const reconFields = {
+    reconsiderationOfId: recon?.directlyReconsidered ? recon.reconsiderationOfId : undefined,
+    triggeredByActor: recon?.triggeredByActor,
+    triggeredByQuestion: recon?.triggeredByQuestion,
+  };
+
+  let result;
+  try {
+    result = await verify(vendorBillId, matchDetail, investigation, humanContext);
+  } catch (e) {
+    // Same failure mode and same policy as runInvestigateStage's catch — see its comment.
+    // A failed Verifier means "no independent second opinion obtained," not "pipeline crashed";
+    // runPipeline treats a missing verify submission the same as verify never having run.
+    const d = await writeDecision({
+      invoiceId: vendorBillId, nodeId: "verify", agentId: process.env.TENSORMUX_MODEL || "glm-4-7-flash", model: process.env.TENSORMUX_MODEL || "glm-4-7-flash",
+      parentDecisionId, startedAt, endedAt: new Date().toISOString(),
+      actionTaken: "error", reasonCode: "R99_AGENT_ERROR",
+      claims: [{ text: `Verifier failed: ${e instanceof Error ? e.message : String(e)}`, tag: "grounded" }],
+      idempotencyKey, ...reconFields,
+    });
+    await publish(d);
+    return { decision: d };
+  }
 
   const d = await writeDecision({
     invoiceId: vendorBillId, nodeId: "verify", agentId: process.env.TENSORMUX_MODEL || "glm-4-7-flash", model: process.env.TENSORMUX_MODEL || "glm-4-7-flash",
@@ -174,7 +254,7 @@ export async function runVerifyStage(vendorBillId: string, matchDetail: unknown,
     actionTaken: result.submission.agrees ? investigation.recommended_action : "disagreement",
     toolCalls: result.toolCalls,
     claims: [{ text: result.submission.notes || "Verifier agreed with the Investigator's conclusion.", tag: "grounded" }],
-    idempotencyKey: idemKey(vendorBillId, "verify"),
+    idempotencyKey, ...reconFields,
   });
   await publish(d);
   return { decision: d, submission: result.submission };
@@ -187,6 +267,7 @@ export async function runPolicyStage(params: {
   combined: CombinedDecision;
   verifySubmission?: VerificationSubmission;
   parentDecisionId?: string;
+  recon?: ReconsiderationInput;
 }): Promise<Decision> {
   let finalAction: Action = params.combined.overallAction;
   const claims: Claim[] = [];
@@ -205,7 +286,7 @@ export async function runPolicyStage(params: {
     actionTaken: finalAction,
     reasonCode: params.combined.dominantException ?? "CLEAN_MATCH",
     claims: claims.length > 0 ? claims : undefined,
-    idempotencyKey: idemKey(params.vendorBillId, "policy"),
+    idempotencyKey: idemKey(params.vendorBillId, "policy", params.recon ? `:${params.recon.attemptTag}` : ""),
   });
   await publish(d);
   return d;
@@ -213,21 +294,42 @@ export async function runPolicyStage(params: {
 
 // --- audit ---
 
-export async function runAuditStage(vendorBillId: string, policyDecision: Decision): Promise<Decision> {
+export async function runAuditStage(vendorBillId: string, policyDecision: Decision, recon?: ReconsiderationInput): Promise<Decision> {
   const sql = getSql();
   const action = policyDecision.actionTaken as Action;
   const startedAt = new Date().toISOString();
+  const idempotencyKey = idemKey(vendorBillId, "audit", recon ? `:${recon.attemptTag}` : "");
 
-  const newStatus = action === "auto_approve" ? "approved" : action === "auto_reject" ? "void" : "exception";
-  await sql`UPDATE vendor_bills SET status = ${newStatus} WHERE id = ${vendorBillId}`;
-  // TODO: post the bill-approval journal entry (Dr 6xxx Expense — Cr 2000 AP, DESIGN.md §5.3)
-  // once lib/ledger/journal.ts exists — deliberately not duplicated here, see AO task split.
+  if (action === "auto_approve") {
+    // postBillApproval (lib/ledger/journal.ts, delivered by the AO worker — see the task
+    // split) posts the Dr Expense — Cr AP entry itself and sets vendor_bills.status='posted'.
+    // A genuine posting failure (e.g. a bill line with no GL account coded and no PO line to
+    // fall back to) is a real error state, not something to paper over — surfaced here rather
+    // than crashing the pipeline uncaught (ENGINE.md §5: never silently drop an invoice into limbo).
+    try {
+      await postBillApproval(vendorBillId);
+    } catch (e) {
+      await sql`UPDATE vendor_bills SET status = 'exception' WHERE id = ${vendorBillId}`;
+      const d = await writeDecision({
+        invoiceId: vendorBillId, nodeId: "audit", agentId: "deterministic-policy-engine",
+        parentDecisionId: policyDecision.id, startedAt, endedAt: new Date().toISOString(),
+        actionTaken: "error", reasonCode: "R99_AGENT_ERROR",
+        claims: [{ text: `Posting failed: ${e instanceof Error ? e.message : String(e)}`, tag: "grounded" }],
+        idempotencyKey,
+      });
+      await publish(d);
+      return d;
+    }
+  } else {
+    const newStatus = action === "auto_reject" ? "void" : "exception";
+    await sql`UPDATE vendor_bills SET status = ${newStatus} WHERE id = ${vendorBillId}`;
+  }
 
   const d = await writeDecision({
     invoiceId: vendorBillId, nodeId: "audit", agentId: "deterministic-policy-engine",
     parentDecisionId: policyDecision.id, startedAt, endedAt: new Date().toISOString(),
     actionTaken: action, reasonCode: policyDecision.reasonCode,
-    idempotencyKey: idemKey(vendorBillId, "audit"),
+    idempotencyKey,
   });
   await publish(d);
   return d;
@@ -235,8 +337,8 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
 
 // --- the full pipeline ---
 
-/** Tier-2-eligible per ENGINE.md §2.5: only escalate_l2/block get a second opinion — never a plain rule-triggered block with nothing to adjudicate. */
-function isTier2Eligible(action: Action): boolean {
+/** Tier-2-eligible per ENGINE.md §2.5: only escalate_l2/block get a second opinion — never a plain rule-triggered block with nothing to adjudicate. Exported for reconsider.ts's own cascade re-run. */
+export function isTier2Eligible(action: Action): boolean {
   return action === "escalate_l2" || action === "block";
 }
 
@@ -276,6 +378,13 @@ export async function runPipeline(vendorBillId: string): Promise<void> {
   // Investigator's own system prompt already tells it not to force evidence-gathering where
   // none is needed; this is what makes that a real, on-the-record pass, not a skipped stage).
   const { decision: investigateDecision, submission: investigation } = await runInvestigateStage(vendorBillId, matchResult.detail, matchDecision.id);
+  if (!investigation) {
+    // The Investigator failed outright (ENGINE.md §5) — nothing to verify or police against;
+    // block for human attention rather than guessing at a downstream action.
+    const policyDecision = await runPolicyStage({ vendorBillId, combined: asCascadedDecision("block", null), parentDecisionId: investigateDecision.id });
+    await runAuditStage(vendorBillId, policyDecision);
+    return;
+  }
 
   let verifySubmission: VerificationSubmission | undefined;
   let lastDecisionId = investigateDecision.id;
