@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { getDecisionsForInvoice } from "@/lib/ledger/decisions";
-import { descriptionSimilarity } from "@/lib/matching/line-match";
+import { getEmbedding, cosineSimilarity } from "@/lib/embeddings";
 import type { Decision } from "@/lib/types";
 
 /**
@@ -11,19 +11,15 @@ import type { Decision } from "@/lib/types";
  * BUILD.md's own description of it).
  *
  * Two-stage retrieval-then-constrained-answer, per DESIGN.md §8:
- *   Stage A — find candidate decisions relevant to the question.
+ *   Stage A — find candidate decisions relevant to the question, via real embedding
+ *   similarity (lib/embeddings.ts) against each decision's own text content.
  *   Stage B — answer using ONLY the fetched records as context, every claim cited, an
  *   explicit "not recorded" fallback rather than invented inference.
  *
- * HONEST GAP: DESIGN.md §8 specifies Stage A as a fuzzy EMBEDDING search over `decisions`.
- * No embeddings/pgvector infrastructure exists in this codebase (same real gap as
- * lib/agent/tools.ts's check_duplicate near-duplicate detection, documented there for the
- * same reason). Since every real call site scopes this to ONE invoice already (the API route
- * is /api/invoices/:id/decisions/:decisionId/explain), and one invoice's decision count is
- * small (~6-8 for a normal pipeline pass, occasionally more with reconsiderations), Stage A
- * here is a deterministic trigram-Jaccard relevance score (reusing line-match.ts's own
- * descriptionSimilarity) rather than a real embedding search — correct for this codebase's
- * actual scale, not a silent shortcut on a large corpus.
+ * SCALE NOTE: every real call site scopes this to ONE invoice already (the API route is
+ * /api/invoices/:id/decisions/:decisionId/explain) — no pgvector index needed, embeddings are
+ * computed fresh per call over a small set (~6-8 decisions for a normal pipeline pass,
+ * occasionally more with reconsiderations) and only when that set exceeds MAX_CANDIDATES.
  */
 
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-5-nano";
@@ -48,13 +44,18 @@ export interface ExplainResult {
 
 const MAX_CANDIDATES = 10;
 
-/** Stage A — see the module doc's honest gap note on why this isn't a real embedding search. */
-function findCandidateDecisions(question: string, decisions: Decision[]): Decision[] {
+/** Stage A — real embedding similarity between the question and each decision's own text content. */
+async function findCandidateDecisions(question: string, decisions: Decision[]): Promise<Decision[]> {
   if (decisions.length <= MAX_CANDIDATES) return decisions;
-  const scored = decisions.map((d) => {
-    const text = [d.nodeId, d.actionTaken, d.reasonCode, ...(d.claims?.map((c) => c.text) ?? [])].filter(Boolean).join(" ");
-    return { d, score: descriptionSimilarity(question, text) };
-  });
+
+  const questionEmbedding = await getEmbedding(question);
+  const scored = await Promise.all(
+    decisions.map(async (d) => {
+      const text = [d.nodeId, d.actionTaken, d.reasonCode, ...(d.claims?.map((c) => c.text) ?? [])].filter(Boolean).join(" ");
+      const embedding = await getEmbedding(text);
+      return { d, score: cosineSimilarity(questionEmbedding, embedding) };
+    }),
+  );
   return scored
     .sort((a, b) => b.score - a.score)
     .slice(0, MAX_CANDIDATES)
@@ -88,7 +89,7 @@ export async function explain(invoiceId: string, decisionId: string, question: s
   const anchor = allDecisions.find((d) => d.id === decisionId);
   if (!anchor) throw new Error(`explain: decision '${decisionId}' not found for invoice '${invoiceId}'`);
 
-  const candidates = findCandidateDecisions(question, allDecisions);
+  const candidates = await findCandidateDecisions(question, allDecisions);
   const context = includeLinked([anchor, ...candidates], allDecisions);
 
   const contextPayload = context.map((d) => ({

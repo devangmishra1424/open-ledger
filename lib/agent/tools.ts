@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
 import { getSql } from "@/db/client";
 import { DOLLAR_THRESHOLD_TABLE, PRECEDENCE_RANK } from "@/lib/matching/decision-matrix";
-import { descriptionSimilarity } from "@/lib/matching/line-match";
+import { getEmbedding, cosineSimilarity } from "@/lib/embeddings";
 import type { PurchaseOrder, PurchaseOrderLine, GoodsReceipt, Vendor, VendorCorrection } from "@/lib/types";
 
 /**
@@ -223,13 +223,14 @@ export async function getVendorHistory(vendorId: string): Promise<{ found: boole
 }
 
 /**
- * spec's own worked example (ENGINE.md §3) describes embedding-similarity near-duplicate
- * detection. That needs an embeddings pipeline + vector store this hackathon doesn't have
- * time to build correctly (better to not build it than to fake it with a misleading
- * cosine-similarity-shaped number backed by nothing real). Instead: a deterministic,
- * honestly-simpler heuristic — same vendor, invoice-number trigram similarity, amount
- * within 2%, and invoice date within 5 days. Exact duplicates (same vendor+invoice_number)
- * are reported the same way pre-match-validation.ts's own duplicate check would find them.
+ * ENGINE.md §3's tool description calls for "embedding similarity on vendor+amount+date+line
+ * items." The SQL query below already does the coarse narrowing on vendor/amount/date (no
+ * vector index needed for that part — a handful of candidates per vendor at hackathon scale);
+ * lib/embeddings.ts's real getEmbedding()/cosineSimilarity() then scores each surviving
+ * candidate's invoice_number against this invoice's own, catching a resubmission with a
+ * typo'd or reformatted number that a trigram heuristic could miss on genuinely different
+ * phrasing. Exact duplicates (same vendor+invoice_number) are reported the same way
+ * pre-match-validation.ts's own duplicate check would find them.
  */
 export async function checkDuplicate(invoiceId: string): Promise<{ found: boolean; message?: string; exactDuplicateIds?: string[]; nearDuplicates?: Array<{ id: string; invoiceNumber: string; similarityScore: number }> }> {
   const sql = getSql();
@@ -252,10 +253,18 @@ export async function checkDuplicate(invoiceId: string): Promise<{ found: boolea
     AND ABS(total_amount - ${inv.total_amount}) <= ${inv.total_amount} * 0.02
     AND ABS(EXTRACT(EPOCH FROM (invoice_date::timestamptz - ${inv.invoice_date}::timestamptz))) <= 5 * 86400`;
 
-  const nearDuplicates = candidateRows
-    .map((c: any) => ({ id: c.id, invoiceNumber: c.invoice_number, similarityScore: descriptionSimilarity(c.invoice_number, inv.invoice_number) }))
-    .filter((c: { similarityScore: number }) => c.similarityScore >= 0.5)
-    .sort((a: { similarityScore: number }, b: { similarityScore: number }) => b.similarityScore - a.similarityScore);
+  let nearDuplicates: Array<{ id: string; invoiceNumber: string; similarityScore: number }> = [];
+  if (candidateRows.length > 0) {
+    const thisEmbedding = await getEmbedding(inv.invoice_number);
+    const scored = await Promise.all(
+      candidateRows.map(async (c: any) => ({
+        id: c.id,
+        invoiceNumber: c.invoice_number,
+        similarityScore: cosineSimilarity(thisEmbedding, await getEmbedding(c.invoice_number)),
+      })),
+    );
+    nearDuplicates = scored.filter((c) => c.similarityScore >= 0.5).sort((a, b) => b.similarityScore - a.similarityScore);
+  }
 
   return { found: true, exactDuplicateIds: exactRows.map((r: any) => r.id), nearDuplicates };
 }
