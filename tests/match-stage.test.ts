@@ -161,4 +161,37 @@ describe("runMatchStage", () => {
     const r = await runMatchStage(billId);
     expect(r.findings.some((f) => f.code === "EXC-QTY_VAR")).toBe(true); // 0 actually accepted
   });
+
+  it("split invoice (spec §1.6 Scenario B): a second partial invoice against the same PO line closes it cleanly, no false exception", async () => {
+    const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-SPLIT", unitPrice: 10, qtyOrdered: 100 });
+    await acceptGoodsReceipt(poId, lineId, 100);
+
+    const bill1 = await makeBill({ poId, invoiceNumber: PREFIX + "-INV-SPLIT-1", totalAmount: 600 });
+    await addBillLine(bill1, { qty: 60, unitPrice: 10 });
+    const r1 = await runMatchStage(bill1);
+    expect(r1.findings.some((f) => f.code === "EXC-QTY_VAR")).toBe(false);
+    // simulate the first invoice having already been approved, so the second sees it as a real prior claim
+    await sql`UPDATE vendor_bills SET status = 'approved' WHERE id = ${bill1}`;
+
+    const bill2 = await makeBill({ poId, invoiceNumber: PREFIX + "-INV-SPLIT-2", totalAmount: 400 });
+    await addBillLine(bill2, { qty: 40, unitPrice: 10 });
+    const r2 = await runMatchStage(bill2);
+    expect(r2.findings.some((f) => f.code === "EXC-QTY_VAR")).toBe(false); // 60 + 40 = 100, closes exactly
+  });
+
+  it("split invoice over-claim: a second invoice billing for more than what's left after a prior invoice fires EXC-QTY_VAR for just the excess", async () => {
+    const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-SPLIT-OVER", unitPrice: 10, qtyOrdered: 100 });
+    await acceptGoodsReceipt(poId, lineId, 100);
+
+    const bill1 = await makeBill({ poId, invoiceNumber: PREFIX + "-INV-SPLITOVER-1", totalAmount: 600 });
+    await addBillLine(bill1, { qty: 60, unitPrice: 10 });
+    await runMatchStage(bill1);
+    await sql`UPDATE vendor_bills SET status = 'approved' WHERE id = ${bill1}`;
+
+    // only 40 units remain available (100 received - 60 already claimed), but this bills for 50
+    const bill2 = await makeBill({ poId, invoiceNumber: PREFIX + "-INV-SPLITOVER-2", totalAmount: 500 });
+    await addBillLine(bill2, { qty: 50, unitPrice: 10 });
+    const r2 = await runMatchStage(bill2);
+    expect(r2.findings.some((f) => f.code === "EXC-QTY_VAR")).toBe(true);
+  });
 });
