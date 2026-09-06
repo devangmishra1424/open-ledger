@@ -214,3 +214,43 @@ work, not a stub to route around.
 `lib/types.ts` is the one file both halves import from (BUILD.md §9). If a shape you need isn't
 there, add to it and say so — don't redefine an equivalent interface in `app/` or `lib/audit/`
 that could quietly drift out of sync with the real one `lib/` code uses.
+
+---
+
+## 5. Reality check against the real frontend (found, not assumed — read before building routes)
+
+A real frontend landed in this repo under `frontend/` (a standalone Vite + React app, separate
+from the `app/*` Next.js pages BUILD.md originally planned) with its own `src/services/api.js`.
+It's real, working code — checked directly, not guessed — and it expects a noticeably
+**different API shape** than ENGINE.md §7 / this file's §2 describe. It gracefully falls back to
+`src/data/mockData.js` when a call fails, so nothing is currently broken — but nothing is wired
+to real data either. This needs a human decision (adapt the routes to the frontend's expectations,
+or adapt the frontend's `api.js` to the Engine's real data model) — not something to silently
+pick a side on.
+
+**Endpoints `api.js` actually calls, that this doc's §2 doesn't cover:**
+`POST /invoices/:id/approve`, `POST /invoices/:id/contest`, `POST /invoices/:id/reject`,
+`POST /invoices/:id/seal`, `POST /dashboard/mark-reviewed`, `GET /audit/seals`,
+`POST /audit/seal-all`, `GET /activity`, `GET /pbc/requests` (not `/pbc`),
+`POST /pbc/requests/:id/close`, `GET /pbc/evidence`, `GET /agents`, `GET /ecosystem`,
+`GET /settings`, `PUT /settings`. Base path is `/api` but not nested under `/api/invoices/...`
+the same way this doc assumes for some of these (e.g. `seal`/`approve`/`reject`/`contest` are
+each their own route, not one `/review` route with an `action` field).
+
+**`mockData.js`'s shape doesn't match `lib/types.ts` either** — e.g. `vendor` (a plain name
+string, not `vendor_id`), `status: 'Clean'|'In Review'|'Blocked'|'In Progress'` (not
+`BillStatus`'s real `processing/matched/exception/approved/posted/paid/void`),
+`processedByAgents: string[]` (generic labels like "Fraud Agent"/"Compliance Agent" — this
+system's real architecture has exactly two LLM roles, Investigator and Verifier, plus
+deterministic stages; nothing here currently produces a per-invoice list of named "agents"),
+`confidenceScore` as one aggregate number (real confidence is per-decision, on `Decision.confidence`,
+one number per pipeline stage, not one per invoice), `riskFlags: string[]` (free text, vs. the
+real `reason_code` enum backed by the `reason_codes` table), `hash` (a single string per invoice
+— the real hash chain is per-*decision*, not per-invoice; there is no one "the hash" for a bill).
+
+**Not yet backed by anything on the Engine side at all:** `/agents`, `/ecosystem`, `/settings`
+have no corresponding `lib/` function or even an obvious one to build — these look like they'd
+need new, small, genuinely new pieces (or a decision that they're UI-only/mock-only for the demo).
+
+This section is a factual diff, not a fix — reconciling it (which side changes, and how much)
+is a call for whoever owns the demo's final shape.
