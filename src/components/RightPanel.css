@@ -1,0 +1,220 @@
+.right-panel-container {
+  width: 330px;
+  min-width: 330px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.widget-card {
+  padding: 24px;
+  min-height: 210px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* Neutral Ledger Summary Border (zero blue/purple gradient) */
+.ledger-summary-widget {
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5) !important;
+  position: relative;
+}
+
+.widget-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.widget-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.widget-timestamp {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.summary-value-box {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-glass);
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.summary-amount {
+  font-size: 26px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.5px;
+}
+
+.summary-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.summary-text-line {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.pending-seals-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.seal-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-glass);
+}
+
+.seal-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lock-icon-box {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255, 214, 10, 0.15);
+  border: 1px solid rgba(255, 214, 10, 0.35);
+  color: #ffd60a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.seal-vendor-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.seal-id {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.seal-amount {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  text-align: right;
+}
+
+.confidence-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-left: 6px;
+  display: inline-block;
+}
+
+.activity-stat-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 8px 0;
+}
+
+.activity-sealed-count {
+  font-size: 28px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.health-gauge-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.health-circle-ring {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: conic-gradient(#a7c957 0% 92%, rgba(255, 255, 255, 0.1) 92% 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.health-circle-ring::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: #0d1120;
+}
+
+.health-circle-text {
+  position: relative;
+  z-index: 2;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #a7c957;
+}
+
+.health-label {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* Mini Bar Chart */
+.mini-bar-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  height: 60px;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.chart-bar-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.bar-fill {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: rgba(255, 255, 255, 0.12);
+  transition: height 0.4s ease;
+}
+
+.bar-fill.active-day {
+  background: #a7c957;
+  box-shadow: 0 0 10px rgba(167, 201, 87, 0.5);
+}
+
+.chart-day-label {
+  font-size: 10px;
+  color: var(--text-dim);
+}

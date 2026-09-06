@@ -1,0 +1,21 @@
+.scroll-stack-container {
+  width: 100%;
+  position: relative;
+  overflow-y: auto;
+  padding-bottom: 80px;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+}
+
+.scroll-stack-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scroll-stack-item-wrapper {
+  position: relative;
+  width: 100%;
+  margin-bottom: 24px;
+  transition: opacity 0.15s ease, transform 0.15s ease, filter 0.15s ease;
+  transform-origin: center top;
+  will-change: transform, opacity, filter;
+}
