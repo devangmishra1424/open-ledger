@@ -14,8 +14,8 @@ open-ledger/
 ├── docs/ap-three-way-match-spec.md   — already written, not owned by either builder
 ├── db/
 │   ├── schema.sql          # §2 below — copy verbatim as your first commit
-│   ├── migrate.ts          # runs schema.sql + seeds reason_codes/chart_of_accounts against a fresh .sqlite file
-│   └── client.ts           # better-sqlite3 singleton (WAL mode, foreign_keys=ON)
+│   ├── migrate.ts          # drops + recreates every table against Supabase Postgres, seeds reason_codes/chart_of_accounts
+│   └── client.ts           # postgres.js singleton — DATABASE_URL from .env, pooled connection for serverless hosting
 ├── scripts/
 │   ├── seed.ts             # demo dataset: vendors, POs, receipts, invoices (one per EXC-*), PBC items
 │   └── eval.ts             # runs seed data through the pipeline, reports straight-through/escalation accuracy vs ground truth

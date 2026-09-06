@@ -1,9 +1,14 @@
+-- Postgres (Supabase) schema. Switched from SQLite: booleans are real BOOLEAN (not 0/1),
+-- timestamps default to now()::text (kept as TEXT, not TIMESTAMPTZ, so the app's existing
+-- ISO-string handling doesn't need to change), and `decisions` gets an explicit BIGSERIAL
+-- `seq` column since Postgres has no implicit rowid to order the hash chain by.
+
 CREATE TABLE chart_of_accounts (
   id TEXT PRIMARY KEY, account_number TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
   account_type TEXT NOT NULL CHECK (account_type IN ('asset','liability','equity','revenue','expense')),
   account_subtype TEXT, normal_balance TEXT NOT NULL CHECK (normal_balance IN ('debit','credit')),
   parent_account_id TEXT REFERENCES chart_of_accounts(id),
-  is_control_account INTEGER NOT NULL DEFAULT 0, currency TEXT, is_active INTEGER NOT NULL DEFAULT 1
+  is_control_account BOOLEAN NOT NULL DEFAULT false, currency TEXT, is_active BOOLEAN NOT NULL DEFAULT true
 );
 CREATE TABLE accounting_periods (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
@@ -12,8 +17,8 @@ CREATE TABLE accounting_periods (
 CREATE TABLE vendors (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, remit_to_address TEXT, bank_account_last4 TEXT,
   bank_account_changed_at TEXT, trust_tier TEXT NOT NULL DEFAULT 'new' CHECK (trust_tier IN ('trusted','new','flagged')),
-  tax_id TEXT, w9_on_file INTEGER NOT NULL DEFAULT 0, payment_terms_code TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  tax_id TEXT, w9_on_file BOOLEAN NOT NULL DEFAULT false, payment_terms_code TEXT,
+  created_at TEXT NOT NULL DEFAULT now()::text
 );
 CREATE TABLE vendor_bank_change_reviews (
   id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL REFERENCES vendors(id),
@@ -21,11 +26,11 @@ CREATE TABLE vendor_bank_change_reviews (
   status TEXT NOT NULL DEFAULT 'callback_pending' CHECK (status IN ('callback_pending','callback_confirmed','callback_failed')),
   callback_phone_used TEXT, callback_confirmed_by TEXT, callback_at TEXT,
   second_reviewer_name TEXT, source_invoice_id TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT now()::text
 );
 CREATE TABLE vendor_corrections (
   id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL REFERENCES vendors(id), pattern TEXT NOT NULL,
-  note TEXT, source_invoice_id TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  note TEXT, source_invoice_id TEXT, created_at TEXT NOT NULL DEFAULT now()::text
 );
 CREATE TABLE tax_codes (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, rate REAL NOT NULL,
@@ -49,12 +54,12 @@ CREATE TABLE purchase_order_lines (
   id TEXT PRIMARY KEY, po_id TEXT NOT NULL REFERENCES purchase_orders(id), line_number INTEGER NOT NULL,
   description TEXT NOT NULL, uom TEXT NOT NULL DEFAULT 'each', qty_ordered REAL NOT NULL,
   unit_price REAL NOT NULL, gl_account_id TEXT REFERENCES chart_of_accounts(id),
-  tolerance_pct REAL NOT NULL DEFAULT 0.02, final_delivery INTEGER NOT NULL DEFAULT 0
+  tolerance_pct REAL NOT NULL DEFAULT 0.02, final_delivery BOOLEAN NOT NULL DEFAULT false
 );
 CREATE TABLE goods_receipts (
   id TEXT PRIMARY KEY, po_id TEXT NOT NULL REFERENCES purchase_orders(id), receipt_date TEXT NOT NULL,
   receiver_name TEXT, condition TEXT NOT NULL DEFAULT 'accepted' CHECK (condition IN ('accepted','damaged','rejected')),
-  final_delivery_indicator INTEGER NOT NULL DEFAULT 0
+  final_delivery_indicator BOOLEAN NOT NULL DEFAULT false
 );
 CREATE TABLE goods_receipt_lines (
   id TEXT PRIMARY KEY, goods_receipt_id TEXT NOT NULL REFERENCES goods_receipts(id),
@@ -67,7 +72,7 @@ CREATE TABLE journal_entries (
   status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('draft','posted','reversed','voided')),
   posted_by TEXT, posted_at TEXT, reversal_of_entry_id TEXT REFERENCES journal_entries(id),
   currency TEXT NOT NULL DEFAULT 'USD', exchange_rate REAL NOT NULL DEFAULT 1.0,
-  idempotency_key TEXT UNIQUE, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  idempotency_key TEXT UNIQUE, created_at TEXT NOT NULL DEFAULT now()::text
 );
 CREATE TABLE journal_entry_lines (
   id TEXT PRIMARY KEY, entry_id TEXT NOT NULL REFERENCES journal_entries(id), line_number INTEGER NOT NULL,
@@ -83,7 +88,7 @@ CREATE TABLE vendor_bills (
   subtotal REAL NOT NULL, tax_total REAL NOT NULL DEFAULT 0, total_amount REAL NOT NULL,
   raw_source TEXT, ap_account_id TEXT REFERENCES chart_of_accounts(id), journal_entry_id TEXT REFERENCES journal_entries(id),
   status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing','matched','exception','approved','posted','paid','void')),
-  received_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(vendor_id, invoice_number)
+  received_at TEXT NOT NULL DEFAULT now()::text, UNIQUE(vendor_id, invoice_number)
 );
 CREATE TABLE vendor_bill_lines (
   id TEXT PRIMARY KEY, vendor_bill_id TEXT NOT NULL REFERENCES vendor_bills(id),
@@ -104,6 +109,7 @@ CREATE TABLE reason_codes (
   code TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL
 );
 CREATE TABLE decisions (
+  seq BIGSERIAL,
   id TEXT PRIMARY KEY, invoice_id TEXT REFERENCES vendor_bills(id),
   node_id TEXT NOT NULL CHECK (node_id IN ('extract','validate','match','investigate','verify','policy','audit','audit_assemble')),
   parent_decision_id TEXT REFERENCES decisions(id), reconsideration_of_id TEXT REFERENCES decisions(id),
@@ -113,13 +119,13 @@ CREATE TABLE decisions (
   confidence REAL, action_taken TEXT, reason_code TEXT REFERENCES reason_codes(code),
   forwarded_to TEXT, what_was_forwarded TEXT, triggered_by_actor TEXT, triggered_by_question TEXT,
   idempotency_key TEXT UNIQUE, prev_hash TEXT, hash TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT now()::text
 );
 CREATE TABLE reviews (
   id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL REFERENCES vendor_bills(id), reviewer_name TEXT NOT NULL,
   action TEXT NOT NULL CHECK (action IN ('approve','reject','request_info','contest')),
   reason_code TEXT REFERENCES reason_codes(code), note TEXT, decision_id TEXT REFERENCES decisions(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT now()::text
 );
 CREATE TABLE pbc_requests (
   id TEXT PRIMARY KEY,
@@ -127,8 +133,9 @@ CREATE TABLE pbc_requests (
   description TEXT NOT NULL, covered_period_id TEXT REFERENCES accounting_periods(id),
   due_date TEXT, owner_name TEXT,
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','assembled','submitted','accepted','exception')),
-  linked_invoice_ids TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  linked_invoice_ids TEXT, created_at TEXT NOT NULL DEFAULT now()::text
 );
 CREATE INDEX idx_decisions_invoice ON decisions(invoice_id);
+CREATE INDEX idx_decisions_seq ON decisions(seq);
 CREATE INDEX idx_vendor_bills_vendor ON vendor_bills(vendor_id);
 CREATE INDEX idx_jel_account ON journal_entry_lines(account_id);

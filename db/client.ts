@@ -1,15 +1,25 @@
-import Database from "better-sqlite3";
-import path from "node:path";
+import postgres from "postgres";
 
-const DB_PATH = process.env.DATABASE_PATH ?? path.join(process.cwd(), "db", "open-ledger.sqlite");
+/**
+ * Supabase Postgres connection. Use the POOLED connection string (port 6543, pgbouncer) in
+ * DATABASE_URL when deployed to a serverless host (Vercel etc.) — serverless spins up many
+ * short-lived instances and a direct (port 5432) connection per instance will exhaust
+ * Postgres's connection limit fast. The pooled string is what Supabase's dashboard calls
+ * "Transaction" mode under Project Settings > Database > Connection pooling.
+ */
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error("DATABASE_URL is not set — copy your Supabase connection string into .env");
+}
 
-let db: Database.Database | undefined;
+let sqlClient: ReturnType<typeof postgres> | undefined;
 
-export function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
+export function getSql() {
+  if (!sqlClient) {
+    sqlClient = postgres(connectionString!, {
+      // pgbouncer transaction-mode pooling doesn't support prepared statements.
+      prepare: false,
+    });
   }
-  return db;
+  return sqlClient;
 }

@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { getDb } from "@/db/client";
+import type { TransactionSql } from "postgres";
+import { getSql } from "@/db/client";
 import { computeHash } from "./hash-chain";
 import type { Decision, NodeId } from "@/lib/types";
 
 /**
  * The hash chain is GLOBAL across every decision ever written (one single append-only
  * ledger, not one per invoice) — this is what the dashboard's single "chain verified ✓"
- * indicator and /api/audit/verify check. better-sqlite3 is synchronous/single-connection,
- * which serializes every write and makes this safe without extra locking (ENGINE.md §5).
+ * indicator and /api/audit/verify check. Ordered by the `seq` BIGSERIAL column (Postgres
+ * has no implicit rowid the way SQLite does, so this is an explicit monotonic sequence).
+ * All functions here are async now that the database is a real network round-trip
+ * (Supabase Postgres), not an in-process SQLite file.
  */
 
 export interface WriteDecisionInput {
@@ -34,14 +37,24 @@ export interface WriteDecisionInput {
   idempotencyKey?: string;
 }
 
-function toRow(d: Decision) {
+/**
+ * The exact shape that gets hashed. Exported deliberately: anything that verifies a decision's
+ * hash later (verifyChain(), /api/audit/verify) MUST call `hashableRow(fromRow(dbRow))` — i.e.
+ * go through this same function on a reconstructed Decision object — never hash a raw DB row
+ * directly. The raw row uses snake_case keys (prev_hash); this function's output uses
+ * camelCase (prevHash). Hashing the wrong shape produces a different canonicalized string and
+ * would make every decision falsely appear tampered — this is exactly the class of bug that
+ * broke `superseded_by_id` earlier, caught the same way: trace the shapes by hand before
+ * trusting them.
+ */
+export function hashableRow(d: Decision) {
   return {
     id: d.id,
     invoice_id: d.invoiceId ?? null,
     node_id: d.nodeId,
     parent_decision_id: d.parentDecisionId ?? null,
     reconsideration_of_id: d.reconsiderationOfId ?? null,
-    superseded_by_id: d.supersededById ?? null,
+    superseded_by_id: d.supersededById ?? null, // excluded inside canonicalize() itself
     agent_id: d.agentId,
     model: d.model ?? null,
     model_version: d.modelVersion ?? null,
@@ -59,8 +72,7 @@ function toRow(d: Decision) {
     triggered_by_actor: d.triggeredByActor ?? null,
     triggered_by_question: d.triggeredByQuestion ?? null,
     idempotency_key: d.idempotencyKey ?? null,
-    prev_hash: d.prevHash ?? null,
-    hash: d.hash,
+    prevHash: d.prevHash ?? null,
     created_at: d.createdAt,
   };
 }
@@ -96,18 +108,50 @@ function fromRow(row: any): Decision {
   };
 }
 
-/** Append-only insert: writes the decision, chained to whatever the last global hash was. */
-export function writeDecision(input: WriteDecisionInput): Decision {
-  const db = getDb();
+/**
+ * A fixed, arbitrary key for the hash-chain's advisory lock — see the correctness note below.
+ * Any stable int8 works; this one has no special meaning beyond being a constant.
+ */
+const HASH_CHAIN_LOCK_KEY = 9081726354;
+
+/**
+ * Append-only insert: writes the decision, chained to whatever the last global hash was.
+ *
+ * Correctness note, real not hypothetical: unlike SQLite (single-connection, serializes every
+ * write automatically), Postgres genuinely allows concurrent connections — two writeDecision()
+ * calls arriving at the same moment could both read the same "last hash," then both insert
+ * claiming it as their prev_hash, silently forking the chain. This is exactly the risk ENGINE.md
+ * §5 flagged as a future concern when this project was still on SQLite ("scaling to Postgres
+ * would need a single-writer advisory lock around the hash-chain sequence") — now that we've
+ * actually switched to Postgres (for live hosting), that future is now. Fixed here with a
+ * transaction-scoped Postgres advisory lock (`pg_advisory_xact_lock`): it serializes the
+ * read-last-hash + insert sequence globally, and auto-releases at commit/rollback — no manual
+ * unlock to forget.
+ */
+export async function writeDecision(input: WriteDecisionInput): Promise<Decision> {
+  const sql = getSql();
 
   if (input.idempotencyKey) {
-    const existing = db.prepare(`SELECT * FROM decisions WHERE idempotency_key = ?`).get(input.idempotencyKey);
-    if (existing) return fromRow(existing); // already written — don't double-post (ENGINE.md §5)
+    const existing = await sql`SELECT * FROM decisions WHERE idempotency_key = ${input.idempotencyKey}`;
+    if (existing.length > 0) return fromRow(existing[0]); // already written — don't double-post (ENGINE.md §5)
   }
 
-  const last = db.prepare(`SELECT hash FROM decisions ORDER BY rowid DESC LIMIT 1`).get() as { hash: string } | undefined;
-  const prevHash = last?.hash ?? null;
+  return sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(${HASH_CHAIN_LOCK_KEY})`;
 
+    const last = await tx`SELECT hash FROM decisions ORDER BY seq DESC LIMIT 1`;
+    const prevHash: string | null = last.length > 0 ? last[0].hash : null;
+
+    const decision = await buildAndInsertDecision(tx, input, prevHash);
+    return decision;
+  });
+}
+
+async function buildAndInsertDecision(
+  sql: TransactionSql<{}>,
+  input: WriteDecisionInput,
+  prevHash: string | null
+): Promise<Decision> {
   const decision: Decision = {
     id: randomUUID(),
     invoiceId: input.invoiceId,
@@ -135,57 +179,60 @@ export function writeDecision(input: WriteDecisionInput): Decision {
     hash: "", // computed below, then fixed
     createdAt: new Date().toISOString(),
   };
-  decision.hash = computeHash(prevHash, toRow(decision));
+  decision.hash = computeHash(prevHash, hashableRow(decision));
 
-  db.prepare(
-    `INSERT INTO decisions (id, invoice_id, node_id, parent_decision_id, reconsideration_of_id, superseded_by_id,
+  const r = hashableRow(decision);
+  await sql`
+    INSERT INTO decisions (id, invoice_id, node_id, parent_decision_id, reconsideration_of_id, superseded_by_id,
       agent_id, model, model_version, started_at, ended_at, inputs_consumed, tool_calls, claims, policy_evaluation,
       confidence, action_taken, reason_code, forwarded_to, what_was_forwarded, triggered_by_actor, triggered_by_question,
       idempotency_key, prev_hash, hash, created_at)
-    VALUES (@id, @invoice_id, @node_id, @parent_decision_id, @reconsideration_of_id, @superseded_by_id,
-      @agent_id, @model, @model_version, @started_at, @ended_at, @inputs_consumed, @tool_calls, @claims, @policy_evaluation,
-      @confidence, @action_taken, @reason_code, @forwarded_to, @what_was_forwarded, @triggered_by_actor, @triggered_by_question,
-      @idempotency_key, @prev_hash, @hash, @created_at)`
-  ).run(toRow(decision));
+    VALUES (${r.id}, ${r.invoice_id}, ${r.node_id}, ${r.parent_decision_id}, ${r.reconsideration_of_id}, ${r.superseded_by_id},
+      ${r.agent_id}, ${r.model}, ${r.model_version}, ${r.started_at}, ${r.ended_at}, ${r.inputs_consumed}, ${r.tool_calls}, ${r.claims}, ${r.policy_evaluation},
+      ${r.confidence}, ${r.action_taken}, ${r.reason_code}, ${r.forwarded_to}, ${r.what_was_forwarded}, ${r.triggered_by_actor}, ${r.triggered_by_question},
+      ${r.idempotency_key}, ${prevHash}, ${decision.hash}, ${r.created_at})
+  `;
 
   return decision;
 }
 
-export function getDecision(id: string): Decision | undefined {
-  const row = getDb().prepare(`SELECT * FROM decisions WHERE id = ?`).get(id);
-  return row ? fromRow(row) : undefined;
+export async function getDecision(id: string): Promise<Decision | undefined> {
+  const rows = await getSql()`SELECT * FROM decisions WHERE id = ${id}`;
+  return rows.length > 0 ? fromRow(rows[0]) : undefined;
 }
 
-export function getDecisionsForInvoice(invoiceId: string): Decision[] {
-  const rows = getDb().prepare(`SELECT * FROM decisions WHERE invoice_id = ? ORDER BY rowid ASC`).all(invoiceId);
+export async function getDecisionsForInvoice(invoiceId: string): Promise<Decision[]> {
+  const rows = await getSql()`SELECT * FROM decisions WHERE invoice_id = ${invoiceId} ORDER BY seq ASC`;
   return rows.map(fromRow);
 }
 
-export function getAllDecisionsInOrder(): Decision[] {
-  const rows = getDb().prepare(`SELECT * FROM decisions ORDER BY rowid ASC`).all();
+export async function getAllDecisionsInOrder(): Promise<Decision[]> {
+  const rows = await getSql()`SELECT * FROM decisions ORDER BY seq ASC`;
   return rows.map(fromRow);
 }
 
 /** Decisions at the same invoice that came after `after` in the pipeline (used by the reconsider cascade). */
-export function getDecisionsAfter(after: Decision): Decision[] {
+export async function getDecisionsAfter(after: Decision): Promise<Decision[]> {
   if (!after.invoiceId) return [];
-  const rows = getDb()
-    .prepare(`SELECT * FROM decisions WHERE invoice_id = ? AND rowid > (SELECT rowid FROM decisions WHERE id = ?) ORDER BY rowid ASC`)
-    .all(after.invoiceId, after.id);
+  const sql = getSql();
+  const rows = await sql`
+    SELECT d.* FROM decisions d, decisions anchor
+    WHERE anchor.id = ${after.id} AND d.invoice_id = ${after.invoiceId} AND d.seq > anchor.seq
+    ORDER BY d.seq ASC
+  `;
   return rows.map(fromRow);
 }
 
-export function markSuperseded(decisionId: string, byId: string): void {
-  getDb().prepare(`UPDATE decisions SET superseded_by_id = ? WHERE id = ? AND superseded_by_id IS NULL`).run(byId, decisionId);
-  // Note: this is the one deliberate exception to "never UPDATE a decisions row" — it only ever
-  // sets a forward pointer once (the WHERE clause makes it a no-op on a second attempt), it never
-  // touches any of the row's actual decision content (nodeId, actionTaken, hash, etc.), so the
-  // hash chain's own integrity (computed over the content fields) is untouched by this update.
+export async function markSuperseded(decisionId: string, byId: string): Promise<void> {
+  await getSql()`UPDATE decisions SET superseded_by_id = ${byId} WHERE id = ${decisionId} AND superseded_by_id IS NULL`;
+  // The one deliberate exception to "never UPDATE a decisions row" — it only ever sets a
+  // forward pointer once (the WHERE clause makes a second attempt a no-op), and it never
+  // touches any of the row's actual decision content. hash-chain.ts's canonicalize()
+  // explicitly excludes this field from the hashed payload for exactly this reason — see
+  // the comment there and the regression test in tests/hash-chain.test.ts.
 }
 
-export function countReconsiderations(originalDecisionId: string): number {
-  const row = getDb()
-    .prepare(`SELECT COUNT(*) as n FROM decisions WHERE reconsideration_of_id = ?`)
-    .get(originalDecisionId) as { n: number };
-  return row.n;
+export async function countReconsiderations(originalDecisionId: string): Promise<number> {
+  const rows = await getSql()`SELECT COUNT(*)::int as n FROM decisions WHERE reconsideration_of_id = ${originalDecisionId}`;
+  return rows[0].n;
 }
