@@ -217,6 +217,16 @@ CREATE INDEX idx_vendor_bills_vendor ON vendor_bills(vendor_id);
 CREATE INDEX idx_jel_account ON journal_entry_lines(account_id);
 ```
 
+### 2.1 Reconciliation: SQLite → Postgres, and seed-count corrections (added post-implementation)
+
+The SQL block above is **no longer literal**. Commit `c8f6654` switched the live db layer from SQLite (better-sqlite3) to Supabase Postgres (`postgres.js`), for live hosting. The real `db/schema.sql` differs from the block above only in dialect — `BOOLEAN` instead of `INTEGER` 0/1, `now()::text` instead of `datetime('now')`, and an added `BIGSERIAL seq` column (plus an `idx_decisions_seq` index) on `decisions`, since Postgres has no implicit rowid to order the hash chain by — table and column shapes are otherwise unchanged. `db/client.ts` is a `postgres.js` singleton reading `DATABASE_URL` from `.env` (Supabase's pooled, port-6543 "Transaction mode" connection string, for serverless hosting); `db/migrate.ts` drops and recreates every table on each run (a hackathon demo DB, not a production migration chain) rather than guarding inserts.
+
+**Seed counts, superseding this doc's earlier 14 reason_codes / 4 chart_of_accounts instruction:** `db/migrate.ts` seeds **16** `reason_codes` (the 12 canonical `EXC-*` codes from `docs/ap-three-way-match-spec.md` §2, plus `EXC-13`/`EXC-14` from ALGORITHMS.md §7, plus `CLEAN_MATCH` — the required non-null reason code on every Tier-0 auto-approval — and `R99_AGENT_ERROR`, ENGINE.md §5's reserved code for a pipeline stage that failed after its bounded retry) and **23** `chart_of_accounts` rows (DESIGN.md §4's fuller numbering, not the 4-account minimum originally specified here).
+
+**`lib/types.ts` additions beyond the block below:** the real file also exports `PurchaseOrder`, `PurchaseOrderLine`, `GoodsReceipt`, and `VendorBillLine` — needed once `lib/matching/*.ts` had to reference PO and GRN shapes that this doc's original snippet never included. Treat the file on disk, not the block below, as the authority for what's importable.
+
+**Alias note:** `docs/ap-three-way-match-spec.md` §1.2/§1.3 use `EXC-CURRENCY_MISMATCH` and `EXC-INVOICE_BEFORE_RECEIPT` informally — these are **not** distinct codes, just loose prose aliases for the canonical `EXC-CURRENCY` and `EXC-BEFORE_RCV` seeded above. Do not seed or branch on the alias spellings.
+
 ---
 
 ## 3. `lib/types.ts` — the shared contract, copy verbatim, both of you import from here and nowhere else redefines these shapes
