@@ -211,7 +211,11 @@ export async function logCallbackAttempt(input: LogCallbackAttemptInput): Promis
     if (review.status !== "callback_pending") {
       throw new Error(`logCallbackAttempt: review '${input.reviewId}' is '${review.status}', not 'callback_pending'`);
     }
-    const callbackAt = input.callbackAt ?? new Date().toISOString();
+    const callbackAtRaw = input.callbackAt;
+    const callbackAt = callbackAtRaw ? requireNonBlank(callbackAtRaw, "callbackAt") : new Date().toISOString();
+    if (Number.isNaN(Date.parse(callbackAt))) {
+      throw new Error(`callbackAt must be a valid ISO timestamp`);
+    }
     await tx`
       UPDATE vendor_bank_change_reviews
       SET callback_phone_used = ${phoneUsed}, callback_confirmed_by = ${confirmedBy}, callback_at = ${callbackAt}
