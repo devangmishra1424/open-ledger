@@ -50,6 +50,12 @@ export function getSql() {
       max: 20,
       idle_timeout: 10, // seconds a connection can sit idle before this client releases it
       connect_timeout: 10, // seconds to wait for a new connection before failing loud
+      // NUMERIC columns (all money, quantities and rates) arrive as strings by default, to avoid
+      // silently losing digits. A JS double round-trips about 15 significant digits, i.e. amounts up
+      // to roughly ten billion with cents, far beyond what one invoice reaches; so read them as
+      // numbers and let the code do arithmetic on them. The DATABASE keeps the exact value, and
+      // amounts are re-rounded to the cent where they are written.
+      types: { numeric: { to: 1700, from: [1700], serialize: (x: unknown) => String(x), parse: (x: string) => Number(x) } },
       ...(schema ? { connection: { search_path: schema } } : {}),
     });
   }

@@ -27,10 +27,10 @@ export const PUT = handle("PUT /api/settings", async (req) => {
 
   await getSql()`
     INSERT INTO app_settings (id, auto_approval_confidence, max_auto_payment_amount, updated_at)
-    VALUES ('default', COALESCE(${confidence}::real, 90.0), COALESCE(${maxAmount}::real, 50000.0), ${new Date().toISOString()})
+    VALUES ('default', COALESCE(${confidence}::real, 90.0), COALESCE(${maxAmount}::numeric, 50000.0), ${new Date().toISOString()})
     ON CONFLICT (id) DO UPDATE SET
       auto_approval_confidence = COALESCE(${confidence}::real, app_settings.auto_approval_confidence),
-      max_auto_payment_amount = COALESCE(${maxAmount}::real, app_settings.max_auto_payment_amount),
+      max_auto_payment_amount = COALESCE(${maxAmount}::numeric, app_settings.max_auto_payment_amount),
       updated_at = EXCLUDED.updated_at`;
   return Response.json({ success: true, ...(await getPolicyLimits()) });
 });

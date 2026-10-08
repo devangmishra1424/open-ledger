@@ -121,7 +121,16 @@ function detectCurrency(text: string): string | null {
   return null;
 }
 
+/** Header lines that are boilerplate, not a vendor: copy markers, page counters, document titles. */
+const BOILERPLATE_LINE = /^(?:(?:tax\s+)?invoice|original(?:\s+for\s+\w+)?|duplicate(?:\s+for\s+\w+)?|triplicate|copy|page\s+\d+(?:\s+of\s+\d+)?|bill|receipt|statement|credit\s+(?:note|memo)|proforma(?:\s+invoice)?)$/i;
+/** Address / contact lines that sit in a letterhead near the vendor name but are not it. */
+const CONTACT_LINE = /@|www\.|https?:|^\d|\+?\d[\d\s().-]{7,}\d|\b(?:street|st\.|road|rd\.|avenue|ave\.|blvd|suite|floor|p\.?o\.? box)\b/i;
+
+/** Vendors found by their header position rather than a label: the one field a total check cannot verify. */
+const VENDOR_FROM_HEADER = new WeakSet<ExtractionSubmission>();
+
 const RE = {
+  vendorLabel: /^(?:vendor(?:\s+name)?|supplier|bill(?:ed)?\s+from|sold\s+by|from)\s*:\s*(.+)$/i,
   invoiceNo: /^(?:invoice\s*(?:number|no\.?|#)|inv\s*(?:no\.?|#))\s*[:#]\s*(.+)$/i,
   date: /^(?:invoice\s*)?date\s*:\s*(.+)$/i,
   po: /^(?:purchase\s*order|po(?:\s*(?:number|no\.?|reference|ref\.?))?)\s*[:#]\s*(.+)$/i,
@@ -179,7 +188,8 @@ export function parseTemplateInvoice(invoiceText: string): ExtractionSubmission 
       continue;
     }
 
-    if ((m = line.match(RE.invoiceNo))) s.invoice_number = m[1].trim();
+    if ((m = line.match(RE.vendorLabel))) s.vendor_name = m[1].trim();
+    else if ((m = line.match(RE.invoiceNo))) s.invoice_number = m[1].trim();
     else if ((m = line.match(RE.date))) s.invoice_date = normalizeDate(m[1]);
     else if ((m = line.match(RE.po))) s.po_reference = m[1].trim();
     else if (RE.subtotal.test(line)) s.subtotal = amountIn(afterColon(line));
@@ -188,9 +198,13 @@ export function parseTemplateInvoice(invoiceText: string): ExtractionSubmission 
   }
   flush();
 
-  // The vendor is whatever heads the document, once the "INVOICE" title is skipped — a heuristic, reported as uncertain.
-  const head = lines.find((l) => !/^(tax\s+)?invoice$/i.test(l) && !/:/.test(l));
-  s.vendor_name = head ?? null;
+  // No "Vendor:" label: fall back to the first line that is not boilerplate, a contact line or a
+  // labelled field. A heuristic, so it is reported as uncertain (see finalize).
+  if (!s.vendor_name) {
+    const head = lines.find((l) => !BOILERPLATE_LINE.test(l) && !CONTACT_LINE.test(l) && !/:/.test(l));
+    s.vendor_name = head ?? null;
+    if (head) VENDOR_FROM_HEADER.add(s);
+  }
   s.currency = detectCurrency(invoiceText);
   return s;
 }
@@ -203,7 +217,7 @@ function finalize(s: ExtractionSubmission, method: ExtractionMethod, selfReporte
     s.currency = "USD";
     uncertain.push("currency not stated — assumed USD");
   }
-  if (method !== "llm" && s.vendor_name != null) uncertain.push("vendor_name taken from the document header (heuristic)");
+  if (VENDOR_FROM_HEADER.has(s)) uncertain.push("vendor_name taken from the document header (heuristic)");
   const cap = CONFIDENCE_CAP[method];
   const base = a.checkScore * cap;
   return { ...s, confidence: Math.round(Math.min(base, selfReported ?? 1) * 100) / 100, uncertain_fields: uncertain };

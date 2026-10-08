@@ -7,3 +7,6 @@ import { llmConfigured } from "@/lib/agent/llm";
  * SKIP_LIVE_LLM=1 is set to run only the deterministic suites.
  */
 export const liveLlm = llmConfigured() && !process.env.SKIP_LIVE_LLM;
+
+/** The near-duplicate check embeds text through OpenAI; same rule: needs its own key, skipped visibly without it. */
+export const liveEmbeddings = Boolean(process.env.OPENAI_API_KEY) && !process.env.SKIP_LIVE_LLM;

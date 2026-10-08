@@ -1,4 +1,4 @@
--- Postgres (Supabase) schema. Switched from SQLite: booleans are real BOOLEAN (not 0/1),
+-- Postgres (Supabase) schema. Money, quantities and rates are NUMERIC (exact); only model confidence stays REAL. Switched from SQLite: booleans are real BOOLEAN (not 0/1),
 -- timestamps default to now()::text (kept as TEXT, not TIMESTAMPTZ, so the app's existing
 -- ISO-string handling doesn't need to change), and `decisions` gets an explicit BIGSERIAL
 -- `seq` column since Postgres has no implicit rowid to order the hash chain by.
@@ -34,10 +34,10 @@ CREATE TABLE vendor_corrections (
   -- UOM-conversion extension (ALGORITHMS.md §14: "a natural, cheap extension of the existing
   -- vendor_corrections learning-loop mechanism" rather than a parallel table). Only populated
   -- when this correction records a confirmed unit-of-measure conversion factor; NULL otherwise.
-  uom_from TEXT, uom_to TEXT, conversion_factor REAL
+  uom_from TEXT, uom_to TEXT, conversion_factor NUMERIC(18,8)
 );
 CREATE TABLE tax_codes (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, rate REAL NOT NULL,
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, rate NUMERIC(10,6) NOT NULL,
   tax_type TEXT NOT NULL CHECK (tax_type IN ('vat','gst','sales_tax','withholding')),
   direction TEXT NOT NULL CHECK (direction IN ('input','output')),
   tax_account_id TEXT REFERENCES chart_of_accounts(id), jurisdiction TEXT,
@@ -45,20 +45,20 @@ CREATE TABLE tax_codes (
 );
 CREATE TABLE exchange_rates (
   id TEXT PRIMARY KEY, from_currency TEXT NOT NULL, to_currency TEXT NOT NULL,
-  rate REAL NOT NULL, rate_date TEXT NOT NULL, rate_source TEXT
+  rate NUMERIC(18,8) NOT NULL, rate_date TEXT NOT NULL, rate_source TEXT
 );
 CREATE TABLE purchase_orders (
   id TEXT PRIMARY KEY, po_number TEXT UNIQUE NOT NULL, vendor_id TEXT NOT NULL REFERENCES vendors(id), buyer_name TEXT,
   order_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','partial','closed')),
   po_type TEXT NOT NULL DEFAULT 'standard' CHECK (po_type IN ('standard','blanket')),
-  max_value_ceiling REAL, max_qty_ceiling REAL,
-  currency TEXT NOT NULL DEFAULT 'USD', exchange_rate REAL NOT NULL DEFAULT 1.0
+  max_value_ceiling NUMERIC(18,4), max_qty_ceiling NUMERIC(18,4),
+  currency TEXT NOT NULL DEFAULT 'USD', exchange_rate NUMERIC(18,8) NOT NULL DEFAULT 1.0
 );
 CREATE TABLE purchase_order_lines (
   id TEXT PRIMARY KEY, po_id TEXT NOT NULL REFERENCES purchase_orders(id), line_number INTEGER NOT NULL,
-  description TEXT NOT NULL, uom TEXT NOT NULL DEFAULT 'each', qty_ordered REAL NOT NULL,
-  unit_price REAL NOT NULL, gl_account_id TEXT REFERENCES chart_of_accounts(id),
-  tolerance_pct REAL NOT NULL DEFAULT 0.02, final_delivery BOOLEAN NOT NULL DEFAULT false
+  description TEXT NOT NULL, uom TEXT NOT NULL DEFAULT 'each', qty_ordered NUMERIC(18,4) NOT NULL,
+  unit_price NUMERIC(18,4) NOT NULL, gl_account_id TEXT REFERENCES chart_of_accounts(id),
+  tolerance_pct NUMERIC(8,6) NOT NULL DEFAULT 0.02, final_delivery BOOLEAN NOT NULL DEFAULT false
 );
 CREATE TABLE goods_receipts (
   id TEXT PRIMARY KEY, po_id TEXT NOT NULL REFERENCES purchase_orders(id), receipt_date TEXT NOT NULL,
@@ -67,7 +67,7 @@ CREATE TABLE goods_receipts (
 );
 CREATE TABLE goods_receipt_lines (
   id TEXT PRIMARY KEY, goods_receipt_id TEXT NOT NULL REFERENCES goods_receipts(id),
-  po_line_id TEXT NOT NULL REFERENCES purchase_order_lines(id), qty_received REAL NOT NULL
+  po_line_id TEXT NOT NULL REFERENCES purchase_order_lines(id), qty_received NUMERIC(18,4) NOT NULL
 );
 CREATE TABLE journal_entries (
   id TEXT PRIMARY KEY, entry_number TEXT UNIQUE NOT NULL, entry_date TEXT NOT NULL,
@@ -75,21 +75,21 @@ CREATE TABLE journal_entries (
   source_type TEXT NOT NULL CHECK (source_type IN ('vendor_bill','payment','manual','reversal')), source_id TEXT,
   status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('draft','posted','reversed','voided')),
   posted_by TEXT, posted_at TEXT, reversal_of_entry_id TEXT REFERENCES journal_entries(id),
-  currency TEXT NOT NULL DEFAULT 'USD', exchange_rate REAL NOT NULL DEFAULT 1.0,
+  currency TEXT NOT NULL DEFAULT 'USD', exchange_rate NUMERIC(18,8) NOT NULL DEFAULT 1.0,
   idempotency_key TEXT UNIQUE, created_at TEXT NOT NULL DEFAULT now()::text
 );
 CREATE TABLE journal_entry_lines (
   id TEXT PRIMARY KEY, entry_id TEXT NOT NULL REFERENCES journal_entries(id), line_number INTEGER NOT NULL,
   account_id TEXT NOT NULL REFERENCES chart_of_accounts(id),
-  debit_amount REAL NOT NULL DEFAULT 0, credit_amount REAL NOT NULL DEFAULT 0,
-  currency_amount REAL NOT NULL, base_currency_amount REAL NOT NULL,
+  debit_amount NUMERIC(18,4) NOT NULL DEFAULT 0, credit_amount NUMERIC(18,4) NOT NULL DEFAULT 0,
+  currency_amount NUMERIC(18,4) NOT NULL, base_currency_amount NUMERIC(18,4) NOT NULL,
   department TEXT, class TEXT, location TEXT, vendor_id TEXT REFERENCES vendors(id)
 );
 CREATE TABLE vendor_bills (
   id TEXT PRIMARY KEY, vendor_id TEXT NOT NULL REFERENCES vendors(id), po_id TEXT REFERENCES purchase_orders(id),
   invoice_number TEXT NOT NULL, invoice_date TEXT NOT NULL, due_date TEXT,
-  currency TEXT NOT NULL DEFAULT 'USD', exchange_rate REAL NOT NULL DEFAULT 1.0,
-  subtotal REAL NOT NULL, tax_total REAL NOT NULL DEFAULT 0, total_amount REAL NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD', exchange_rate NUMERIC(18,8) NOT NULL DEFAULT 1.0,
+  subtotal NUMERIC(18,4) NOT NULL, tax_total NUMERIC(18,4) NOT NULL DEFAULT 0, total_amount NUMERIC(18,4) NOT NULL,
   raw_source TEXT, ap_account_id TEXT REFERENCES chart_of_accounts(id), journal_entry_id TEXT REFERENCES journal_entries(id),
   status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing','matched','exception','approved','posted','paid','void')),
   -- EXC-CREDIT_MEMO extension (spec §2 EXC-07): invoice_type distinguishes a credit memo from
@@ -103,22 +103,22 @@ CREATE TABLE vendor_bills (
 CREATE TABLE vendor_bill_lines (
   id TEXT PRIMARY KEY, vendor_bill_id TEXT NOT NULL REFERENCES vendor_bills(id),
   po_line_id TEXT REFERENCES purchase_order_lines(id), description TEXT NOT NULL,
-  qty_invoiced REAL NOT NULL, unit_price REAL NOT NULL, uom TEXT NOT NULL DEFAULT 'each',
+  qty_invoiced NUMERIC(18,4) NOT NULL, unit_price NUMERIC(18,4) NOT NULL, uom TEXT NOT NULL DEFAULT 'each',
   tax_code_id TEXT REFERENCES tax_codes(id), gl_account_id TEXT REFERENCES chart_of_accounts(id),
   -- EXC-TAX_VAR extension: the tax actually charged on THIS line, vs tax_codes.rate (the
   -- expected rate for tax_code_id) — tax_total on vendor_bills is only a header aggregate and
   -- can't be broken down per line when a bill has lines under different tax codes. Nullable:
   -- most demo/seed lines won't set it, and no tax comparison fires without it (see match-stage.ts).
-  tax_amount REAL
+  tax_amount NUMERIC(18,4)
 );
 CREATE TABLE payments (
   id TEXT PRIMARY KEY, method TEXT NOT NULL DEFAULT 'ach' CHECK (method IN ('ach','wire','check','virtual_card')),
-  payment_date TEXT NOT NULL, bank_account_id TEXT, total_amount REAL NOT NULL,
+  payment_date TEXT NOT NULL, bank_account_id TEXT, total_amount NUMERIC(18,4) NOT NULL,
   journal_entry_id TEXT REFERENCES journal_entries(id), positive_pay_reference TEXT
 );
 CREATE TABLE payment_applications (
   id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id),
-  vendor_bill_id TEXT NOT NULL REFERENCES vendor_bills(id), applied_amount REAL NOT NULL
+  vendor_bill_id TEXT NOT NULL REFERENCES vendor_bills(id), applied_amount NUMERIC(18,4) NOT NULL
 );
 CREATE TABLE reason_codes (
   code TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL
@@ -168,7 +168,7 @@ CREATE TABLE pbc_evidence_files (
 CREATE TABLE app_settings (
   id TEXT PRIMARY KEY DEFAULT 'default',
   auto_approval_confidence REAL NOT NULL DEFAULT 90.0,
-  max_auto_payment_amount REAL NOT NULL DEFAULT 50000.00,
+  max_auto_payment_amount NUMERIC(18,4) NOT NULL DEFAULT 50000.00,
   erp_webhook_url TEXT,
   updated_at TEXT NOT NULL DEFAULT now()::text
 );

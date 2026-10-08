@@ -67,6 +67,29 @@ describe("parseTemplateInvoice", () => {
     expect(s.total).toBeNull();
   });
 
+  it("reads a labelled Vendor: header, ahead of any heuristic", () => {
+    const labelled = INLINE_INVOICE.replace("INVOICE\nAcme Supply Co.", "INVOICE\nVendor: Acme Supply Co.");
+    expect(labelled).not.toBe(INLINE_INVOICE); // the fixture really changed
+    expect(parseTemplateInvoice(labelled).vendor_name).toBe("Acme Supply Co.");
+  });
+
+  it("skips boilerplate banners and letterhead contact lines when looking for the vendor", () => {
+    for (const banner of ["ORIGINAL FOR RECIPIENT", "Page 1 of 2", "TAX INVOICE", "COPY"]) {
+      expect(parseTemplateInvoice(`${banner}\n${INLINE_INVOICE}`).vendor_name).toBe("Acme Supply Co.");
+    }
+    const letterhead = INLINE_INVOICE.replace("INVOICE\nAcme Supply Co.", "Acme Supply Co.\n1200 Market Street, Suite 400\nbilling@acme.example\n+1 415 555 0100\nINVOICE");
+    expect(letterhead).not.toBe(INLINE_INVOICE);
+    expect(parseTemplateInvoice(letterhead).vendor_name).toBe("Acme Supply Co.");
+  });
+
+  it("only a header-derived vendor is reported as uncertain; a labelled one is not", async () => {
+    const labelled = await extract(INLINE_INVOICE.replace("INVOICE\nAcme Supply Co.", "INVOICE\nVendor: Acme Supply Co."));
+    expect(labelled.submission.vendor_name).toBe("Acme Supply Co.");
+    expect(labelled.submission.uncertain_fields.join(" ")).not.toContain("vendor_name");
+    const header = await extract(INLINE_INVOICE);
+    expect(header.submission.uncertain_fields.join(" ")).toContain("vendor_name taken from the document header");
+  });
+
   it("leaves unreadable fields null instead of guessing", () => {
     const s = parseTemplateInvoice("some scanned garbage with no structure");
     expect(s.invoice_number).toBeNull();

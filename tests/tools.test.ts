@@ -3,6 +3,7 @@ import { getSql } from "@/db/client";
 import {
   getPo, getReceipts, getVendorHistory, checkDuplicate, recallVendorCorrections, rememberCorrection, getPolicy,
 } from "@/lib/agent/tools";
+import { liveEmbeddings } from "./helpers/live-llm";
 
 /**
  * Integration tests against the real, live Supabase DB — no mocks, matching this project's
@@ -122,13 +123,13 @@ describe("getVendorHistory", () => {
 });
 
 describe("checkDuplicate", () => {
-  it("reports no exact duplicate for a normal invoice — vendor_bills' own UNIQUE(vendor_id, invoice_number) constraint makes a real exact-duplicate row physically impossible once pre-match-validation has already gated the insert; this just confirms the query itself runs clean and returns empty, not a broken/skipped check", async () => {
+  it.skipIf(!liveEmbeddings)("reports no exact duplicate for a normal invoice — vendor_bills' own UNIQUE(vendor_id, invoice_number) constraint makes a real exact-duplicate row physically impossible once pre-match-validation has already gated the insert; this just confirms the query itself runs clean and returns empty, not a broken/skipped check", async () => {
     const r = await checkDuplicate(currentInvoiceId);
     expect(r.found).toBe(true);
     expect(r.exactDuplicateIds).toEqual([]);
   });
 
-  it("finds the near-duplicate (close invoice number, amount, and date) with a similarity score", async () => {
+  it.skipIf(!liveEmbeddings)("finds the near-duplicate (close invoice number, amount, and date) with a similarity score", async () => {
     const r = await checkDuplicate(currentInvoiceId);
     const nearIds = r.nearDuplicates?.map((d) => d.id) ?? [];
     expect(nearIds).toContain(nearDupInvoiceId);
@@ -136,7 +137,7 @@ describe("checkDuplicate", () => {
     expect(match?.similarityScore).toBeGreaterThanOrEqual(0.5);
   });
 
-  it("does not flag an unrelated invoice (very different amount/date/number) as any kind of duplicate", async () => {
+  it.skipIf(!liveEmbeddings)("does not flag an unrelated invoice (very different amount/date/number) as any kind of duplicate", async () => {
     const r = await checkDuplicate(currentInvoiceId);
     const allFlaggedIds = [...(r.exactDuplicateIds ?? []), ...(r.nearDuplicates?.map((d) => d.id) ?? [])];
     const unrelated = await sql`SELECT id FROM vendor_bills WHERE invoice_number = ${PREFIX + "-INV-9999"}`;
