@@ -3,6 +3,9 @@ import { extract } from "@/lib/agent/extractor";
 import { runPipeline } from "@/lib/pipeline/orchestrator";
 import { getFrontendInvoice } from "@/lib/api-shapes";
 
+// Next.js ESM interop fallback for pdf-parse
+const pdfParse = require("pdf-parse");
+
 /**
  * POST /api/invoices/ingest — the real document-ingestion path: takes raw, unstructured
  * invoice text (what you'd get from an uploaded .txt/email/OCR dump) and runs it through the
@@ -18,9 +21,23 @@ import { getFrontendInvoice } from "@/lib/api-shapes";
 export async function POST(req: Request) {
   const sql = getSql();
   const body = await req.json().catch(() => ({}));
-  const rawText: string = body.rawText ?? "";
+  let rawText: string = body.rawText ?? "";
   if (!rawText.trim()) {
     return Response.json({ error: "rawText is required — nothing to ingest" }, { status: 400 });
+  }
+
+  // Handle Base64 PDF Uploads seamlessly
+  if (rawText.startsWith("data:application/pdf;base64,")) {
+    const base64Data = rawText.replace("data:application/pdf;base64,", "");
+    const buffer = Buffer.from(base64Data, "base64");
+    try {
+      const parseFunc = pdfParse.default || pdfParse;
+      const parsed = await parseFunc(buffer);
+      rawText = parsed.text;
+    } catch (e) {
+      console.error("PDF Parse Error:", e);
+      return Response.json({ error: "Failed to parse PDF file" }, { status: 400 });
+    }
   }
 
   const { submission, toolCalls } = await extract(rawText);

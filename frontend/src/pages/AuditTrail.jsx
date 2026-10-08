@@ -9,7 +9,8 @@ import {
   Check,
   CheckSquare,
   Paperclip,
-  FileText
+  FileText,
+  Bot
 } from 'lucide-react';
 import { api } from '../services/api';
 import './AuditTrail.css';
@@ -21,6 +22,12 @@ const AuditTrail = () => {
   const [tieOutFilter, setTieOutFilter] = useState('All');
   const [tagFilter, setTagFilter] = useState('All');
   const [minAmountFilter, setMinAmountFilter] = useState(0);
+
+  // PBC Narrative State
+  const [narrativeQuestion, setNarrativeQuestion] = useState("");
+  const [narrativeAnswer, setNarrativeAnswer] = useState(null);
+  const [isNarrating, setIsNarrating] = useState(false);
+
   const [evidenceFiles, setEvidenceFiles] = useState([]);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [chainVerified, setChainVerified] = useState(null);
@@ -74,6 +81,22 @@ const AuditTrail = () => {
       alert(`Could not read "${file.name}": ${err.message}`);
     } finally {
       setIsUploadingFile(false);
+    }
+  };
+
+  const handleNarrate = async () => {
+    if (!narrativeQuestion.trim() || !selectedRequestId) return;
+    setIsNarrating(true);
+    setNarrativeAnswer(null);
+    try {
+      const res = await api.narratePbcRequest(selectedRequestId, narrativeQuestion);
+      if (res && res.results) {
+        setNarrativeAnswer(res.results);
+      }
+    } catch (e) {
+      console.error("Narration failed", e);
+    } finally {
+      setIsNarrating(false);
     }
   };
 
@@ -297,6 +320,36 @@ const AuditTrail = () => {
           <span style={{ fontSize: '12px', color: 'var(--text-dim)', fontWeight: 600 }}>
             Showing {matchingEvidence.length} matching EvidenceRecords
           </span>
+        </div>
+
+        {/* PBC Narrative View */}
+        <div style={{ padding: '16px', background: 'rgba(255,255,255,0.02)', borderTop: '1px solid rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <input 
+              type="text" 
+              className="narrative-input" 
+              placeholder="Ask the auditor a question about this request..." 
+              value={narrativeQuestion}
+              onChange={(e) => setNarrativeQuestion(e.target.value)}
+              style={{ flex: 1, padding: '10px 14px', borderRadius: '6px', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' }}
+              onKeyDown={(e) => e.key === 'Enter' && handleNarrate()}
+            />
+            <button className="btn-primary" onClick={handleNarrate} disabled={isNarrating || !narrativeQuestion.trim()}>
+              <Bot size={16} />
+              {isNarrating ? "Thinking..." : "Ask"}
+            </button>
+          </div>
+          {narrativeAnswer && (
+            <div style={{ marginTop: '16px', padding: '16px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', borderLeft: '3px solid #a7c957' }}>
+              <h4 style={{ fontSize: '13px', fontWeight: 600, color: '#a7c957', marginBottom: '8px' }}>Auditor Narrative</h4>
+              {narrativeAnswer.map((ans, idx) => (
+                <p key={idx} style={{ fontSize: '13px', color: '#e5e7eb', marginBottom: idx === narrativeAnswer.length - 1 ? 0 : '8px', lineHeight: 1.5 }}>
+                  {ans.answer}
+                  {!ans.grounded && <span style={{ color: '#ffd60a', marginLeft: '6px' }}>(Not fully grounded in evidence)</span>}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Evidence Records List */}

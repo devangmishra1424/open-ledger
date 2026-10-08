@@ -22,16 +22,16 @@ import type { Decision } from "@/lib/types";
  * occasionally more with reconsiderations) and only when that set exceeds MAX_CANDIDATES.
  */
 
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-5-nano";
+const DEFAULT_MODEL = "llama-3.3-70b-versatile";
 const TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 1;
 
 let client: OpenAI | undefined;
-function getOpenAiClient(): OpenAI {
+function getGroqClient(): OpenAI {
   if (!client) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
-    client = new OpenAI({ apiKey });
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error("GROQ_API_KEY is not set");
+    client = new OpenAI({ apiKey, baseURL: "https://api.groq.com/openai/v1" });
   }
   return client;
 }
@@ -42,39 +42,32 @@ export interface ExplainResult {
   grounded: boolean;
 }
 
-const MAX_CANDIDATES = 10;
-
-/** Stage A — real embedding similarity between the question and each decision's own text content. */
 async function findCandidateDecisions(question: string, decisions: Decision[]): Promise<Decision[]> {
-  if (decisions.length <= MAX_CANDIDATES) return decisions;
-
-  const questionEmbedding = await getEmbedding(question);
-  const scored = await Promise.all(
-    decisions.map(async (d) => {
-      const text = [d.nodeId, d.actionTaken, d.reasonCode, ...(d.claims?.map((c) => c.text) ?? [])].filter(Boolean).join(" ");
-      const embedding = await getEmbedding(text);
-      return { d, score: cosineSimilarity(questionEmbedding, embedding) };
-    }),
-  );
-  return scored
-    .sort((a, b) => b.score - a.score)
-    .slice(0, MAX_CANDIDATES)
-    .map((s) => s.d);
+  // Bypassing embeddings for demo/production determinism.
+  // We just return all decisions (typically < 10 anyway).
+  return decisions;
 }
 
 /** Pulls in parents/children/reconsideration links for the candidate set (DESIGN.md §8: "plus linked parents/children"). */
-function includeLinked(seed: Decision[], allDecisions: Decision[]): Decision[] {
-  const ids = new Set(seed.map((d) => d.id));
-  for (const d of seed) {
-    if (d.parentDecisionId) ids.add(d.parentDecisionId);
-    if (d.reconsiderationOfId) ids.add(d.reconsiderationOfId);
-  }
-  for (const d of allDecisions) {
-    if ((d.parentDecisionId && ids.has(d.parentDecisionId)) || (d.reconsiderationOfId && ids.has(d.reconsiderationOfId))) {
-      ids.add(d.id);
+function includeLinked(initialSet: Decision[], allDecisions: Decision[]): Decision[] {
+  const finalSet = new Map<string, Decision>();
+  const allById = new Map(allDecisions.map((d) => [d.id, d]));
+
+  for (const d of initialSet) {
+    if (!d) continue;
+    finalSet.set(d.id, d);
+    
+    if (d.supersededById) {
+      const superseding = allById.get(d.supersededById);
+      if (superseding) finalSet.set(superseding.id, superseding);
+    }
+    if (d.reconsiderationOfId) {
+      const original = allById.get(d.reconsiderationOfId);
+      if (original) finalSet.set(original.id, original);
     }
   }
-  return allDecisions.filter((d) => ids.has(d.id));
+
+  return Array.from(finalSet.values());
 }
 
 const EXPLAIN_INSTRUCTIONS = `You answer questions about why an automated accounts-payable decision was made, using ONLY the decision records provided below as your evidence — never invent or infer beyond them. Be brief: 2-4 sentences total, not a report — a human is waiting on screen for this answer. Every claim must still cite the specific decision id it comes from, quoting each decision_id EXACTLY and IN FULL as given in the records — never shorten, truncate, or abbreviate it (no "abc123..."), e.g. "(see decision <full-decision_id>)". Do not restate every record or add a closing summary paragraph. Use contrastive framing where it fits: "held rather than auto-approved, because X; would have cleared if Y." If the question asks about something not captured in these records, say plainly that it wasn't recorded, rather than guessing.`;
@@ -104,20 +97,23 @@ export async function explain(invoiceId: string, decisionId: string, question: s
     triggered_by_question: d.triggeredByQuestion ?? null,
   }));
 
-  const openai = getOpenAiClient();
-  const response = await openai.responses.create(
+  const openai = getGroqClient();
+  const response = await openai.chat.completions.create(
     {
-      model: DEFAULT_MODEL, instructions: EXPLAIN_INSTRUCTIONS,
-      input: JSON.stringify({ question, decisions: contextPayload }),
-      // This is a grounded lookup-and-cite task over context already handed to the model, not
-      // a problem it needs to reason through — low effort should cut the real, measured
-      // latency (10-17s per call at default effort) with no real reasoning to lose.
-      reasoning: { effort: "low" },
+      model: DEFAULT_MODEL,
+      messages: [
+        { role: "system", content: EXPLAIN_INSTRUCTIONS },
+        { role: "user", content: JSON.stringify({ question, decisions: contextPayload }) }
+      ],
+      max_tokens: 4000
     },
     { timeout: TIMEOUT_MS, maxRetries: MAX_RETRIES },
   );
 
-  const answer = response.output_text;
-  const citedDecisionIds = contextPayload.filter((d) => answer.includes(d.decision_id)).map((d) => d.decision_id);
-  return { answer, citedDecisionIds, grounded: citedDecisionIds.length > 0 };
+  const answer = response.choices[0]?.message?.content?.trim() || "";
+  
+  const citedDecisionIds = context.map((d) => d.id).filter((id) => answer.includes(id));
+  const grounded = citedDecisionIds.length > 0;
+
+  return { answer, citedDecisionIds, grounded };
 }

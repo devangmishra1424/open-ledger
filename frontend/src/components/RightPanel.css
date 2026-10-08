@@ -85,7 +85,14 @@
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border-glass);
+  animation: slideInRight 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
+
+.seal-item-row:nth-child(1) { animation-delay: 0.1s; }
+.seal-item-row:nth-child(2) { animation-delay: 0.2s; }
+.seal-item-row:nth-child(3) { animation-delay: 0.3s; }
+.seal-item-row:nth-child(4) { animation-delay: 0.4s; }
+.seal-item-row:nth-child(5) { animation-delay: 0.5s; }
 
 .seal-item-left {
   display: flex;
@@ -200,7 +207,16 @@
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  animation: growUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
+
+.chart-bar-column:nth-child(1) { animation-delay: 0.1s; }
+.chart-bar-column:nth-child(2) { animation-delay: 0.15s; }
+.chart-bar-column:nth-child(3) { animation-delay: 0.2s; }
+.chart-bar-column:nth-child(4) { animation-delay: 0.25s; }
+.chart-bar-column:nth-child(5) { animation-delay: 0.3s; }
+.chart-bar-column:nth-child(6) { animation-delay: 0.35s; }
+.chart-bar-column:nth-child(7) { animation-delay: 0.4s; }
 
 .bar-fill {
   width: 100%;
@@ -217,4 +233,14 @@
 .chart-day-label {
   font-size: 10px;
   color: var(--text-dim);
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes growUp {
+  from { opacity: 0; transform: scaleY(0); transform-origin: bottom; }
+  to { opacity: 1; transform: scaleY(1); transform-origin: bottom; }
 }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import GlassCard from '../components/GlassCard';
 import SpecularButton from '../components/SpecularButton';
 import PixelTransition from '../components/PixelTransition';
@@ -11,7 +12,12 @@ import {
   ArrowRight,
   Sparkles,
   Construction,
-  Upload
+  Upload,
+  Inbox,
+  FileSearch,
+  Key,
+  Database,
+  GitCompare
 } from 'lucide-react';
 import './Dashboard.css';
 
@@ -22,7 +28,13 @@ const Dashboard = ({ onSelectInvoice }) => {
   const [statusFilter, setStatusFilter] = useState('All');
   const [priorityFilter, setPriorityFilter] = useState('All');
   const [isIngesting, setIsIngesting] = useState(false);
+  const [visualizerStep, setVisualizerStep] = useState(0);
+  const [demoPoKey, setDemoPoKey] = useState("");
+  const [uploadedFileName, setUploadedFileName] = useState("Invoice Document");
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [pastedText, setPastedText] = useState("");
   const fileInputRef = useRef(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
@@ -65,31 +77,78 @@ const Dashboard = ({ onSelectInvoice }) => {
     }
   };
 
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
+  const processRawInvoiceText = async (rawText, fileName = 'Invoice Document') => {
+    setIsIngesting(true);
+    setShowUploadModal(false);
+    setUploadedFileName(fileName);
+    setVisualizerStep(1); // Extracting Invoice Data...
+
+    try {
+      const created = await api.ingestInvoice(rawText);
+      if (created && created.id) {
+        setInvoices((prev) => [created, ...prev]);
+        const poKey = created.poNumber || created.extraction?.po_reference || 'PO-AutoMatched';
+        setDemoPoKey(poKey);
+
+        setTimeout(() => {
+          setVisualizerStep(2); // Matching Key Found
+          setTimeout(() => {
+            setVisualizerStep(3); // Querying ERP
+            setTimeout(() => {
+              setVisualizerStep(4); // Executing Match
+              setTimeout(() => {
+                setVisualizerStep(0);
+                setIsIngesting(false);
+                if (onSelectInvoice) onSelectInvoice(created);
+                navigate(`/invoice/${created.id}`);
+              }, 400);
+            }, 400);
+          }, 400);
+        }, 400);
+      } else {
+        alert('Could not process invoice — backend did not confirm creation.');
+        setIsIngesting(false);
+        setVisualizerStep(0);
+      }
+    } catch (err) {
+      alert(`Ingestion error: ${err.message}`);
+      setIsIngesting(false);
+      setVisualizerStep(0);
+    }
   };
 
   const handleFileSelected = async (e) => {
     const file = e.target.files?.[0];
-    e.target.value = '';
     if (!file) return;
 
-    setIsIngesting(true);
     try {
-      const rawText = await file.text();
-      const created = await api.ingestInvoice(rawText);
-      if (created && created.id) {
-        setInvoices([created, ...invoices]);
-        const conf = created.extraction?.confidence != null ? `${Math.round(created.extraction.confidence * 100)}%` : 'n/a';
-        alert(`Ingested "${file.name}" as invoice #${created.id} — Extraction Agent confidence: ${conf}. Real pipeline is now running against it.`);
+      if (file.name.toLowerCase().endsWith('.pdf')) {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          await processRawInvoiceText(reader.result, file.name);
+        };
+        reader.onerror = () => alert("Failed to read PDF file.");
+        reader.readAsDataURL(file);
       } else {
-        alert(`Could not ingest "${file.name}" — the backend did not confirm it.`);
+        const rawText = await file.text();
+        await processRawInvoiceText(rawText, file.name);
       }
     } catch (err) {
-      alert(`Could not read or ingest "${file.name}": ${err.message}`);
-    } finally {
-      setIsIngesting(false);
+      alert(`Could not read file: ${err.message}`);
     }
+  };
+
+  const handleUploadDemo = async () => {
+    const randomSuffix = Math.floor(Math.random() * 10000);
+    const sampleText = `INVOICE\nVendor: Global Freight Logistics\nInvoice Date: 2026-09-15\nInvoice Number: GFL-99382-${randomSuffix}\nPurchase Order: PO-55102\n\nLine Items:\n1. Standard Ground Shipping\n   Qty: 1\n   Unit Price: $500.00\n2. Express Air Freight\n   Qty: 1\n   Unit Price: $1200.00\n\nSubtotal: 1700.00\nTax (5%): 85.00\nTotal Amount Due: 1785.00\n`;
+    await processRawInvoiceText(sampleText, `Demo_Invoice_${randomSuffix}.txt`);
+  };
+
+  const handlePasteSubmit = async () => {
+    if (!pastedText.trim()) return;
+    const textToProcess = pastedText;
+    setPastedText('');
+    await processRawInvoiceText(textToProcess, 'Pasted_Invoice.txt');
   };
 
   const handleSealAll = async () => {
@@ -130,18 +189,97 @@ const Dashboard = ({ onSelectInvoice }) => {
       <div className="dashboard-middle-column">
         {/* Top Summary Row: Ledger Summary & Pending Seals */}
         <div className="top-summary-grid">
-          <LedgerSummaryWidget 
-            allReviewed={allReviewed} 
-            onMarkReviewed={handleMarkReviewed} 
+          <LedgerSummaryWidget
+            allReviewed={allReviewed}
+            onMarkReviewed={handleMarkReviewed}
           />
-          <PendingSealsWidget 
-            seals={seals} 
-            onSealAll={handleSealAll} 
+          <PendingSealsWidget
+            seals={seals}
+            onSealAll={handleSealAll}
           />
         </div>
 
         {/* Bottom Middle Area: Filter Options & Add New Invoice + Standard Invoice Scroll List */}
-        <GlassCard className="invoices-main-container-card inner-dark-card">
+        <GlassCard className="invoices-main-container-card inner-dark-card" style={{ position: 'relative' }}>
+          {visualizerStep > 0 && (
+            <div className="erp-visualizer-overlay">
+              <div className="erp-visualizer-box">
+                {visualizerStep >= 1 && <div className="step fade-in"><FileSearch size={24} /> <span>Extracting Invoice Data from <strong>{uploadedFileName}</strong>...</span></div>}
+                {visualizerStep >= 2 && <div className="step fade-in success"><Key size={24} /> <span>Matching Key Found: <strong className="font-mono">{demoPoKey}</strong></span></div>}
+                {visualizerStep >= 3 && <div className="step fade-in"><Database size={24} /> <span>Querying ERP for Purchase Order & Goods Receipt...</span></div>}
+                {visualizerStep >= 4 && <div className="step fade-in highlight"><GitCompare size={24} /> <span>Executing 3-Way Match Stage...</span></div>}
+                {visualizerStep < 4 && <div className="spinner-small" style={{ marginTop: '20px' }}></div>}
+              </div>
+            </div>
+          )}
+
+          {showUploadModal && (
+            <div className="erp-visualizer-overlay" onClick={() => setShowUploadModal(false)}>
+              <div className="erp-visualizer-box" onClick={(e) => e.stopPropagation()} style={{ width: '560px', padding: '30px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ color: '#fff', fontSize: '20px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <Upload size={20} color="#a7c957" /> Upload & Ingest Invoice
+                  </h3>
+                  <button style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer' }} onClick={() => setShowUploadModal(false)}>✕</button>
+                </div>
+                
+                <p style={{ color: '#9ca3af', fontSize: '13px', margin: '4px 0 16px 0' }}>Select a file from your computer, paste text, or run a sample invoice:</p>
+
+                {/* File picker dropzone */}
+                <div style={{ border: '2px dashed rgba(167, 201, 87, 0.4)', borderRadius: '12px', padding: '24px', textAlign: 'center', background: 'rgba(167, 201, 87, 0.05)', marginBottom: '16px' }}>
+                  <FileSearch size={32} color="#a7c957" style={{ marginBottom: '8px' }} />
+                  <div style={{ color: '#fff', fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>Choose an Invoice File</div>
+                  <div style={{ color: '#9ca3af', fontSize: '12px', marginBottom: '12px' }}>Supports .txt, .json, .csv, .md files</div>
+                  <input
+                    type="file"
+                    id="modal-file-input"
+                    onChange={handleFileSelected}
+                    style={{ display: 'none' }}
+                  />
+                  <label htmlFor="modal-file-input" className="btn-glass" style={{ background: '#a7c957', color: '#0d0d12', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', padding: '8px 18px' }}>
+                    Browse Files
+                  </label>
+                </div>
+
+                {/* Paste Textarea */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ display: 'block', color: '#e5e7eb', fontSize: '12.5px', fontWeight: 600, marginBottom: '6px' }}>Or Paste Raw Invoice Text:</label>
+                  <textarea
+                    rows={4}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(0,0,0,0.5)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: '10px',
+                      color: '#fff',
+                      padding: '10px',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      outline: 'none',
+                      resize: 'vertical'
+                    }}
+                    placeholder="INVOICE # 1002&#10;Vendor: Acme Corp&#10;Purchase Order: PO-55102&#10;Line 1: Widget A Qty 10 @ $50.00"
+                    value={pastedText}
+                    onChange={(e) => setPastedText(e.target.value)}
+                  />
+                  {pastedText.trim() && (
+                    <button className="btn-glass" style={{ background: '#60a5fa', color: '#000', fontWeight: 700, marginTop: '8px', width: '100%', justifyContent: 'center' }} onClick={handlePasteSubmit}>
+                      Process Pasted Text
+                    </button>
+                  )}
+                </div>
+
+                {/* Sample Demo button */}
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: '#9ca3af' }}>Don't have a file ready?</span>
+                  <button className="btn-glass" style={{ fontSize: '12px', padding: '6px 14px' }} onClick={handleUploadDemo}>
+                    Run Sample Invoice
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="dashboard-hero-header">
             <h1 className="hero-headline-compact">
               <Shuffle
@@ -166,9 +304,9 @@ const Dashboard = ({ onSelectInvoice }) => {
             {/* Filter & Action Bar */}
             <div className="dashboard-filter-bar">
               <div className="filter-inputs-group">
-                <select 
+                <select
                   className="filter-select"
-                  value={statusFilter} 
+                  value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
                 >
                   <option value="All">Status: All</option>
@@ -178,7 +316,7 @@ const Dashboard = ({ onSelectInvoice }) => {
                   <option value="In Progress">Status: In Progress</option>
                 </select>
 
-                <select 
+                <select
                   className="filter-select"
                   value={priorityFilter}
                   onChange={(e) => setPriorityFilter(e.target.value)}
@@ -195,21 +333,14 @@ const Dashboard = ({ onSelectInvoice }) => {
                 </button>
               </div>
 
-              <input
-                type="file"
-                accept=".txt,text/plain"
-                ref={fileInputRef}
-                style={{ display: 'none' }}
-                onChange={handleFileSelected}
-              />
               <button
                 className="btn-glass"
-                style={{ fontSize: '12px', padding: '6px 14px', fontWeight: 600 }}
-                onClick={handleUploadClick}
+                style={{ fontSize: '13px', padding: '8px 18px', fontWeight: 700, background: '#a7c957', color: '#0d0d12', borderColor: 'transparent' }}
+                onClick={() => setShowUploadModal(true)}
                 disabled={isIngesting}
               >
-                <Upload size={14} />
-                <span>{isIngesting ? 'Extracting…' : 'Upload Invoice'}</span>
+                <Upload size={15} color="#0d0d12" style={{ marginRight: '4px' }} />
+                <span>{isIngesting ? 'Processing…' : 'Upload / Ingest Invoice'}</span>
               </button>
 
               <SpecularButton
@@ -229,8 +360,18 @@ const Dashboard = ({ onSelectInvoice }) => {
           {/* Standard Vertical Invoice Scroll List (Internal Overflow-Y Scroll) */}
           <div className="normal-invoice-scroll-list">
             {filteredInvoices.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)', fontSize: '13.5px' }}>
-                No invoices currently in backlog. Click <strong>"+ New Invoice"</strong> above or connect <code>GET /api/invoices</code>.
+              <div style={{ textAlign: 'center', padding: '60px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: 'rgba(167, 201, 87, 0.1)', border: '1px solid rgba(167, 201, 87, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
+                  <Inbox size={24} color="#a7c957" />
+                </div>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#e5e7eb', marginBottom: '6px' }}>No Invoices in Backlog</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '20px', maxWidth: '280px', lineHeight: 1.5 }}>
+                  Your ledger is clean. Upload a new invoice to kick off the autonomous pipeline.
+                </p>
+                <button className="btn-glass" style={{ padding: '8px 16px', fontSize: '12px', fontWeight: 600 }} onClick={() => setShowUploadModal(true)}>
+                  <Upload size={14} />
+                  <span>Upload Document</span>
+                </button>
               </div>
             ) : (
               filteredInvoices.map((inv) => {
@@ -298,7 +439,7 @@ const Dashboard = ({ onSelectInvoice }) => {
                         )}
                       </div>
 
-                      <button 
+                      <button
                         className="btn-glass"
                         style={{ fontSize: '11.5px', padding: '5px 12px', fontWeight: 600 }}
                         onClick={() => onSelectInvoice(inv)}
@@ -321,10 +462,10 @@ const Dashboard = ({ onSelectInvoice }) => {
         <GlassCard className="pixel-card-wrapper inner-dark-card" style={{ padding: '0', overflow: 'hidden' }}>
           <PixelTransition
             firstContent={
-              <img 
-                src="/meme.jpg" 
-                alt="Leonardo DiCaprio Throwing Money Meme" 
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+              <img
+                src="/ai_network.png"
+                alt="AI Neural Network Data Ledger"
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
             }
             secondContent={
@@ -342,7 +483,7 @@ const Dashboard = ({ onSelectInvoice }) => {
         </GlassCard>
 
         {/* Bottom Right: Activity Logs */}
-        <ActivityWidget onNavigateToInvoices={() => {}} />
+        <ActivityWidget onNavigateToInvoices={() => { }} />
       </div>
     </div>
   );

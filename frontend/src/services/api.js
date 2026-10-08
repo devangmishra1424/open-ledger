@@ -132,6 +132,13 @@ export const api = {
     return request(endpoint, { method: 'GET' }, []);
   },
 
+  narratePbcRequest: async (requestId, question) => {
+    return request(`/pbc/${requestId}/narrate`, {
+      method: 'POST',
+      body: JSON.stringify({ question })
+    }, { results: [] });
+  },
+
   getEvidenceFiles: async (requestId) => {
     return request(`/pbc/requests/${requestId}/files`, { method: 'GET' }, []);
   },

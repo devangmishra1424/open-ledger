@@ -9,13 +9,17 @@
     "migrate": "tsx --env-file=.env db/migrate.ts",
     "seed": "tsx --env-file=.env scripts/seed.ts",
     "eval": "tsx --env-file=.env scripts/eval.ts",
+    "generate-pdfs": "tsx --env-file=.env scripts/generate_demo_pdfs.ts",
     "test": "vitest run"
   },
   "dependencies": {
+    "@types/pdfkit": "^0.17.6",
     "fast-json-stable-stringify": "2.1.0",
     "munkres-js": "1.2.2",
     "next": "15.5.25",
     "openai": "^7.10.0",
+    "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.20.2",
     "postgres": "3.4.9",
     "react": "19.0.0",
     "react-dom": "19.0.0"

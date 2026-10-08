@@ -138,6 +138,14 @@
   gap: 10px;
   border-radius: 16px;
   flex-shrink: 0;
+  transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.invoice-card-condensed:hover {
+  transform: translateY(-2px) scale(1.005);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(167, 201, 87, 0.3);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .card-row-top {
@@ -163,8 +171,9 @@
 .invoice-amount-compact {
   font-size: 17px;
   font-weight: 700;
-  color: #ffffff;
+  color: #a7c957;
   text-align: right;
+  text-shadow: 0 0 10px rgba(167, 201, 87, 0.2);
 }
 
 .card-row-meta {
@@ -195,6 +204,33 @@
   gap: 6px;
   overflow: hidden;
   max-width: 70%;
+}
+
+/* ERP Visualizer Overlay */
+.erp-visualizer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.erp-visualizer-box {
+  background: rgba(13, 13, 18, 0.95);
+  border: 1px solid rgba(167, 201, 87, 0.3);
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.8), 0 0 15px rgba(167, 201, 87, 0.1);
+  border-radius: 16px;
+  padding: 40px;
+  width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .agent-tag-chip-sm {
@@ -228,6 +264,7 @@
 }
 
 @media (max-width: 1180px) {
+
   /* Stacking to one column without also fixing row sizing left both sections splitting the
      available height equally (CSS grid's default auto-row behavior) — the invoice list needs
      far more room than that, so it was rendering at ~0 usable height and looking "empty" or
@@ -240,6 +277,7 @@
     min-height: 100%;
     overflow-y: auto;
   }
+
   .dashboard-middle-column,
   .dashboard-right-column {
     width: 100%;

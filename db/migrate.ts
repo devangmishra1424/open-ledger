@@ -3,7 +3,7 @@ import path from "node:path";
 import { getSql } from "./client";
 
 const TABLES_IN_DROP_ORDER = [
-  "pbc_requests", "reviews", "decisions", "reason_codes",
+  "app_settings", "pbc_evidence_files", "pbc_requests", "reviews", "decisions", "reason_codes",
   "payment_applications", "payments", "vendor_bill_lines", "vendor_bills",
   "journal_entry_lines", "journal_entries",
   "goods_receipt_lines", "goods_receipts", "purchase_order_lines", "purchase_orders",
@@ -81,8 +81,11 @@ async function main() {
   await sql`INSERT INTO accounting_periods (id, name, start_date, end_date, status)
              VALUES ('2026-09', '2026-09', '2026-09-01', '2026-09-30', 'open')`;
 
+  // --- Seed the default app_settings row for the Settings page ---
+  await sql`INSERT INTO app_settings (id) VALUES ('default')`;
+
   console.log(`Migrated ${connectionInfo(connectionString())}`);
-  console.log(`Seeded ${accounts.length} accounts, ${reasonCodes.length} reason codes, 1 accounting period.`);
+  console.log(`Seeded ${accounts.length} accounts, ${reasonCodes.length} reason codes, 1 accounting period, 1 app_settings.`);
 
   await sql.end();
 }

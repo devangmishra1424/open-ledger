@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import GlassCard from '../components/GlassCard';
 import { api } from '../services/api';
-import { Search, Filter, ArrowRight, Lock, CheckCircle2 } from 'lucide-react';
+import { Search, Filter, ArrowRight, Lock, CheckCircle2, TriangleAlert, Inbox } from 'lucide-react';
 import './InvoiceQueue.css';
 
 const InvoiceQueue = ({ onSelectInvoice }) => {
@@ -110,8 +110,16 @@ const InvoiceQueue = ({ onSelectInvoice }) => {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  No invoices found. Connect backend API <code>GET /api/invoices</code> to populate live stream.
+                <td colSpan={8} style={{ padding: '0' }}>
+                  <div style={{ textAlign: 'center', padding: '80px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: 'rgba(167, 201, 87, 0.1)', border: '1px solid rgba(167, 201, 87, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
+                      <Inbox size={24} color="#a7c957" />
+                    </div>
+                    <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#e5e7eb', marginBottom: '6px' }}>No Invoices Found</h3>
+                    <p style={{ color: 'var(--text-muted)', fontSize: '13px', maxWidth: '280px', lineHeight: 1.5 }}>
+                      No invoices match the current search or tab filters. Try clearing your search or connecting <code>GET /api/invoices</code>.
+                    </p>
+                  </div>
                 </td>
               </tr>
             ) : (
@@ -126,19 +134,22 @@ const InvoiceQueue = ({ onSelectInvoice }) => {
                   <td className="font-mono" style={{ fontWeight: 600, color: '#ffffff' }}>
                     {inv.id}
                   </td>
-                  <td style={{ fontWeight: 600, color: '#ffffff' }}>
+                  <td style={{ fontWeight: 600, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '6px', height: '100%' }}>
                     {inv.vendor}
+                    {inv.riskFlags?.length > 0 && (
+                      <TriangleAlert size={14} color="#d00000" title={`Risk Flag: ${inv.riskFlags[0]}`} />
+                    )}
                   </td>
                   <td className="font-mono" style={{ color: 'var(--text-muted)' }}>
                     {inv.poNumber}
                   </td>
-                  <td className="font-mono" style={{ fontWeight: 700, color: '#ffffff' }}>
+                  <td className="font-mono queue-amount-highlight">
                     ${inv.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '130px' }}>
                       <div className="progress-bar-track" style={{ height: '4px' }}>
-                        <div className="progress-bar-fill" style={{ width: `${inv.progress}%` }} />
+                        <div className={`progress-bar-fill ${inv.progress < 100 ? 'animated-stripe' : ''}`} style={{ width: `${inv.progress}%` }} />
                       </div>
                       <span className="font-mono" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                         {inv.progress}%

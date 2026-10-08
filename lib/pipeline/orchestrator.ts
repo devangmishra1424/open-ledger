@@ -8,6 +8,8 @@ import { investigate, type InvestigationSubmission } from "@/lib/agent/investiga
 import { verify, type VerificationSubmission } from "@/lib/agent/verifier";
 import { extract } from "@/lib/agent/extractor";
 import { postBillApproval } from "@/lib/ledger/journal";
+import { triggerPayment } from "@/lib/payments/dodo";
+import { notifyReviewer } from "@/lib/telegram";
 import { hashJson } from "@/lib/agent/hash";
 import { publishPipelineEvent } from "@/lib/pipeline/events";
 import type { Decision, Claim } from "@/lib/types";
@@ -308,6 +310,12 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
     // than crashing the pipeline uncaught (ENGINE.md §5: never silently drop an invoice into limbo).
     try {
       await postBillApproval(vendorBillId);
+      
+      // Auto-payment integration
+      const billRows = await sql`SELECT total_amount FROM vendor_bills WHERE id = ${vendorBillId}`;
+      if (billRows.length > 0) {
+        await triggerPayment(vendorBillId, billRows[0].total_amount);
+      }
     } catch (e) {
       await sql`UPDATE vendor_bills SET status = 'exception' WHERE id = ${vendorBillId}`;
       const d = await writeDecision({
@@ -323,6 +331,22 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
   } else {
     const newStatus = action === "auto_reject" ? "void" : "exception";
     await sql`UPDATE vendor_bills SET status = ${newStatus} WHERE id = ${vendorBillId}`;
+    
+    if (action === "escalate_l1" || action === "escalate_l2") {
+      const billRows = await sql`SELECT vb.invoice_number, v.name as vendor_name FROM vendor_bills vb JOIN vendors v ON v.id = vb.vendor_id WHERE vb.id = ${vendorBillId}`;
+      if (billRows.length > 0) {
+        const b = billRows[0];
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:5173";
+        const url = `${baseUrl}/queue/${vendorBillId}`;
+        await notifyReviewer(
+          "AP Supervisor",
+          vendorBillId,
+          `Invoice ${b.invoice_number} from ${b.vendor_name} requires manual review (${policyDecision.reasonCode}).`,
+          url,
+          url
+        ).catch(e => console.error("Telegram notification failed implicitly", e));
+      }
+    }
   }
 
   const d = await writeDecision({

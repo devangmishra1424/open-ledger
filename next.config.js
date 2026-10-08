@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  serverExternalPackages: ["better-sqlite3"],
+  serverExternalPackages: ['pdf-parse', 'pdfjs-dist', 'openai'],
 };
 
 module.exports = nextConfig;

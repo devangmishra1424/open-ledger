@@ -18,12 +18,11 @@ const TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 1; // ENGINE.md §5, same policy as the Responses loop
 
 let client: OpenAI | undefined;
-function getTensorMuxClient(): OpenAI {
+function getGroqClient(): OpenAI {
   if (!client) {
-    const apiKey = process.env.TENSORMUX_API_KEY;
-    const baseURL = process.env.TENSORMUX_BASE_URL;
-    if (!apiKey || !baseURL) throw new Error("TENSORMUX_API_KEY / TENSORMUX_BASE_URL are not set");
-    client = new OpenAI({ apiKey, baseURL });
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error("GROQ_API_KEY is not set");
+    client = new OpenAI({ apiKey, baseURL: "https://api.groq.com/openai/v1" });
   }
   return client;
 }
@@ -47,9 +46,8 @@ export interface RunChatCompletionsLoopParams<TSubmission> {
 
 export async function runChatCompletionsLoop<TSubmission>(params: RunChatCompletionsLoopParams<TSubmission>): Promise<AgentLoopResult<TSubmission>> {
   const { instructions, initialInput, tools, submissionToolName, executeTool, maxTurns = 8 } = params;
-  const model = params.model || process.env.TENSORMUX_MODEL;
-  if (!model) throw new Error("TENSORMUX_MODEL is not set and no model was passed explicitly");
-  const openai = getTensorMuxClient();
+  const model = params.model || "llama-3.3-70b-versatile";
+  const openai = getGroqClient();
   const chatTools = tools.map(toChatCompletionTool);
 
   let messages: OpenAI.Chat.ChatCompletionMessageParam[] = [

@@ -53,12 +53,34 @@ const InvoiceDetail = ({ invoice, onBack }) => {
 
   useEffect(() => {
     if (!targetId) return;
+
+    // Initial fetch
     api.getInvoiceById(targetId).then((data) => {
       if (data) {
         setInv(data);
         setInvoiceStatus(data.status);
       }
     });
+
+    // Subscribe to SSE for live updates
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+    const es = new EventSource(`${baseUrl}/invoices/${targetId}/events`);
+
+    es.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === "pipeline_update" && payload.invoice) {
+          setInv(payload.invoice);
+          setInvoiceStatus(payload.invoice.status);
+        }
+      } catch (err) {
+        console.error("Failed to parse SSE payload", err);
+      }
+    };
+
+    return () => {
+      es.close();
+    };
   }, [targetId]);
 
   const rawAgentNodes = (inv?.decisions ?? []).map((d) => ({
@@ -75,7 +97,17 @@ const InvoiceDetail = ({ invoice, onBack }) => {
   // animation — this invoice already finished processing, so there is nothing to simulate;
   // the count itself (rawAgentNodes.length) is entirely real.
   useEffect(() => {
-    setCompletedStepCount(1);
+    // If we've already animated past the old length (e.g. a live update just appended a node),
+    // skip the from-scratch animation and just show everything.
+    setCompletedStepCount((prev) => {
+      if (prev > 1 && rawAgentNodes.length >= prev) {
+        return rawAgentNodes.length;
+      }
+      return 1;
+    });
+
+    if (completedStepCount > 1) return; // Skip setting timers if we skipped the animation
+
     const total = rawAgentNodes.length || 1;
     const timers = [];
     for (let step = 2; step <= total; step++) {
@@ -392,7 +424,7 @@ const InvoiceDetail = ({ invoice, onBack }) => {
                     <div className="ask-why-popover" onClick={(e) => e.stopPropagation()}>
                       <div className="popover-header">
                         <span>🤖 Attestation: {node.title}</span>
-                        <button 
+                        <button
                           style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer' }}
                           onClick={() => setActivePopoverNode(null)}
                         >
