@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { getSql } from "../db/client";
+import { assertDestructiveAllowed } from "../db/guard";
 import PDFDocument from "pdfkit";
 
 interface DemoItem {
@@ -202,6 +203,7 @@ Total Amount Due: $${total.toFixed(2)}
 }
 
 async function main() {
+  assertDestructiveAllowed("scripts/setup-clean-demo.ts");
   const sql = getSql();
   console.log("🧹 Clearing all existing invoice data from database...");
 

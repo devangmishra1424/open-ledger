@@ -182,18 +182,35 @@ export function buildPaymentDraft(input: PaymentDraftInput): JournalEntryDraft {
   };
 }
 
+/**
+ * The period a posting date belongs to. A closed period stays closed (posting into it is an
+ * error — that is what closing means). A date no period covers yet gets its calendar month
+ * opened on first use: a single hard-coded period (the old seed) made every approval after
+ * 30 Sept fail with "no open accounting period".
+ */
 async function resolvePeriodId(sql: TransactionSql<{}>, entryDate: string): Promise<string> {
   const rows = await sql`
-    SELECT id FROM accounting_periods
-    WHERE start_date <= ${entryDate} AND end_date >= ${entryDate} AND status = 'open'
+    SELECT id, status FROM accounting_periods
+    WHERE start_date <= ${entryDate} AND end_date >= ${entryDate}
   `;
-  if (rows.length === 0) throw new Error(`no open accounting period covers date '${entryDate}' — cannot post a journal entry`);
-  return rows[0].id;
+  const open = rows.find((r: any) => r.status === "open");
+  if (open) return open.id;
+  if (rows.length > 0) {
+    throw new Error(`accounting period '${rows[0].id}' is ${rows[0].status} — cannot post a journal entry dated ${entryDate}`);
+  }
+  const month = entryDate.slice(0, 7); // YYYY-MM
+  const [y, m] = month.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  await sql`
+    INSERT INTO accounting_periods (id, name, start_date, end_date, status)
+    VALUES (${month}, ${month}, ${month + "-01"}, ${month + "-" + String(lastDay).padStart(2, "0")}, 'open')
+    ON CONFLICT (id) DO NOTHING`;
+  return month;
 }
 
 /** Runs inside the advisory-locked transaction, so concurrent posters can't both compute the same number. */
 async function nextEntryNumber(sql: TransactionSql<{}>): Promise<string> {
-  const rows = await sql`SELECT COUNT(*)::int as n FROM journal_entries`;
+  const rows = await sql`SELECT COALESCE(MAX(substring(entry_number from 4)::int), 0) AS n FROM journal_entries WHERE entry_number ~ '^JE-[0-9]+$'`;
   return `JE-${String(Number(rows[0].n) + 1).padStart(6, "0")}`;
 }
 
@@ -250,75 +267,85 @@ export async function postBillApproval(billId: string): Promise<PostResult> {
   const existing = await sql`SELECT id FROM journal_entries WHERE idempotency_key = ${idempotencyKey}`;
   if (existing.length > 0) return { journalEntryId: existing[0].id, alreadyPosted: true };
 
-  return sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(${JOURNAL_LOCK_KEY})`;
+  return sql.begin((tx) => postBillApprovalInTx(tx, billId));
+}
 
-    const billRows = await tx`SELECT * FROM vendor_bills WHERE id = ${billId}`;
-    if (billRows.length === 0) throw new Error(`postBillApproval: no vendor_bill found with id '${billId}'`);
-    const bill = billRows[0];
+/** postBillApproval inside a transaction the caller owns (so approval + its audit record commit together). */
+export async function postBillApprovalInTx(tx: TransactionSql<{}>, billId: string): Promise<PostResult> {
+  const idempotencyKey = computeIdempotencyKey("vendor_bill", billId, "bill_approval");
+  await tx`SELECT pg_advisory_xact_lock(${JOURNAL_LOCK_KEY})`;
 
-    if (bill.journal_entry_id) return { journalEntryId: bill.journal_entry_id, alreadyPosted: true };
+  // FOR UPDATE: lock the invoice row so a concurrent reject (which updates this row) cannot slip in
+  // between this status check and the UPDATE below — otherwise an approve and a reject on the
+  // same invoice could both commit, leaving a rejected invoice posted to the ledger.
+  const billRows = await tx`SELECT * FROM vendor_bills WHERE id = ${billId} FOR UPDATE`;
+  if (billRows.length === 0) throw new Error(`postBillApproval: no vendor_bill found with id '${billId}'`);
+  const bill = billRows[0];
 
-    // Re-check under the lock in case a concurrent caller committed between the first check and here.
-    const raced = await tx`SELECT id FROM journal_entries WHERE idempotency_key = ${idempotencyKey}`;
-    if (raced.length > 0) return { journalEntryId: raced[0].id, alreadyPosted: true };
+  if (bill.journal_entry_id) return { journalEntryId: bill.journal_entry_id, alreadyPosted: true };
+  // A rejected invoice must never reach the ledger — this is the last line of defence against an
+  // approve racing a reject (the status check in the caller can be a moment stale).
+  if (bill.status === "void") throw new Error(`postBillApproval: vendor_bill '${billId}' was rejected (void) and cannot be posted`);
 
-    const lineRows = await tx`SELECT * FROM vendor_bill_lines WHERE vendor_bill_id = ${billId}`;
-    if (lineRows.length === 0) throw new Error(`postBillApproval: vendor_bill '${billId}' has no lines to post`);
+  // Re-check under the lock in case a concurrent caller committed between the first check and here.
+  const raced = await tx`SELECT id FROM journal_entries WHERE idempotency_key = ${idempotencyKey}`;
+  if (raced.length > 0) return { journalEntryId: raced[0].id, alreadyPosted: true };
 
-    const resolvedLines: Array<{ accountId: string; amount: number }> = [];
-    for (const line of lineRows) {
-      let accountId: string | null = line.gl_account_id;
-      if (!accountId && line.po_line_id) {
-        const poLineRows = await tx`SELECT gl_account_id FROM purchase_order_lines WHERE id = ${line.po_line_id}`;
-        accountId = poLineRows[0]?.gl_account_id ?? null;
-      }
-      if (!accountId) {
-        throw new Error(`postBillApproval: vendor_bill_line '${line.id}' has no gl_account_id and no PO line to fall back to`);
-      }
-      resolvedLines.push({ accountId, amount: line.qty_invoiced * line.unit_price });
+  const lineRows = await tx`SELECT * FROM vendor_bill_lines WHERE vendor_bill_id = ${billId}`;
+  if (lineRows.length === 0) throw new Error(`postBillApproval: vendor_bill '${billId}' has no lines to post`);
+
+  const resolvedLines: Array<{ accountId: string; amount: number }> = [];
+  for (const line of lineRows) {
+    let accountId: string | null = line.gl_account_id;
+    if (!accountId && line.po_line_id) {
+      const poLineRows = await tx`SELECT gl_account_id FROM purchase_order_lines WHERE id = ${line.po_line_id}`;
+      accountId = poLineRows[0]?.gl_account_id ?? null;
     }
-
-    const apAccountId = await resolveApAccountId(tx, bill.ap_account_id);
-
-    let taxAccountId: string | null = null;
-    if (bill.tax_total > 0) {
-      const lineWithTaxCode = lineRows.find((l: any) => l.tax_code_id);
-      if (lineWithTaxCode) {
-        const taxCodeRows = await tx`SELECT tax_account_id FROM tax_codes WHERE id = ${lineWithTaxCode.tax_code_id}`;
-        taxAccountId = taxCodeRows[0]?.tax_account_id ?? null;
-      }
-      if (!taxAccountId) {
-        const fallbackRows = await tx`SELECT id FROM chart_of_accounts WHERE account_number = '2210'`;
-        taxAccountId = fallbackRows[0]?.id ?? null;
-      }
+    if (!accountId) {
+      throw new Error(`postBillApproval: vendor_bill_line '${line.id}' has no gl_account_id and no PO line to fall back to`);
     }
+    resolvedLines.push({ accountId, amount: line.qty_invoiced * line.unit_price });
+  }
 
-    const entryDate = new Date().toISOString().slice(0, 10);
-    const draft = buildBillApprovalDraft({
-      billId,
-      invoiceNumber: bill.invoice_number,
-      currency: bill.currency,
-      exchangeRate: bill.exchange_rate,
-      totalAmount: bill.total_amount,
-      taxTotal: bill.tax_total,
-      apAccountId,
-      taxAccountId,
-      lines: resolvedLines,
-      entryDate,
-    });
+  const apAccountId = await resolveApAccountId(tx, bill.ap_account_id);
 
-    const periodId = await resolvePeriodId(tx, entryDate);
-    const entryNumber = await nextEntryNumber(tx);
-    const entryId = randomUUID();
-    const postedAt = new Date().toISOString();
+  let taxAccountId: string | null = null;
+  if (bill.tax_total > 0) {
+    const lineWithTaxCode = lineRows.find((l: any) => l.tax_code_id);
+    if (lineWithTaxCode) {
+      const taxCodeRows = await tx`SELECT tax_account_id FROM tax_codes WHERE id = ${lineWithTaxCode.tax_code_id}`;
+      taxAccountId = taxCodeRows[0]?.tax_account_id ?? null;
+    }
+    if (!taxAccountId) {
+      const fallbackRows = await tx`SELECT id FROM chart_of_accounts WHERE account_number = '2210'`;
+      taxAccountId = fallbackRows[0]?.id ?? null;
+    }
+  }
 
-    await insertJournalEntryAndLines(tx, draft, entryId, entryNumber, periodId, postedAt);
-
-    await tx`UPDATE vendor_bills SET journal_entry_id = ${entryId}, status = 'posted' WHERE id = ${billId}`;
-
-    return { journalEntryId: entryId, alreadyPosted: false };
+  const entryDate = new Date().toISOString().slice(0, 10);
+  const draft = buildBillApprovalDraft({
+    billId,
+    invoiceNumber: bill.invoice_number,
+    currency: bill.currency,
+    exchangeRate: bill.exchange_rate,
+    totalAmount: bill.total_amount,
+    taxTotal: bill.tax_total,
+    apAccountId,
+    taxAccountId,
+    lines: resolvedLines,
+    entryDate,
   });
+
+  const periodId = await resolvePeriodId(tx, entryDate);
+  const entryNumber = await nextEntryNumber(tx);
+  const entryId = randomUUID();
+  const postedAt = new Date().toISOString();
+
+  await insertJournalEntryAndLines(tx, draft, entryId, entryNumber, periodId, postedAt);
+
+  await tx`UPDATE vendor_bills SET journal_entry_id = ${entryId}, status = 'posted' WHERE id = ${billId}`;
+
+  return { journalEntryId: entryId, alreadyPosted: false };
 }
 
 export interface PaymentApplicationInput {

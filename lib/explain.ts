@@ -1,6 +1,5 @@
-import OpenAI from "openai";
 import { getDecisionsForInvoice } from "@/lib/ledger/decisions";
-import { getEmbedding, cosineSimilarity } from "@/lib/embeddings";
+import { getLlmClient, modelFor, explainLlmError } from "@/lib/agent/llm";
 import type { Decision } from "@/lib/types";
 
 /**
@@ -10,31 +9,17 @@ import type { Decision } from "@/lib/types";
  * (lib/audit/narrator.ts, a thin wrapper calling this same function with a pbc scope —
  * BUILD.md's own description of it).
  *
- * Two-stage retrieval-then-constrained-answer, per DESIGN.md §8:
- *   Stage A — find candidate decisions relevant to the question, via real embedding
- *   similarity (lib/embeddings.ts) against each decision's own text content.
- *   Stage B — answer using ONLY the fetched records as context, every claim cited, an
- *   explicit "not recorded" fallback rather than invented inference.
- *
- * SCALE NOTE: every real call site scopes this to ONE invoice already (the API route is
- * /api/invoices/:id/decisions/:decisionId/explain) — no pgvector index needed, embeddings are
- * computed fresh per call over a small set (~6-8 decisions for a normal pipeline pass,
- * occasionally more with reconsiderations) and only when that set exceeds MAX_CANDIDATES.
+ * Retrieval-then-constrained-answer, per DESIGN.md §8:
+ *   Stage A — pick the candidate decisions. Today that is ALL of the invoice's decisions
+ *   (a normal pipeline pass writes ~6-8, so they fit in one prompt); DESIGN.md's embedding
+ *   similarity ranking is deliberately not used until an invoice's trail outgrows a prompt.
+ *   Stage B — answer using ONLY those records as context, every claim cited, an explicit
+ *   "not recorded" fallback rather than invented inference. `grounded` is true only if the
+ *   answer quotes at least one real decision id from the records it was given.
  */
 
-const DEFAULT_MODEL = "llama-3.3-70b-versatile";
-const TIMEOUT_MS = 20_000;
+const TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 1;
-
-let client: OpenAI | undefined;
-function getGroqClient(): OpenAI {
-  if (!client) {
-    const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) throw new Error("GROQ_API_KEY is not set");
-    client = new OpenAI({ apiKey, baseURL: "https://api.groq.com/openai/v1" });
-  }
-  return client;
-}
 
 export interface ExplainResult {
   answer: string;
@@ -43,8 +28,7 @@ export interface ExplainResult {
 }
 
 async function findCandidateDecisions(question: string, decisions: Decision[]): Promise<Decision[]> {
-  // Bypassing embeddings for demo/production determinism.
-  // We just return all decisions (typically < 10 anyway).
+  // See the Stage A note above: all of the invoice's decisions, no ranking.
   return decisions;
 }
 
@@ -97,18 +81,23 @@ export async function explain(invoiceId: string, decisionId: string, question: s
     triggered_by_question: d.triggeredByQuestion ?? null,
   }));
 
-  const openai = getGroqClient();
-  const response = await openai.chat.completions.create(
-    {
-      model: DEFAULT_MODEL,
-      messages: [
-        { role: "system", content: EXPLAIN_INSTRUCTIONS },
-        { role: "user", content: JSON.stringify({ question, decisions: contextPayload }) }
-      ],
-      max_tokens: 4000
-    },
-    { timeout: TIMEOUT_MS, maxRetries: MAX_RETRIES },
-  );
+  const model = modelFor("explainer");
+  let response;
+  try {
+    response = await getLlmClient().chat.completions.create(
+      {
+        model,
+        messages: [
+          { role: "system", content: EXPLAIN_INSTRUCTIONS },
+          { role: "user", content: JSON.stringify({ question, decisions: contextPayload }) },
+        ],
+        max_tokens: 4000,
+      },
+      { timeout: TIMEOUT_MS, maxRetries: MAX_RETRIES },
+    );
+  } catch (e) {
+    throw explainLlmError(e, "explainer", model);
+  }
 
   const answer = response.choices[0]?.message?.content?.trim() || "";
   

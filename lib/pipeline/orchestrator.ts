@@ -6,9 +6,10 @@ import { runMatchStage, type MatchStageResult } from "@/lib/pipeline/match-stage
 import { moreRestrictive, type Action, type CombinedDecision } from "@/lib/matching/decision-matrix";
 import { investigate, type InvestigationSubmission } from "@/lib/agent/investigator";
 import { verify, type VerificationSubmission } from "@/lib/agent/verifier";
-import { extract } from "@/lib/agent/extractor";
+import { extract, type ExtractionResult } from "@/lib/agent/extractor";
+import { modelFor } from "@/lib/agent/llm";
 import { postBillApproval } from "@/lib/ledger/journal";
-import { triggerPayment } from "@/lib/payments/dodo";
+import { triggerPayment } from "@/lib/payments/payments";
 import { notifyReviewer } from "@/lib/telegram";
 import { hashJson } from "@/lib/agent/hash";
 import { publishPipelineEvent } from "@/lib/pipeline/events";
@@ -64,13 +65,46 @@ async function publish(decision: Decision): Promise<void> {
 
 // --- extract ---
 
-export async function runExtractStage(vendorBillId: string): Promise<Decision> {
+/** What the extract decision records for an extraction: the real producer, its method, and what it was unsure of. */
+function extractionDecisionFields(result: ExtractionResult) {
+  const claims: Claim[] = result.submission.uncertain_fields.map((f) => ({ text: `Uncertain: ${f}`, tag: "grounded" as const }));
+  if (result.fallbackReason) claims.push({ text: `Extraction fallback: ${result.fallbackReason}`, tag: "grounded" });
+  return {
+    agentId: result.model,
+    // `model` is only set when an LLM actually produced the result: the template parser is not a model.
+    model: result.method === "llm" ? result.model : undefined,
+    confidence: result.submission.confidence,
+    actionTaken: "extracted",
+    toolCalls: result.toolCalls,
+    claims: claims.length > 0 ? claims : undefined,
+  };
+}
+
+/**
+ * `preExtracted` is passed by the ingest route, which has to run extraction BEFORE it can create
+ * the bill (vendor_id is required) and has already inserted the lines. Without it, the lines
+ * existing would be mistaken for a structured fixture and the decision would claim a
+ * deterministic parse at confidence 1.0 for a document an extractor actually had to read.
+ */
+export async function runExtractStage(vendorBillId: string, preExtracted?: ExtractionResult): Promise<Decision> {
   const sql = getSql();
   const startedAt = new Date().toISOString();
+
+  if (preExtracted) {
+    const d = await writeDecision({
+      invoiceId: vendorBillId, nodeId: "extract", startedAt, endedAt: new Date().toISOString(),
+      ...extractionDecisionFields(preExtracted),
+      idempotencyKey: idemKey(vendorBillId, "extract"),
+    });
+    await publish(d);
+    return d;
+  }
 
   const lineCountRows = await sql`SELECT COUNT(*)::int as n FROM vendor_bill_lines WHERE vendor_bill_id = ${vendorBillId}`;
   if (lineCountRows[0].n > 0) {
     // Structured/JSON demo fixture — lines already exist, pure parse, no LLM (ENGINE.md §2.1).
+    // Structured input (JSON/EDI-style fixture or API caller): nothing was read off a document, so
+    // there is no extraction uncertainty to report. "parsed" is also what runValidateStage keys on.
     const d = await writeDecision({
       invoiceId: vendorBillId, nodeId: "extract", agentId: "deterministic-parser",
       startedAt, endedAt: new Date().toISOString(), confidence: 1.0, actionTaken: "parsed",
@@ -100,9 +134,8 @@ export async function runExtractStage(vendorBillId: string): Promise<Decision> {
       VALUES (${crypto.randomUUID()}, ${vendorBillId}, ${li.description}, ${li.quantity}, ${li.unit_price})`;
   }
   const d = await writeDecision({
-    invoiceId: vendorBillId, nodeId: "extract", agentId: process.env.OPENAI_MODEL || "gpt-5-nano", model: process.env.OPENAI_MODEL || "gpt-5-nano",
-    startedAt, endedAt: new Date().toISOString(), confidence: result.submission.confidence,
-    actionTaken: "extracted", toolCalls: result.toolCalls,
+    invoiceId: vendorBillId, nodeId: "extract", startedAt, endedAt: new Date().toISOString(),
+    ...extractionDecisionFields(result),
     idempotencyKey: idemKey(vendorBillId, "extract"),
   });
   await publish(d);
@@ -122,11 +155,21 @@ export async function runValidateStage(vendorBillId: string, parentDecisionId?: 
   const lineCountRows = await sql`SELECT COUNT(*)::int as n FROM vendor_bill_lines WHERE vendor_bill_id = ${vendorBillId}`;
   const dupRows = await sql`SELECT id FROM vendor_bills WHERE vendor_id = ${bill.vendor_id} AND invoice_number = ${bill.invoice_number} AND id != ${bill.id}`;
 
+  // Was this invoice read off a document (extractor output + its confidence) or handed to us
+  // structured? The extract stage's own decision is the source of truth: "parsed" means
+  // structured. A document read below the 85% threshold raises EXC-LAYOUT for a human.
+  const extractRows = await sql`
+    SELECT action_taken, confidence FROM decisions
+    WHERE invoice_id = ${vendorBillId} AND node_id = 'extract' AND superseded_by_id IS NULL
+    ORDER BY seq DESC LIMIT 1`;
+  const readFromDocument = extractRows.length > 0 && extractRows[0].action_taken === "extracted";
+
   const input: PreMatchInput = {
     invoice: {
       invoiceDate: bill.invoice_date,
       currency: bill.currency,
-      isStructuredInput: true, // no real OCR pipeline exists yet — see extract stage's own scope
+      isStructuredInput: !readFromDocument,
+      ocrConfidence: readFromDocument ? (extractRows[0].confidence ?? 0) : undefined,
       mandatoryFieldsPresent: lineCountRows[0].n > 0,
     },
     vendor: { trustTier: vendor.trust_tier },
@@ -190,12 +233,13 @@ export async function runInvestigateStage(vendorBillId: string, matchDetail: unk
   try {
     result = await investigate(vendorBillId, matchDetail, humanContext);
   } catch (e) {
+    const failedModel = modelFor("investigator");
     // A real, observed failure mode (not hypothetical): the model sometimes asks a plain-text
-    // clarifying question instead of ever calling submit_investigation, which runResponsesLoop
+    // clarifying question instead of ever calling submit_investigation, which runToolLoop
     // correctly treats as a hard failure rather than guessing. ENGINE.md §5: never let this
     // crash the whole pipeline run uncaught — surface it as an error-state decision instead.
     const d = await writeDecision({
-      invoiceId: vendorBillId, nodeId: "investigate", agentId: process.env.OPENAI_MODEL || "gpt-5-nano", model: process.env.OPENAI_MODEL || "gpt-5-nano",
+      invoiceId: vendorBillId, nodeId: "investigate", agentId: failedModel, model: failedModel,
       parentDecisionId, startedAt, endedAt: new Date().toISOString(),
       actionTaken: "error", reasonCode: "R99_AGENT_ERROR",
       claims: [{ text: `Investigator failed: ${e instanceof Error ? e.message : String(e)}`, tag: "grounded" }],
@@ -206,7 +250,7 @@ export async function runInvestigateStage(vendorBillId: string, matchDetail: unk
   }
 
   const d = await writeDecision({
-    invoiceId: vendorBillId, nodeId: "investigate", agentId: process.env.OPENAI_MODEL || "gpt-5-nano", model: process.env.OPENAI_MODEL || "gpt-5-nano",
+    invoiceId: vendorBillId, nodeId: "investigate", agentId: result.model, model: result.model,
     parentDecisionId, startedAt, endedAt: new Date().toISOString(),
     confidence: result.submission.confidence, actionTaken: result.submission.recommended_action,
     toolCalls: result.toolCalls,
@@ -235,11 +279,12 @@ export async function runVerifyStage(vendorBillId: string, matchDetail: unknown,
   try {
     result = await verify(vendorBillId, matchDetail, investigation, humanContext);
   } catch (e) {
+    const failedModel = modelFor("verifier");
     // Same failure mode and same policy as runInvestigateStage's catch — see its comment.
     // A failed Verifier means "no independent second opinion obtained," not "pipeline crashed";
     // runPipeline treats a missing verify submission the same as verify never having run.
     const d = await writeDecision({
-      invoiceId: vendorBillId, nodeId: "verify", agentId: process.env.TENSORMUX_MODEL || "glm-4-7-flash", model: process.env.TENSORMUX_MODEL || "glm-4-7-flash",
+      invoiceId: vendorBillId, nodeId: "verify", agentId: failedModel, model: failedModel,
       parentDecisionId, startedAt, endedAt: new Date().toISOString(),
       actionTaken: "error", reasonCode: "R99_AGENT_ERROR",
       claims: [{ text: `Verifier failed: ${e instanceof Error ? e.message : String(e)}`, tag: "grounded" }],
@@ -250,7 +295,7 @@ export async function runVerifyStage(vendorBillId: string, matchDetail: unknown,
   }
 
   const d = await writeDecision({
-    invoiceId: vendorBillId, nodeId: "verify", agentId: process.env.TENSORMUX_MODEL || "glm-4-7-flash", model: process.env.TENSORMUX_MODEL || "glm-4-7-flash",
+    invoiceId: vendorBillId, nodeId: "verify", agentId: result.model, model: result.model,
     parentDecisionId, startedAt, endedAt: new Date().toISOString(),
     confidence: result.submission.confidence,
     actionTaken: result.submission.agrees ? investigation.recommended_action : "disagreement",
@@ -264,6 +309,23 @@ export async function runVerifyStage(vendorBillId: string, matchDetail: unknown,
 
 // --- policy ---
 
+/**
+ * The policy rule, pure: the deterministic combined decision, tightened (never loosened) by a
+ * Verifier that disagrees. Shared by the policy stage and by reconsideration, which needs to
+ * know whether a re-review would change the outcome BEFORE it writes anything.
+ */
+export function computePolicyAction(combined: CombinedDecision, verifySubmission?: VerificationSubmission): { action: Action; claims: Claim[] } {
+  let action: Action = combined.overallAction;
+  const claims: Claim[] = [];
+  if (verifySubmission && verifySubmission.agrees === false) {
+    // ENGINE.md §2.5: disagreement between Investigator and Verifier forces escalation
+    // rather than trusting either alone — "more restrictive wins" against a floor of L2.
+    action = moreRestrictive(action, "escalate_l2");
+    claims.push({ text: `Verifier disagreed with the Investigator: ${verifySubmission.notes}`, tag: "grounded" });
+  }
+  return { action, claims };
+}
+
 export async function runPolicyStage(params: {
   vendorBillId: string;
   combined: CombinedDecision;
@@ -271,15 +333,7 @@ export async function runPolicyStage(params: {
   parentDecisionId?: string;
   recon?: ReconsiderationInput;
 }): Promise<Decision> {
-  let finalAction: Action = params.combined.overallAction;
-  const claims: Claim[] = [];
-
-  if (params.verifySubmission && params.verifySubmission.agrees === false) {
-    // ENGINE.md §2.5: disagreement between Investigator and Verifier forces escalation
-    // rather than trusting either alone — "more restrictive wins" against a floor of L2.
-    finalAction = moreRestrictive(finalAction, "escalate_l2");
-    claims.push({ text: `Verifier disagreed with the Investigator: ${params.verifySubmission.notes}`, tag: "grounded" });
-  }
+  const { action: finalAction, claims } = computePolicyAction(params.combined, params.verifySubmission);
 
   const startedAt = new Date().toISOString();
   const d = await writeDecision({
@@ -310,12 +364,6 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
     // than crashing the pipeline uncaught (ENGINE.md §5: never silently drop an invoice into limbo).
     try {
       await postBillApproval(vendorBillId);
-      
-      // Auto-payment integration
-      const billRows = await sql`SELECT total_amount FROM vendor_bills WHERE id = ${vendorBillId}`;
-      if (billRows.length > 0) {
-        await triggerPayment(vendorBillId, billRows[0].total_amount);
-      }
     } catch (e) {
       await sql`UPDATE vendor_bills SET status = 'exception' WHERE id = ${vendorBillId}`;
       const d = await writeDecision({
@@ -323,6 +371,26 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
         parentDecisionId: policyDecision.id, startedAt, endedAt: new Date().toISOString(),
         actionTaken: "error", reasonCode: "R99_AGENT_ERROR",
         claims: [{ text: `Posting failed: ${e instanceof Error ? e.message : String(e)}`, tag: "grounded" }],
+        idempotencyKey,
+      });
+      await publish(d);
+      return d;
+    }
+
+    // The bill is now POSTED. Paying it is a separate step with its own failure mode: if the
+    // payment rail fails, the ledger entry is still correct and the bill must stay 'posted'
+    // (unpaid) with the failure on the record, not be flipped to 'exception' as if posting broke.
+    try {
+      const billRows = await sql`SELECT total_amount FROM vendor_bills WHERE id = ${vendorBillId}`;
+      if (billRows.length > 0) {
+        await triggerPayment(vendorBillId, billRows[0].total_amount);
+      }
+    } catch (e) {
+      const d = await writeDecision({
+        invoiceId: vendorBillId, nodeId: "audit", agentId: "deterministic-policy-engine",
+        parentDecisionId: policyDecision.id, startedAt, endedAt: new Date().toISOString(),
+        actionTaken: "payment_failed", reasonCode: "R99_AGENT_ERROR",
+        claims: [{ text: `Posted to the ledger, but payment did not go out: ${e instanceof Error ? e.message : String(e)}`, tag: "grounded" }],
         idempotencyKey,
       });
       await publish(d);
@@ -370,8 +438,43 @@ function asCascadedDecision(action: Action, exceptionCode: CombinedDecision["dom
   return { overallAction: action, dominantException: exceptionCode, cascaded: true, deferredExceptions: [] };
 }
 
-export async function runPipeline(vendorBillId: string): Promise<void> {
-  const extractDecision = await runExtractStage(vendorBillId);
+/**
+ * Runs the pipeline and guarantees the bill never stays at 'processing' if a stage throws
+ * something unexpected (DB outage, bug): it is moved to 'exception' with an R99 audit decision,
+ * so it shows up in the reviewer's queue instead of silently spinning forever. The original
+ * error is re-thrown for the caller to log.
+ */
+export async function runPipeline(vendorBillId: string, opts: { extraction?: ExtractionResult } = {}): Promise<void> {
+  try {
+    await runPipelineStages(vendorBillId, opts);
+  } catch (e) {
+    await recordPipelineCrash(vendorBillId, e);
+    throw e;
+  }
+}
+
+async function recordPipelineCrash(vendorBillId: string, cause: unknown): Promise<void> {
+  const message = (cause instanceof Error ? cause.message : String(cause)).slice(0, 300);
+  try {
+    const sql = getSql();
+    await sql`UPDATE vendor_bills SET status = 'exception' WHERE id = ${vendorBillId} AND status = 'processing'`;
+    const now = new Date().toISOString();
+    const d = await writeDecision({
+      invoiceId: vendorBillId, nodeId: "audit", agentId: "system", startedAt: now, endedAt: now,
+      actionTaken: "error", reasonCode: "R99_AGENT_ERROR",
+      claims: [{ text: `Pipeline stopped unexpectedly: ${message}`, tag: "grounded" }],
+      idempotencyKey: idemKey(vendorBillId, "audit", ":crash"),
+    });
+    await publish(d);
+  } catch (inner) {
+    // The ledger itself is unreachable; nothing more can be recorded. Both errors go to the log
+    // so an operator can find the stuck bill by id.
+    console.error(`runPipeline: bill ${vendorBillId} crashed (${message}) and the crash could not be recorded:`, inner);
+  }
+}
+
+async function runPipelineStages(vendorBillId: string, opts: { extraction?: ExtractionResult }): Promise<void> {
+  const extractDecision = await runExtractStage(vendorBillId, opts.extraction);
   if (extractDecision.actionTaken === "error") {
     const policyDecision = await runPolicyStage({ vendorBillId, combined: asCascadedDecision("block", null), parentDecisionId: extractDecision.id });
     await runAuditStage(vendorBillId, policyDecision);

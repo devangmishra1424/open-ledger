@@ -2,11 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/db/client";
+import { assertDestructiveAllowed } from "@/db/guard";
 import PDFDocument from 'pdfkit';
 
 const outputDir = "D:\\AO_Hackathon\\demo-invoices";
 
 async function main() {
+  assertDestructiveAllowed("scripts/generate_demo_pdfs.ts");
   const sql = getSql();
 
   console.log("Clearing existing invoices, POs, and GRs...");

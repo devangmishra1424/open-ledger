@@ -29,7 +29,7 @@ afterAll(async () => {
   await sql`DELETE FROM vendors WHERE id = ${vendorId}`;
 });
 
-describe("investigate() — real multi-turn OpenAI Responses API loop", () => {
+describe("investigate() — real multi-turn tool loop", () => {
   it("gathers real evidence via tool calls before concluding on a flagged-vendor, no-PO high-dollar invoice", async () => {
     const matchResult = {
       exception_types: ["EXC-NON_PO"],

@@ -21,6 +21,17 @@ function loadDotEnv(filePath: string) {
 }
 loadDotEnv(path.resolve(__dirname, ".env"));
 
+// The suite runs in its OWN schema inside the same Supabase database — never in the live
+// `public` tables. Forced unconditionally (a DB_SCHEMA in .env must not be able to redirect the
+// tests at live data), and inherited by the worker processes vitest spawns. tests/global-setup.ts
+// rebuilds this schema before each run; tests/test-schema-isolation.test.ts proves the workers
+// really are pinned to it.
+const TEST_SCHEMA = "veribook_test";
+if (process.env.DB_SCHEMA && process.env.DB_SCHEMA !== TEST_SCHEMA) {
+  console.warn(`[vitest] ignoring DB_SCHEMA=${process.env.DB_SCHEMA} from the environment; tests always run in '${TEST_SCHEMA}'.`);
+}
+process.env.DB_SCHEMA = TEST_SCHEMA;
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -28,14 +39,18 @@ export default defineConfig({
     },
   },
   test: {
+    globalSetup: ["./tests/global-setup.ts"],
     // Vitest runs different test FILES in parallel worker processes by default. Several
     // suites here write real rows into the shared `decisions` table (the global, sequential
-    // hash chain) against one live Supabase DB — no isolated per-worker test database exists.
+    // hash chain) in one database — no isolated per-worker test schema exists.
     // Running files in parallel lets one file's afterAll delete rows out from under another
     // file's still-in-flight verifyChain() check, breaking a chain-integrity assertion that
     // has nothing wrong with it — reproduced and confirmed multiple times, not a guess.
     // Sequential file execution is the real fix; a to-DO comment wouldn't have caught the
     // next person's new DB-writing test suite hitting the exact same race.
     fileParallelism: false,
+    // Every DB-backed test is a network round trip to Supabase and some call a live LLM; the 5s default flakes.
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
   },
 });

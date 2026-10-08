@@ -1,10 +1,10 @@
-import { getDecision, countReconsiderations, getDecisionsAfter, markSuperseded } from "@/lib/ledger/decisions";
+import { getDecision, getDecisionsForInvoice, countReconsiderations, getDecisionsAfter, markSuperseded } from "@/lib/ledger/decisions";
 import { runMatchStage } from "@/lib/pipeline/match-stage";
 import {
-  runInvestigateStage, runVerifyStage, runPolicyStage, runAuditStage, isTier2Eligible,
+  runInvestigateStage, runVerifyStage, runPolicyStage, runAuditStage, isTier2Eligible, computePolicyAction,
   type ReconsiderationInput,
 } from "@/lib/pipeline/orchestrator";
-import type { Action, CombinedDecision } from "@/lib/matching/decision-matrix";
+import { asAction, moreRestrictive, type CombinedDecision } from "@/lib/matching/decision-matrix";
 import type { InvestigationSubmission } from "@/lib/agent/investigator";
 import type { VerificationSubmission } from "@/lib/agent/verifier";
 import type { Decision, ReconsiderResponse } from "@/lib/types";
@@ -100,7 +100,28 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
     return { newDecision, cascaded: false, supersededDecisionIds: [] };
   }
 
-  const cascaded = newDecision.actionTaken !== original.actionTaken;
+  // What the model recommends is free text, and it must not be able to move money. Two rules:
+  //  1. Only a recognised Action counts (anything else is ignored, not cast).
+  //  2. It can only TIGHTEN what the deterministic rules decided (moreRestrictive), never loosen
+  //     it — so "auto_approve" is reachable only for a clean deterministic match. Before this,
+  //     a contested invoice whose re-review said "auto_approve" was cascaded straight into
+  //     posting and paying it.
+  const floor = matchResult.combined.overallAction;
+  const proposed = original.nodeId === "investigate" ? asAction(newDecision.actionTaken) : undefined;
+  const combinedForPolicy: CombinedDecision = {
+    overallAction: proposed ? moreRestrictive(floor, proposed) : floor,
+    dominantException: matchResult.combined.dominantException,
+    cascaded: false,
+    deferredExceptions: matchResult.combined.deferredExceptions,
+  };
+  // The reconsidered node WAS verify: its new submission is what policy needs.
+  const reconsideredVerify: VerificationSubmission | undefined = original.nodeId === "verify"
+    ? { agrees: newDecision.actionTaken !== "disagreement", exception_types: [], confidence: newDecision.confidence ?? 0, notes: newDecision.claims?.[0]?.text ?? "" }
+    : undefined;
+
+  // Did the outcome actually change? Compare what policy would now conclude with what it concluded.
+  const currentPolicy = (await getDecisionsForInvoice(original.invoiceId)).filter((d) => d.nodeId === "policy" && !d.supersededById).at(-1);
+  const cascaded = computePolicyAction(combinedForPolicy, reconsideredVerify).action !== currentPolicy?.actionTaken;
   const supersededDecisionIds: string[] = [];
 
   if (cascaded) {
@@ -109,18 +130,13 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
     // stages even apply.
     const downstream = await getDecisionsAfter(original);
     for (const d of downstream) {
+      // A person's decision is never superseded by a machine's: the chain keeps it as the record of what they did.
+      if (d.nodeId === "human_review") continue;
       await markSuperseded(d.id, newDecision.id);
       supersededDecisionIds.push(d.id);
     }
 
-    const combinedForPolicy: CombinedDecision = {
-      overallAction: newDecision.actionTaken as Action,
-      dominantException: matchResult.combined.dominantException,
-      cascaded: false,
-      deferredExceptions: matchResult.combined.deferredExceptions,
-    };
-
-    let verifySubmission: VerificationSubmission | undefined;
+    let verifySubmission = reconsideredVerify;
     let lastId = newDecision.id;
 
     if (original.nodeId === "investigate" && isTier2Eligible(combinedForPolicy.overallAction)) {
@@ -131,9 +147,6 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
       const { decision: verifyDecision, submission } = await runVerifyStage(original.invoiceId, matchResult.detail, investigation, newDecision.id, recon);
       verifySubmission = submission;
       lastId = verifyDecision.id;
-    } else if (original.nodeId === "verify") {
-      // The reconsidered node WAS verify itself — its new submission is what policy needs.
-      verifySubmission = { agrees: newDecision.actionTaken !== "disagreement", exception_types: [], confidence: newDecision.confidence ?? 0, notes: newDecision.claims?.[0]?.text ?? "" };
     }
 
     const policyDecision = await runPolicyStage({ vendorBillId: original.invoiceId, combined: combinedForPolicy, verifySubmission, parentDecisionId: lastId, recon });

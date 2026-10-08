@@ -1,19 +1,17 @@
-import { getSql } from "@/db/client";
+import { rejectInvoice } from "@/lib/ledger/human-review";
 import { getFrontendInvoice } from "@/lib/api-shapes";
+import { handle, optionalString, readJsonBody, reviewerName } from "@/lib/http";
 
-/** POST /api/invoices/:id/reject — a human review action (schema's `reviews.action='reject'`). */
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+/**
+ * POST /api/invoices/:id/reject — a human rejects an invoice that is waiting on a person.
+ * Body: { reviewerName, reason? }. Marks it void and records who rejected it in the hash chain.
+ * 409 if it was already approved/posted/paid (reverse the ledger entry instead); rejecting an
+ * already-rejected invoice is a no-op.
+ */
+export const POST = handle("POST /api/invoices/:id/reject", async (req, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
-  const sql = getSql();
-  const body = await req.json().catch(() => ({}));
-  const reviewerName: string = body.reviewerName ?? "demo-reviewer";
-
-  const billRows = await sql`SELECT id FROM vendor_bills WHERE id = ${id}`;
-  if (billRows.length === 0) return Response.json({ error: `no invoice found with id '${id}'` }, { status: 404 });
-
-  await sql`INSERT INTO reviews (id, invoice_id, reviewer_name, action, note) VALUES (${crypto.randomUUID()}, ${id}, ${reviewerName}, 'reject', ${body.reason ?? null})`;
-  await sql`UPDATE vendor_bills SET status = 'void' WHERE id = ${id}`;
-
+  const body = await readJsonBody(req);
+  const outcome = await rejectInvoice({ billId: id, reviewer: reviewerName(body), note: optionalString(body, "reason") });
   const invoice = await getFrontendInvoice(id);
-  return Response.json({ success: true, invoice });
-}
+  return Response.json({ success: true, alreadyDone: outcome.alreadyDone, invoice });
+});

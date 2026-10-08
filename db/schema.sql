@@ -126,7 +126,7 @@ CREATE TABLE reason_codes (
 CREATE TABLE decisions (
   seq BIGSERIAL,
   id TEXT PRIMARY KEY, invoice_id TEXT REFERENCES vendor_bills(id),
-  node_id TEXT NOT NULL CHECK (node_id IN ('extract','validate','match','investigate','verify','policy','audit','audit_assemble')),
+  node_id TEXT NOT NULL CHECK (node_id IN ('extract','validate','match','investigate','verify','policy','audit','audit_assemble','human_review')),
   parent_decision_id TEXT REFERENCES decisions(id), reconsideration_of_id TEXT REFERENCES decisions(id),
   superseded_by_id TEXT REFERENCES decisions(id), agent_id TEXT NOT NULL, model TEXT, model_version TEXT,
   started_at TEXT NOT NULL, ended_at TEXT,

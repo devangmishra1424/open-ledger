@@ -14,6 +14,15 @@ import type { VendorBankChangeReview } from "@/lib/types";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/** The review does not exist (-> HTTP 404). */
+export class BankChangeNotFound extends Error {
+  constructor(message: string) { super(message); this.name = "BankChangeNotFound"; }
+}
+/** The action is not allowed in the review's current state, or breaks maker/checker (-> HTTP 409). */
+export class BankChangeConflict extends Error {
+  constructor(message: string) { super(message); this.name = "BankChangeConflict"; }
+}
+
 /**
  * "Recent" window for treating a vendor's bank_account_changed_at as still gating its
  * invoices. ALGORITHMS.md §6 itself doesn't name a number for this. This project's own
@@ -53,7 +62,7 @@ function fromRow(row: any): VendorBankChangeReview {
 
 async function getReviewOrThrow(sql: Sql<{}> | TransactionSql<{}>, reviewId: string): Promise<VendorBankChangeReview> {
   const rows = await sql`SELECT * FROM vendor_bank_change_reviews WHERE id = ${reviewId}`;
-  if (rows.length === 0) throw new Error(`no vendor_bank_change_reviews row found with id '${reviewId}'`);
+  if (rows.length === 0) throw new BankChangeNotFound(`no vendor_bank_change_reviews row found with id '${reviewId}'`);
   return fromRow(rows[0]);
 }
 
@@ -105,36 +114,44 @@ export interface BankChangeGateCheck {
  *    un-block it, which is the opposite of what §6 asks for.
  */
 export async function detectBankChangeGate(vendorId: string): Promise<BankChangeGateCheck> {
+  const gate = (await detectBankChangeGates([vendorId])).get(vendorId);
+  if (!gate) throw new Error(`detectBankChangeGate: no vendor found with id '${vendorId}'`);
+  return gate;
+}
+
+/** The same check for many vendors in two queries (list screens would otherwise ask once per invoice). Vendors that don't exist are absent from the result. */
+export async function detectBankChangeGates(vendorIds: string[]): Promise<Map<string, BankChangeGateCheck>> {
+  const result = new Map<string, BankChangeGateCheck>();
+  const ids = [...new Set(vendorIds)];
+  if (ids.length === 0) return result;
   const sql = getSql();
-  const vendorRows = await sql`SELECT id, bank_account_last4, bank_account_changed_at FROM vendors WHERE id = ${vendorId}`;
-  if (vendorRows.length === 0) throw new Error(`detectBankChangeGate: no vendor found with id '${vendorId}'`);
-  const vendor = vendorRows[0];
+  const vendorRows = await sql`SELECT id, bank_account_last4, bank_account_changed_at FROM vendors WHERE id IN ${sql(ids)}`;
+  const withChange = vendorRows.filter((v: any) => v.bank_account_changed_at);
+  const reviewRows = withChange.length === 0 ? [] : await sql`
+    SELECT * FROM vendor_bank_change_reviews WHERE vendor_id IN ${sql(withChange.map((v: any) => v.id))} ORDER BY created_at DESC`;
 
-  if (!vendor.bank_account_changed_at) {
-    return { gating: false, status: "cleared" };
-  }
-  const bankAccountChangedAt: string = vendor.bank_account_changed_at;
-
-  const reviewRows = await sql`
-    SELECT * FROM vendor_bank_change_reviews
-    WHERE vendor_id = ${vendorId} AND new_bank_last4 IS NOT DISTINCT FROM ${vendor.bank_account_last4}
-    ORDER BY created_at DESC LIMIT 1
-  `;
-
-  if (reviewRows.length > 0) {
-    const review = fromRow(reviewRows[0]);
-    if (review.status === "callback_confirmed" && review.secondReviewerName) {
-      return { gating: false, status: "cleared", review, bankAccountChangedAt };
+  for (const vendor of vendorRows) {
+    if (!vendor.bank_account_changed_at) {
+      result.set(vendor.id, { gating: false, status: "cleared" });
+      continue;
     }
-    return { gating: true, status: review.status, review, bankAccountChangedAt };
+    const bankAccountChangedAt: string = vendor.bank_account_changed_at;
+    // newest review for this vendor whose new bank details are the vendor's CURRENT ones
+    const match = reviewRows.find((r: any) => r.vendor_id === vendor.id && (r.new_bank_last4 ?? null) === (vendor.bank_account_last4 ?? null));
+    if (match) {
+      const review = fromRow(match);
+      if (review.status === "callback_confirmed" && review.secondReviewerName) {
+        result.set(vendor.id, { gating: false, status: "cleared", review, bankAccountChangedAt });
+      } else {
+        result.set(vendor.id, { gating: true, status: review.status, review, bankAccountChangedAt });
+      }
+      continue;
+    }
+    const changedAtMs = new Date(bankAccountChangedAt).getTime();
+    const isRecent = !Number.isNaN(changedAtMs) && Date.now() - changedAtMs <= BANK_CHANGE_RECENT_WINDOW_DAYS * MS_PER_DAY;
+    result.set(vendor.id, isRecent ? { gating: true, status: "flagged", bankAccountChangedAt } : { gating: false, status: "cleared", bankAccountChangedAt });
   }
-
-  const changedAtMs = new Date(bankAccountChangedAt).getTime();
-  const isRecent = !Number.isNaN(changedAtMs) && Date.now() - changedAtMs <= BANK_CHANGE_RECENT_WINDOW_DAYS * MS_PER_DAY;
-  if (isRecent) {
-    return { gating: true, status: "flagged", bankAccountChangedAt };
-  }
-  return { gating: false, status: "cleared", bankAccountChangedAt };
+  return result;
 }
 
 export interface CreateBankChangeReviewInput {
@@ -209,7 +226,7 @@ export async function logCallbackAttempt(input: LogCallbackAttemptInput): Promis
     await tx`SELECT pg_advisory_xact_lock(${REVIEW_LOCK_KEY})`;
     const review = await getReviewOrThrow(tx, input.reviewId);
     if (review.status !== "callback_pending") {
-      throw new Error(`logCallbackAttempt: review '${input.reviewId}' is '${review.status}', not 'callback_pending'`);
+      throw new BankChangeConflict(`logCallbackAttempt: review '${input.reviewId}' is '${review.status}', not 'callback_pending'`);
     }
     const callbackAtRaw = input.callbackAt;
     const callbackAt = callbackAtRaw ? requireNonBlank(callbackAtRaw, "callbackAt") : new Date().toISOString();
@@ -248,10 +265,10 @@ export async function recordCallbackOutcome(reviewId: string, outcome: CallbackO
     await tx`SELECT pg_advisory_xact_lock(${REVIEW_LOCK_KEY})`;
     const review = await getReviewOrThrow(tx, reviewId);
     if (review.status !== "callback_pending") {
-      throw new Error(`recordCallbackOutcome: review '${reviewId}' is '${review.status}', not 'callback_pending'`);
+      throw new BankChangeConflict(`recordCallbackOutcome: review '${reviewId}' is '${review.status}', not 'callback_pending'`);
     }
     if (outcome === "confirmed" && (!review.callbackConfirmedBy || !review.callbackAt)) {
-      throw new Error(`recordCallbackOutcome: cannot confirm review '${reviewId}' without a logged callback attempt`);
+      throw new BankChangeConflict(`recordCallbackOutcome: cannot confirm review '${reviewId}' without a logged callback attempt`);
     }
 
     const status: VendorBankChangeReview["status"] = outcome === "confirmed" ? "callback_confirmed" : "callback_failed";
@@ -282,16 +299,16 @@ export async function recordSecondReviewerSignOff(reviewId: string, secondReview
     const review = await getReviewOrThrow(tx, reviewId);
 
     if (review.status !== "callback_confirmed") {
-      throw new Error(`recordSecondReviewerSignOff: review '${reviewId}' is '${review.status}', not 'callback_confirmed'`);
+      throw new BankChangeConflict(`recordSecondReviewerSignOff: review '${reviewId}' is '${review.status}', not 'callback_confirmed'`);
     }
     if (review.secondReviewerName) {
-      throw new Error(`recordSecondReviewerSignOff: review '${reviewId}' already has a second-reviewer sign-off ('${review.secondReviewerName}')`);
+      throw new BankChangeConflict(`recordSecondReviewerSignOff: review '${reviewId}' already has a second-reviewer sign-off ('${review.secondReviewerName}')`);
     }
     if (!review.callbackConfirmedBy) {
-      throw new Error(`recordSecondReviewerSignOff: review '${reviewId}' has no callback_confirmed_by on file to check against`);
+      throw new BankChangeConflict(`recordSecondReviewerSignOff: review '${reviewId}' has no callback_confirmed_by on file to check against`);
     }
     if (normalizeReviewerName(signOffName) === normalizeReviewerName(review.callbackConfirmedBy)) {
-      throw new Error(
+      throw new BankChangeConflict(
         `recordSecondReviewerSignOff: maker/checker violation — '${secondReviewerName}' cannot sign off on the bank change they themselves confirmed via callback (review '${reviewId}')`
       );
     }

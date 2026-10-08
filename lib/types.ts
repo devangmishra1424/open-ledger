@@ -1,4 +1,4 @@
-export type NodeId = 'extract'|'validate'|'match'|'investigate'|'verify'|'policy'|'audit'|'audit_assemble';
+export type NodeId = 'extract'|'validate'|'match'|'investigate'|'verify'|'policy'|'audit'|'audit_assemble'|'human_review';
 export type BillStatus = 'processing'|'matched'|'exception'|'approved'|'posted'|'paid'|'void';
 export type ReviewAction = 'approve'|'reject'|'request_info'|'contest';
 export type PbcItemType = 'trial_balance'|'ap_aging'|'invoice_bundle'|'tie_out_check'|'surl_check';
