@@ -1,6 +1,7 @@
 import { verifierPrompt } from "@/lib/agent/prompts";
 import { EVIDENCE_TOOLS, SUBMIT_VERIFICATION, executeTool } from "@/lib/agent/tools";
 import { runToolLoop, type AgentLoopResult } from "@/lib/agent/loop";
+import { normalizeConfidence } from "@/lib/agent/llm";
 import type { HumanReconsiderationContext } from "@/lib/agent/investigator";
 
 /** Matches submit_verification's parameter schema in lib/agent/tools.ts exactly. */
@@ -23,7 +24,7 @@ export async function verify(invoiceId: string, matchResult: unknown, investigat
     payload.human_question = humanContext.question;
     if (humanContext.additionalContext) payload.human_additional_context = humanContext.additionalContext;
   }
-  return runToolLoop<VerificationSubmission>({
+  const result = await runToolLoop<VerificationSubmission>({
     role: "verifier",
     instructions: verifierPrompt(invoiceId),
     initialInput: JSON.stringify(payload),
@@ -31,4 +32,6 @@ export async function verify(invoiceId: string, matchResult: unknown, investigat
     submissionToolName: "submit_verification",
     executeTool,
   });
+  result.submission.confidence = normalizeConfidence(result.submission.confidence);
+  return result;
 }

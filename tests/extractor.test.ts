@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { extract, parseTemplateInvoice, assessExtraction, normalizeDate } from "@/lib/agent/extractor";
-import { llmConfigured } from "@/lib/agent/llm";
+import { liveLlm } from "./helpers/live-llm";
 
 const INLINE_INVOICE = `
 INVOICE
@@ -151,7 +151,7 @@ describe("extract() — what confidence means", () => {
  * Live model call: only for a document the template parser cannot read, so the LLM path is the
  * one exercised. Skipped (visibly, in the report) when no provider key is configured.
  */
-describe.skipIf(!llmConfigured())("extract() — real LLM path", () => {
+describe.skipIf(!liveLlm)("extract() — real LLM path", () => {
   it("reads a free-form invoice the template cannot, and its confidence comes from the arithmetic checks", async () => {
     const freeform = `
 Thank you for your business!

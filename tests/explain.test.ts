@@ -3,6 +3,7 @@ import { getSql } from "@/db/client";
 import { runPipeline } from "@/lib/pipeline/orchestrator";
 import { getDecisionsForInvoice } from "@/lib/ledger/decisions";
 import { explain } from "@/lib/explain";
+import { liveLlm } from "./helpers/live-llm";
 
 /**
  * Real call against the live OpenAI API AND a real, full pipeline run's actual decisions —
@@ -33,7 +34,7 @@ afterAll(async () => {
   await sql`DELETE FROM vendors WHERE id = ${vendorId}`;
 });
 
-describe("explain() — real grounded Q&A over a real pipeline run's decisions", () => {
+describe.skipIf(!liveLlm)("explain() — real grounded Q&A over a real pipeline run's decisions", () => {
   it("answers why the policy decision landed where it did, citing real decision ids", async () => {
     const decisions = await getDecisionsForInvoice(billId);
     const policyDecision = decisions.find((d) => d.nodeId === "policy")!;

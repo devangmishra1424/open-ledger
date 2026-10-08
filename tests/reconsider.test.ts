@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getSql } from "@/db/client";
 import { runPipeline } from "@/lib/pipeline/orchestrator";
-import { getDecision, getDecisionsForInvoice } from "@/lib/ledger/decisions";
+import { getDecision, getDecisionsForInvoice, writeDecision } from "@/lib/ledger/decisions";
 import { reconsider, isEscalateSeniorResult } from "@/lib/pipeline/reconsider";
+import { liveLlm } from "./helpers/live-llm";
 
 const PREFIX = "TEST-RECON";
 const sql = getSql();
@@ -38,7 +39,8 @@ describe("reconsider — guard rails (deterministic, no LLM calls)", () => {
   it("refuses to reconsider a deterministic node (match/validate/policy), not just judgment-bearing ones", async () => {
     const vendorId = await makeVendor();
     const billId = await makeBill(vendorId, PREFIX + "-GUARD-1", 500);
-    await runPipeline(billId);
+    const now = new Date().toISOString();
+    await writeDecision({ invoiceId: billId, nodeId: "match", agentId: "deterministic-matching-engine", startedAt: now, endedAt: now, actionTaken: "escalate_l1", reasonCode: "EXC-NO_PO", idempotencyKey: `guard-match:${billId}` });
     const decisions = await getDecisionsForInvoice(billId);
     const matchDecision = decisions.find((d) => d.nodeId === "match")!;
 
@@ -49,7 +51,8 @@ describe("reconsider — guard rails (deterministic, no LLM calls)", () => {
   it("caps at 3 reconsiderations and escalates to a senior reviewer on the 4th attempt, without calling the LLM again", async () => {
     const vendorId = await makeVendor();
     const billId = await makeBill(vendorId, PREFIX + "-CAP-1", 500);
-    await runPipeline(billId);
+    const now = new Date().toISOString();
+    await writeDecision({ invoiceId: billId, nodeId: "investigate", agentId: "fixture", startedAt: now, endedAt: now, actionTaken: "escalate_l1", confidence: 0.8, idempotencyKey: `cap-inv:${billId}` });
     const decisions = await getDecisionsForInvoice(billId);
     const investigateDecision = decisions.find((d) => d.nodeId === "investigate")!;
 
@@ -69,7 +72,7 @@ describe("reconsider — guard rails (deterministic, no LLM calls)", () => {
   }, 60_000);
 });
 
-describe("reconsider — real re-invocation (real LLM calls)", () => {
+describe.skipIf(!liveLlm)("reconsider — real re-invocation (real LLM calls)", () => {
   it("re-invokes investigate with fresh context plus the human's question, and behaves consistently whether or not it cascades", async () => {
     const vendorId = await makeVendor();
     const billId = await makeBill(vendorId, PREFIX + "-REAL-1", 700);

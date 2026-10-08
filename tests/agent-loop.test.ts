@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import OpenAI from "openai";
 import { runToolLoop } from "@/lib/agent/loop";
-import { LlmConfigError, isMalformedToolCall, modelFor } from "@/lib/agent/llm";
+import { LlmConfigError, LlmRateLimitError, describeRateLimit, isMalformedToolCall, modelFor, normalizeConfidence } from "@/lib/agent/llm";
 
 /**
  * The tool loop against a fake provider client — no network. Pins the behaviours that matter
@@ -63,12 +63,12 @@ describe("runToolLoop", () => {
     expect(create).toHaveBeenCalledTimes(2);
   });
 
-  it("gives up after two re-samples instead of looping forever", async () => {
+  it("gives up after three re-samples instead of looping forever", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const bad = () => apiError(400, "Tool call validation failed: attempted to call tool 'commentary'");
-    const { client, create } = fakeClient([bad(), bad(), bad(), toolCallMessage("submit_x", {})]);
+    const { client, create } = fakeClient([bad(), bad(), bad(), bad(), toolCallMessage("submit_x", {})]);
     await expect(runToolLoop({ ...base, client })).rejects.toThrow(/Tool call validation failed/);
-    expect(create).toHaveBeenCalledTimes(3);
+    expect(create).toHaveBeenCalledTimes(4);
   });
 
   it("does NOT retry an ordinary 400 (a genuinely bad request)", async () => {
@@ -102,6 +102,58 @@ describe("runToolLoop", () => {
   });
 });
 
+describe("rate limits", () => {
+  const daily = "Rate limit reached for model `openai/gpt-oss-120b` ... on tokens per day (TPD): Limit 200000, Used 198981, Requested 1425. Please try again in 2m55.392s.";
+  const perMinute = "Rate limit reached ... on tokens per minute (TPM): Limit 8000, Used 6752, Requested 1273. Please try again in 187.5ms.";
+
+  it("explains a daily cap and a per-minute cap in words, with the retry hint", () => {
+    expect(describeRateLimit("m", daily)).toMatch(/daily usage limit for m was reached; it says to try again in 2m55.392s\. This is a quota/);
+    expect(describeRateLimit("m", perMinute)).toMatch(/per-minute usage limit .* try again in 187.5ms/);
+  });
+
+  it("a 429 that survives the SDK's retries surfaces as a rate-limit error, not a raw provider dump", async () => {
+    const { client } = fakeClient([apiError(429, daily)]);
+    const err = await runToolLoop({ ...base, client, model: "openai/gpt-oss-120b" }).catch((e) => e);
+    expect(err).toBeInstanceOf(LlmRateLimitError);
+    expect(err.message).toMatch(/daily usage limit/);
+    expect(err.message).not.toMatch(/org_/);
+  });
+});
+
+describe("normalizeConfidence", () => {
+  it("accepts 0-1, rescales 0-100, and treats anything unusable as zero confidence", () => {
+    expect(normalizeConfidence(0.97)).toBe(0.97);
+    expect(normalizeConfidence(97)).toBeCloseTo(0.97);
+    expect(normalizeConfidence(100)).toBe(1);
+    expect(normalizeConfidence(1)).toBe(1);
+    expect(normalizeConfidence("0.5")).toBe(0.5);
+    expect(normalizeConfidence(-3)).toBe(0);
+    expect(normalizeConfidence(250)).toBe(1); // out of any sane range: clamp, don't scale
+    expect(normalizeConfidence(undefined)).toBe(0);
+    expect(normalizeConfidence("high")).toBe(0);
+    expect(normalizeConfidence(NaN)).toBe(0);
+  });
+});
+
+describe("reasoning effort", () => {
+  it("is low by default for gpt-oss and omitted for models without the knob", async () => {
+    const { reasoningEffortFor } = await import("@/lib/agent/llm");
+    expect(reasoningEffortFor("openai/gpt-oss-120b")).toBe("low");
+    expect(reasoningEffortFor("qwen/qwen3.8-27b")).toBeUndefined();
+    vi.stubEnv("LLM_REASONING_EFFORT", "high");
+    expect(reasoningEffortFor("openai/gpt-oss-20b")).toBe("high");
+    vi.unstubAllEnvs();
+  });
+  it("is sent on the request only for models that take it", async () => {
+    const withEffort = fakeClient([toolCallMessage("submit_x", {})]);
+    await runToolLoop({ ...base, client: withEffort.client, model: "openai/gpt-oss-120b" });
+    expect((withEffort.create.mock.calls[0] as any[])[0].reasoning_effort).toBe("low");
+    const without = fakeClient([toolCallMessage("submit_x", {})]);
+    await runToolLoop({ ...base, client: without.client, model: "qwen/qwen3.8-27b" });
+    expect((without.create.mock.calls[0] as any[])[0]).not.toHaveProperty("reasoning_effort");
+  });
+});
+
 describe("model configuration", () => {
   it("defaults the Investigator and Verifier to different model families", () => {
     expect(modelFor("investigator")).not.toBe(modelFor("verifier"));
@@ -113,6 +165,8 @@ describe("model configuration", () => {
   });
   it("classifies only provider rejections of the model's own tool call as malformed-tool-call", () => {
     expect(isMalformedToolCall(apiError(400, "Tool call validation failed: x"))).toBe(true);
+    expect(isMalformedToolCall(apiError(400, "Tool choice is required, but model did not call a tool"))).toBe(true);
+    expect(isMalformedToolCall(apiError(400, "Parsing failed. The model generated output that could not be parsed. See 'failed_generation'"))).toBe(true);
     expect(isMalformedToolCall(apiError(400, "unrelated"))).toBe(false);
     expect(isMalformedToolCall(apiError(500, "Tool call validation failed"))).toBe(false);
     expect(isMalformedToolCall(new Error("Tool call validation failed"))).toBe(false);

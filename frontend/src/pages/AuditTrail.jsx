@@ -13,6 +13,8 @@ import {
   Bot
 } from 'lucide-react';
 import { api } from '../services/api';
+import { useToasts } from '../state/Toasts';
+import { Banner } from '../components/ui';
 import './AuditTrail.css';
 
 const AuditTrail = () => {
@@ -31,18 +33,26 @@ const AuditTrail = () => {
   const [evidenceFiles, setEvidenceFiles] = useState([]);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [chainVerified, setChainVerified] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [newDescription, setNewDescription] = useState('');
+  const [newRequestedBy, setNewRequestedBy] = useState('');
+  const toast = useToasts();
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
     const fetchAll = () => {
-      api.getPbcRequests().then((data) => {
-        if (cancelled || !data) return;
-        setRequests(data);
-        if (data.length > 0) setSelectedRequestId((current) => current ?? data[0].request_id);
-      });
-      api.getEvidenceRecords().then((data) => { if (!cancelled && data) setEvidenceRecords(data); });
-      api.verifyChain().then((data) => { if (!cancelled && data) setChainVerified(data.valid); });
+      Promise.all([api.getPbcRequests(), api.getEvidenceRecords(), api.verifyChain()])
+        .then(([reqs, evidence, chain]) => {
+          if (cancelled) return;
+          setRequests(reqs);
+          if (reqs.length > 0) setSelectedRequestId((current) => current ?? reqs[0].request_id);
+          setEvidenceRecords(evidence);
+          setChainVerified(chain.valid);
+          setLoadError(null);
+        })
+        .catch((e) => { if (!cancelled) setLoadError(e); });
     };
     fetchAll();
     const interval = setInterval(fetchAll, 15000);
@@ -51,7 +61,7 @@ const AuditTrail = () => {
 
   useEffect(() => {
     if (!selectedRequestId) return;
-    api.getEvidenceFiles(selectedRequestId).then((data) => setEvidenceFiles(data ?? []));
+    api.getEvidenceFiles(selectedRequestId).then(setEvidenceFiles).catch((e) => toast.error(`Could not load attached files: ${e.message}`));
   }, [selectedRequestId]);
 
   const handleAttachFileClick = () => fileInputRef.current?.click();
@@ -70,15 +80,11 @@ const AuditTrail = () => {
         reader.readAsDataURL(file);
       });
       const contentBase64 = dataUrl.split(',')[1] ?? '';
-      const result = await api.uploadEvidenceFile(selectedRequestId, file.name, contentBase64, file.type);
-      if (result?.success) {
-        const files = await api.getEvidenceFiles(selectedRequestId);
-        setEvidenceFiles(files ?? []);
-      } else {
-        alert(`Could not attach "${file.name}" — the backend did not confirm it.`);
-      }
+      await api.uploadEvidenceFile(selectedRequestId, file.name, contentBase64, file.type);
+      setEvidenceFiles(await api.getEvidenceFiles(selectedRequestId));
+      toast.success(`Attached ${file.name}.`);
     } catch (err) {
-      alert(`Could not read "${file.name}": ${err.message}`);
+      toast.error(`Could not attach "${file.name}": ${err.message}`);
     } finally {
       setIsUploadingFile(false);
     }
@@ -90,11 +96,9 @@ const AuditTrail = () => {
     setNarrativeAnswer(null);
     try {
       const res = await api.narratePbcRequest(selectedRequestId, narrativeQuestion);
-      if (res && res.results) {
-        setNarrativeAnswer(res.results);
-      }
+      setNarrativeAnswer(res.results ?? []);
     } catch (e) {
-      console.error("Narration failed", e);
+      toast.error(`The auditor question could not be answered: ${e.message}`);
     } finally {
       setIsNarrating(false);
     }
@@ -112,28 +116,27 @@ const AuditTrail = () => {
   });
 
   const handleCloseRequest = async (reqId) => {
-    const result = await api.closePbcRequest(reqId);
-    if (result?.success) {
+    try {
+      await api.closePbcRequest(reqId);
       setRequests(prev => prev.map(r => r.request_id === reqId ? { ...r, status: 'closed' } : r));
-      alert(`PBC Request #${reqId} closed.`);
-    } else {
-      alert(`Could not close PBC Request #${reqId}.`);
+      toast.success(`Request ${reqId} closed.`);
+    } catch (e) {
+      toast.error(`Could not close the request: ${e.message}`);
     }
   };
 
-  const handleCreateRequest = async () => {
-    const description = window.prompt('What is this auditor request for?', 'Q4 Vendor Invoice Sample');
-    if (!description) return;
-    const requestedBy = window.prompt('Requested by (auditor / team name):', 'Internal Audit') || 'Internal Audit';
-
-    const result = await api.createPbcRequest({ description, requestedBy, itemType: 'invoice_bundle' });
-    if (result?.success && result.id) {
-      const fresh = await api.getPbcRequests();
-      if (fresh) setRequests(fresh);
-      setSelectedRequestId(result.id);
-      alert(`Created PBC Request #${result.id}.`);
-    } else {
-      alert('Could not create the request — the backend did not confirm it.');
+  const handleCreateRequest = async (e) => {
+    e.preventDefault();
+    try {
+      const result = await api.createPbcRequest({ description: newDescription.trim(), requestedBy: newRequestedBy.trim() || 'Internal Audit', itemType: 'invoice_bundle' });
+      setRequests(await api.getPbcRequests());
+      if (result?.id) setSelectedRequestId(result.id);
+      setShowNewForm(false);
+      setNewDescription('');
+      setNewRequestedBy('');
+      toast.success('Request created.');
+    } catch (err) {
+      toast.error(`Could not create the request: ${err.message}`);
     }
   };
 
@@ -165,7 +168,7 @@ const AuditTrail = () => {
               Audit Support & PBC Request Tracker
             </h2>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Provided-By-Client auditor request fulfillment, EvidenceRecord tie-out verification, & control objectives
+              Auditor requests (Provided-By-Client), the invoices behind them, and the integrity of the decision trail
             </p>
           </div>
 
@@ -177,11 +180,19 @@ const AuditTrail = () => {
             <span className={`status-chip ${chainVerified === false ? 'blocked' : 'clean'} font-mono`} style={{ padding: '6px 12px' }}>
               {chainVerified === null ? 'Checking chain…' : chainVerified ? 'Hash Chain Verified ✓' : 'Chain Integrity Broken ⚠️'}
             </span>
-            <button className="btn-primary" style={{ fontSize: '12.5px', padding: '8px 14px' }} onClick={handleCreateRequest}>
+            <button className="btn-primary" style={{ fontSize: '12.5px', padding: '8px 14px' }} onClick={() => setShowNewForm((v) => !v)}>
               <span>+ New PBC Request</span>
             </button>
           </div>
         </div>
+        {showNewForm && (
+          <form onSubmit={handleCreateRequest} style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 16 }}>
+            <label className="vb-field" style={{ flex: '2 1 280px' }}><span>What is the auditor asking for?</span><input required value={newDescription} onChange={(e) => setNewDescription(e.target.value)} placeholder="Q4 vendor invoice sample" /></label>
+            <label className="vb-field" style={{ flex: '1 1 180px' }}><span>Requested by</span><input value={newRequestedBy} onChange={(e) => setNewRequestedBy(e.target.value)} placeholder="Internal Audit" /></label>
+            <button type="submit" className="vb-btn vb-btn-primary" disabled={!newDescription.trim()}>Create</button>
+          </form>
+        )}
+        {loadError && <div style={{ marginTop: 12 }}><Banner kind="error">Could not load audit data: {loadError.message}</Banner></div>}
       </GlassCard>
 
       {/* 2. Top PBC Request Selection Cards Grid (Item 1a) */}
@@ -422,7 +433,7 @@ const AuditTrail = () => {
 
                   {/* Merkle Attestation Hash Foot */}
                   <div className="evidence-hash-foot">
-                    <span className="font-mono">Merkle Proof: {ev.attestation_hash}</span>
+                    <span className="font-mono">Latest record hash: {ev.attestation_hash}</span>
                     <span>Evidence ID: {ev.evidence_id}</span>
                   </div>
                 </div>

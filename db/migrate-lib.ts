@@ -60,6 +60,7 @@ const REASON_CODES: Array<[string, string, string]> = [
   ["EXC-FRAUD_BANK", "Vendor Bank Detail Change", "Vendor's bank account changed recently — routed to the gated vendor bank-change review workflow, never auto-approved."],
   ["EXC-BLANKET_EXCEEDED", "Blanket PO Ceiling Exceeded", "Cumulative invoiced amount against a blanket PO exceeds its negotiated ceiling."],
   ["EXC-UOM_MISMATCH", "Unit-of-Measure Mismatch", "Invoice and PO line disagree on unit of measure with no conversion factor on file."],
+  ["POLICY_LIMIT", "Auto-Approval Limit", "A clean match was held for a person because it exceeds the Settings amount limit or the Investigator's confidence is below the Settings threshold."],
   ["R99_AGENT_ERROR", "Agent Error", "A pipeline stage failed after its bounded retry — surfaced for human attention, never silently dropped."],
 ];
 

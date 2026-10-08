@@ -1,7 +1,7 @@
 import { EXTRACTOR_PROMPT } from "@/lib/agent/prompts";
 import { SUBMIT_EXTRACTION } from "@/lib/agent/tools";
 import { runToolLoop, type AgentLoopResult } from "@/lib/agent/loop";
-import { llmConfigured, modelFor } from "@/lib/agent/llm";
+import { llmConfigured, modelFor, normalizeConfidence } from "@/lib/agent/llm";
 
 /** Matches submit_extraction's parameter schema in lib/agent/tools.ts exactly. */
 export interface ExtractionSubmission {
@@ -246,7 +246,7 @@ export async function extract(invoiceText: string): Promise<ExtractionResult> {
     });
     const sub = llm.submission;
     sub.line_items = Array.isArray(sub.line_items) ? sub.line_items : [];
-    return { ...llm, submission: finalize(sub, "llm", typeof sub.confidence === "number" ? sub.confidence : undefined), method: "llm" };
+    return { ...llm, submission: finalize(sub, "llm", normalizeConfidence(sub.confidence)), method: "llm" };
   } catch (e) {
     // Not swallowed: the reason travels with the result into the ledger claim and the API response.
     return incomplete(`LLM extraction (${modelFor("extractor")}) failed: ${e instanceof Error ? e.message : String(e)}`);

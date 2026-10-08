@@ -10,7 +10,11 @@
     "seed": "tsx --env-file=.env scripts/seed.ts",
     "eval": "tsx --env-file=.env scripts/eval.ts",
     "generate-pdfs": "tsx --env-file=.env scripts/generate_demo_pdfs.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:demo": "node scripts/dev-demo.cjs",
+    "migrate:apply": "tsx --env-file=.env db/apply-migration.ts",
+    "bench:llm": "tsx --env-file=.env scripts/llm-bench.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@types/pdfkit": "^0.17.6",

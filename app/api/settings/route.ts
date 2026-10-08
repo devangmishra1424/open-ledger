@@ -1,32 +1,36 @@
 import { getSql } from "@/db/client";
+import { getPolicyLimits } from "@/lib/settings";
+import { handle, HttpError, readJsonBody } from "@/lib/http";
 
-/** GET/PUT /api/settings — real persistence (app_settings, single 'default' row). See db/schema.sql's note: not yet read by the live policy engine. */
-export async function GET() {
-  const sql = getSql();
-  const rows = await sql`SELECT auto_approval_confidence, max_auto_payment_amount, erp_webhook_url FROM app_settings WHERE id = 'default'`;
-  if (rows.length === 0) {
-    return Response.json({ autoApprovalConfidence: 95.0, maxAutoPaymentAmount: 50000.0, erpWebhookUrl: "" });
-  }
-  const r = rows[0];
-  return Response.json({
-    autoApprovalConfidence: r.auto_approval_confidence,
-    maxAutoPaymentAmount: r.max_auto_payment_amount,
-    erpWebhookUrl: r.erp_webhook_url ?? "",
-  });
+/**
+ * GET/PUT /api/settings — the two policy guardrails (lib/settings.ts), which the policy engine
+ * reads on every decision. PUT takes either or both: { autoApprovalConfidence: 0-100,
+ * maxAutoPaymentAmount: >= 0 }. (A third field, an ERP webhook URL, used to be stored here but
+ * nothing ever called it; it was removed rather than left as a setting that does nothing.)
+ */
+export const GET = handle("GET /api/settings", async () => {
+  return Response.json(await getPolicyLimits());
+});
+
+function optionalNumber(body: Record<string, unknown>, key: string, min: number, max: number): number | null {
+  const v = body[key];
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) throw new HttpError(400, `${key} must be a number from ${min} to ${max}`);
+  return v;
 }
 
-export async function PUT(req: Request) {
-  const sql = getSql();
-  const body = await req.json().catch(() => ({}));
+export const PUT = handle("PUT /api/settings", async (req) => {
+  const body = await readJsonBody(req);
+  const confidence = optionalNumber(body, "autoApprovalConfidence", 0, 100);
+  const maxAmount = optionalNumber(body, "maxAutoPaymentAmount", 0, 1e12);
+  if (confidence === null && maxAmount === null) throw new HttpError(400, "send autoApprovalConfidence and/or maxAutoPaymentAmount");
 
-  await sql`
-    UPDATE app_settings SET
-      auto_approval_confidence = ${body.autoApprovalConfidence ?? 95.0},
-      max_auto_payment_amount = ${body.maxAutoPaymentAmount ?? 50000.0},
-      erp_webhook_url = ${body.erpWebhookUrl ?? null},
-      updated_at = ${new Date().toISOString()}
-    WHERE id = 'default'
-  `;
-
-  return Response.json({ success: true, ...body });
-}
+  await getSql()`
+    INSERT INTO app_settings (id, auto_approval_confidence, max_auto_payment_amount, updated_at)
+    VALUES ('default', COALESCE(${confidence}::real, 90.0), COALESCE(${maxAmount}::real, 50000.0), ${new Date().toISOString()})
+    ON CONFLICT (id) DO UPDATE SET
+      auto_approval_confidence = COALESCE(${confidence}::real, app_settings.auto_approval_confidence),
+      max_auto_payment_amount = COALESCE(${maxAmount}::real, app_settings.max_auto_payment_amount),
+      updated_at = EXCLUDED.updated_at`;
+  return Response.json({ success: true, ...(await getPolicyLimits()) });
+});

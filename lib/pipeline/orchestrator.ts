@@ -8,6 +8,7 @@ import { investigate, type InvestigationSubmission } from "@/lib/agent/investiga
 import { verify, type VerificationSubmission } from "@/lib/agent/verifier";
 import { extract, type ExtractionResult } from "@/lib/agent/extractor";
 import { modelFor } from "@/lib/agent/llm";
+import { getPolicyLimits, guardrailBreach } from "@/lib/settings";
 import { postBillApproval } from "@/lib/ledger/journal";
 import { triggerPayment } from "@/lib/payments/payments";
 import { notifyReviewer } from "@/lib/telegram";
@@ -326,21 +327,49 @@ export function computePolicyAction(combined: CombinedDecision, verifySubmission
   return { action, claims };
 }
 
+/**
+ * computePolicyAction plus the Settings guardrails: an auto-approval that breaches the amount
+ * limit or the confidence threshold becomes a human review (escalate_l1, reason POLICY_LIMIT).
+ * The guardrails only ever make the outcome more cautious. Shared by the policy stage and by
+ * reconsideration's "would this change the outcome?" check.
+ */
+export async function evaluatePolicy(
+  vendorBillId: string,
+  combined: CombinedDecision,
+  verifySubmission: VerificationSubmission | undefined,
+  investigatorConfidence: number | undefined,
+): Promise<{ action: Action; reasonCode: string; claims: Claim[] }> {
+  const { action, claims } = computePolicyAction(combined, verifySubmission);
+  const reasonCode = combined.dominantException ?? "CLEAN_MATCH";
+  if (action !== "auto_approve") return { action, reasonCode, claims };
+
+  const billRows = await getSql()`SELECT total_amount FROM vendor_bills WHERE id = ${vendorBillId}`;
+  const breach = guardrailBreach({ amount: Number(billRows[0]?.total_amount ?? 0), investigatorConfidence }, await getPolicyLimits());
+  if (!breach) return { action, reasonCode, claims };
+  return { action: "escalate_l1", reasonCode: "POLICY_LIMIT", claims: [...claims, { text: breach, tag: "grounded" }] };
+}
+
 export async function runPolicyStage(params: {
   vendorBillId: string;
   combined: CombinedDecision;
   verifySubmission?: VerificationSubmission;
+  /** The Investigator's reported confidence (0-1), for the Settings confidence guardrail. */
+  investigatorConfidence?: number;
+  /** Set when the stop is NOT a finding about the invoice but a failure of the system itself (R99_AGENT_ERROR). */
+  reasonCodeOverride?: string;
   parentDecisionId?: string;
   recon?: ReconsiderationInput;
 }): Promise<Decision> {
-  const { action: finalAction, claims } = computePolicyAction(params.combined, params.verifySubmission);
+  const evaluated = await evaluatePolicy(params.vendorBillId, params.combined, params.verifySubmission, params.investigatorConfidence);
+  const { action: finalAction, claims } = evaluated;
+  const policyReason = params.reasonCodeOverride ?? evaluated.reasonCode;
 
   const startedAt = new Date().toISOString();
   const d = await writeDecision({
     invoiceId: params.vendorBillId, nodeId: "policy", agentId: "deterministic-policy-engine",
     parentDecisionId: params.parentDecisionId, startedAt, endedAt: new Date().toISOString(),
     actionTaken: finalAction,
-    reasonCode: params.combined.dominantException ?? "CLEAN_MATCH",
+    reasonCode: policyReason,
     claims: claims.length > 0 ? claims : undefined,
     idempotencyKey: idemKey(params.vendorBillId, "policy", params.recon ? `:${params.recon.attemptTag}` : ""),
   });
@@ -476,7 +505,7 @@ async function recordPipelineCrash(vendorBillId: string, cause: unknown): Promis
 async function runPipelineStages(vendorBillId: string, opts: { extraction?: ExtractionResult }): Promise<void> {
   const extractDecision = await runExtractStage(vendorBillId, opts.extraction);
   if (extractDecision.actionTaken === "error") {
-    const policyDecision = await runPolicyStage({ vendorBillId, combined: asCascadedDecision("block", null), parentDecisionId: extractDecision.id });
+    const policyDecision = await runPolicyStage({ vendorBillId, combined: asCascadedDecision("block", null), reasonCodeOverride: "R99_AGENT_ERROR", parentDecisionId: extractDecision.id });
     await runAuditStage(vendorBillId, policyDecision);
     return;
   }
@@ -508,7 +537,7 @@ async function runPipelineStages(vendorBillId: string, opts: { extraction?: Extr
   if (!investigation) {
     // The Investigator failed outright (ENGINE.md §5) — nothing to verify or police against;
     // block for human attention rather than guessing at a downstream action.
-    const policyDecision = await runPolicyStage({ vendorBillId, combined: asCascadedDecision("block", null), parentDecisionId: investigateDecision.id });
+    const policyDecision = await runPolicyStage({ vendorBillId, combined: asCascadedDecision("block", null), reasonCodeOverride: "R99_AGENT_ERROR", parentDecisionId: investigateDecision.id });
     await runAuditStage(vendorBillId, policyDecision);
     return;
   }
@@ -521,6 +550,6 @@ async function runPipelineStages(vendorBillId: string, opts: { extraction?: Extr
     lastDecisionId = verifyDecision.id;
   }
 
-  const policyDecision = await runPolicyStage({ vendorBillId, combined: matchResult.combined, verifySubmission, parentDecisionId: lastDecisionId });
+  const policyDecision = await runPolicyStage({ vendorBillId, combined: matchResult.combined, verifySubmission, investigatorConfidence: investigation.confidence, parentDecisionId: lastDecisionId });
   await runAuditStage(vendorBillId, policyDecision);
 }

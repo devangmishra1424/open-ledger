@@ -92,6 +92,8 @@ export interface ActionAvailability {
 
 export interface FrontendInvoice {
   id: string;
+  /** The number printed on the invoice (what a person calls it), as opposed to the internal id. */
+  invoiceNumber: string;
   vendor: string;
   vendorLogo: string;
   amount: number;
@@ -127,9 +129,28 @@ export interface FrontendInvoice {
   reason: { code: string; name: string; description: string } | null;
   actions: Record<HumanChoiceName, ActionAvailability>;
   /** Present while a vendor bank-detail change on this invoice's vendor still holds payment. */
-  bankChange: { reviewId: string | null; status: string; step: "start_callback" | "record_outcome" | "second_signoff" | "blocked" } | null;
+  bankChange: {
+    reviewId: string | null;
+    status: string;
+    step: "start_callback" | "record_outcome" | "second_signoff" | "blocked";
+    /** Who phoned the vendor, and which number — recorded so a DIFFERENT person can be required to sign off. */
+    callbackBy: string | null;
+    callbackPhone: string | null;
+    oldBankLast4: string | null;
+    newBankLast4: string | null;
+  } | null;
   humanActions: HumanActionView[];
   payment: { reference: string; simulated: boolean } | null;
+}
+
+/** One readable sentence-ish for a headline box; the full text stays in the decision trail. */
+export function clip(text: string | null | undefined, max = 200): string | null {
+  if (!text) return null;
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${cut.slice(0, lastSpace > max * 0.6 ? lastSpace : max).replace(/[,;:\-–—(]+$/, "")}…`;
 }
 
 const PIPELINE_STAGE_COUNT = 7; // extract/validate/match/investigate/verify/policy/audit
@@ -238,9 +259,15 @@ export function toFrontendInvoice(params: {
       } else if (holdActive) {
         headline = "On hold: the vendor's bank details changed";
         detail = "Money cannot move until the change is verified by a callback and signed off by a second reviewer.";
+      } else if (reason?.code === "R99_AGENT_ERROR") {
+        // The invoice may be perfectly fine; the automated review did not finish. Say that, with the real cause.
+        headline = "The automated review did not finish";
+        const failure = lastOf(machine, (d) => d.actionTaken === "error");
+        detail = (clip(failure?.claims?.[0]?.replace(/^(Investigator|Verifier) failed: /, ""), 260) ?? "A step failed.") + " A person has to decide, or you can retry the AI review.";
       } else {
         headline = reason ? reason.name : "Needs a decision";
-        detail = reason ? reason.description : (audit?.claims?.[0] ?? null);
+        // A policy claim is the specific fact (e.g. which limit was breached); the reason's description is the general rule.
+        detail = clip(policy?.claims?.[0]) ?? reason?.description ?? clip(audit?.claims?.[0]);
       }
       break;
     case "approved":
@@ -284,6 +311,7 @@ export function toFrontendInvoice(params: {
 
   return {
     id: bill.id,
+    invoiceNumber: bill.invoice_number,
     vendor: vendorName,
     vendorLogo: vendorInitials(vendorName),
     amount: Number(bill.total_amount),
@@ -315,7 +343,11 @@ export function toFrontendInvoice(params: {
     reason,
     actions: { approve: availability("approve"), reject: availability("reject"), contest: availability("contest") },
     bankChange: gate?.gating
-      ? { reviewId: gate.review?.id ?? null, status: gate.status, step: bankChangeStep(gate) }
+      ? {
+          reviewId: gate.review?.id ?? null, status: gate.status, step: bankChangeStep(gate),
+          callbackBy: gate.review?.callbackConfirmedBy ?? null, callbackPhone: gate.review?.callbackPhoneUsed ?? null,
+          oldBankLast4: gate.review?.oldBankLast4 ?? null, newBankLast4: gate.review?.newBankLast4 ?? null,
+        }
       : null,
     humanActions,
     payment: payment ? { reference: payment.reference, simulated: payment.reference.startsWith("SIMULATED-") } : null,

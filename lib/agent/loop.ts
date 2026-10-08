@@ -2,7 +2,7 @@ import type OpenAI from "openai";
 import type { ToolCallLog } from "@/lib/types";
 import type { ToolDef } from "@/lib/agent/tools";
 import { hashJson } from "@/lib/agent/hash";
-import { getLlmClient, modelFor, explainLlmError, isMalformedToolCall, type AgentRole } from "@/lib/agent/llm";
+import { getLlmClient, modelFor, reasoningEffortFor, explainLlmError, isMalformedToolCall, type AgentRole } from "@/lib/agent/llm";
 
 /**
  * The single multi-turn tool-calling loop every agent (Extractor, Investigator, Verifier) runs
@@ -21,8 +21,11 @@ import { getLlmClient, modelFor, explainLlmError, isMalformedToolCall, type Agen
  */
 
 const TIMEOUT_MS = 30_000;
-const MAX_RETRIES = 1;
-const MAX_RESAMPLES = 2;
+// The SDK retries only transient failures (429 / 5xx / connection) with exponential backoff and
+// honours the provider's retry-after. Provider free tiers cap tokens per minute (observed: 8,000
+// for gpt-oss-120b), so back-to-back runs do hit 429 — four retries ride that out; one did not.
+const MAX_RETRIES = 4;
+const MAX_RESAMPLES = 3; // measured: gpt-oss-120b still failed one of six runs after two
 
 export interface AgentLoopResult<TSubmission> {
   submission: TSubmission;
@@ -68,6 +71,7 @@ export async function runToolLoop<TSubmission>(params: RunToolLoopParams): Promi
   const model = params.model ?? modelFor(role);
   const llm = params.client ?? getLlmClient();
   const chatTools = tools.map(toChatCompletionTool);
+  const effort = reasoningEffortFor(model);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: instructions },
@@ -80,7 +84,7 @@ export async function runToolLoop<TSubmission>(params: RunToolLoopParams): Promi
     for (let attempt = 0; response === undefined; attempt++) {
       try {
         response = await llm.chat.completions.create(
-          { model, messages, tools: chatTools, tool_choice: "required", max_tokens: 4000 },
+          { model, messages, tools: chatTools, tool_choice: "required", max_tokens: 4000, ...(effort ? { reasoning_effort: effort } : {}) },
           { timeout: TIMEOUT_MS, maxRetries: MAX_RETRIES },
         );
       } catch (e) {

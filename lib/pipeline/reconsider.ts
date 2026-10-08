@@ -1,7 +1,7 @@
 import { getDecision, getDecisionsForInvoice, countReconsiderations, getDecisionsAfter, markSuperseded } from "@/lib/ledger/decisions";
 import { runMatchStage } from "@/lib/pipeline/match-stage";
 import {
-  runInvestigateStage, runVerifyStage, runPolicyStage, runAuditStage, isTier2Eligible, computePolicyAction,
+  runInvestigateStage, runVerifyStage, runPolicyStage, runAuditStage, isTier2Eligible, evaluatePolicy,
   type ReconsiderationInput,
 } from "@/lib/pipeline/orchestrator";
 import { asAction, moreRestrictive, type CombinedDecision } from "@/lib/matching/decision-matrix";
@@ -120,8 +120,12 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
     : undefined;
 
   // Did the outcome actually change? Compare what policy would now conclude with what it concluded.
-  const currentPolicy = (await getDecisionsForInvoice(original.invoiceId)).filter((d) => d.nodeId === "policy" && !d.supersededById).at(-1);
-  const cascaded = computePolicyAction(combinedForPolicy, reconsideredVerify).action !== currentPolicy?.actionTaken;
+  const liveDecisions = (await getDecisionsForInvoice(original.invoiceId)).filter((d) => !d.supersededById);
+  const currentPolicy = liveDecisions.filter((d) => d.nodeId === "policy").at(-1);
+  // The confidence the Settings guardrail looks at: the reconsidered Investigator's, or else the live one.
+  const investigatorConfidence = original.nodeId === "investigate" ? newDecision.confidence : liveDecisions.filter((d) => d.nodeId === "investigate").at(-1)?.confidence;
+  const predicted = await evaluatePolicy(original.invoiceId, combinedForPolicy, reconsideredVerify, investigatorConfidence);
+  const cascaded = predicted.action !== currentPolicy?.actionTaken;
   const supersededDecisionIds: string[] = [];
 
   if (cascaded) {
@@ -149,7 +153,7 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
       lastId = verifyDecision.id;
     }
 
-    const policyDecision = await runPolicyStage({ vendorBillId: original.invoiceId, combined: combinedForPolicy, verifySubmission, parentDecisionId: lastId, recon });
+    const policyDecision = await runPolicyStage({ vendorBillId: original.invoiceId, combined: combinedForPolicy, verifySubmission, investigatorConfidence, parentDecisionId: lastId, recon });
     await runAuditStage(original.invoiceId, policyDecision, recon);
   }
 

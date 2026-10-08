@@ -4,6 +4,7 @@ import { nodeLabel } from "@/lib/api-shapes";
 /** GET /api/activity — recent pipeline decisions as a flat activity feed, most recent first. */
 function activityType(nodeId: string, actionTaken: string | null, reasonCode: string | null): string {
   if (nodeId === "extract") return "INVOICE_INGESTED";
+  if (nodeId === "human_review") return "HUMAN_DECISION";
   if (nodeId === "audit" && actionTaken === "auto_approve") return "SEAL_COMMITTED";
   if (reasonCode && reasonCode !== "CLEAN_MATCH") return "DISCREPANCY_FLAGGED";
   return "AGENT_DECISION";

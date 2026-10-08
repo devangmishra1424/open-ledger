@@ -1,14 +1,14 @@
 import { getSql } from "@/db/client";
 
-/** GET /api/ecosystem — real vendor nodes (from vendors table) around a fixed Core/Bank/Blockchain anchor set. */
+/** GET /api/ecosystem — real vendor nodes (from vendors table) around a fixed Core / payment rail / ledger anchor set. */
 export async function GET() {
   const sql = getSql();
   const vendors = await sql`SELECT id, name, trust_tier FROM vendors ORDER BY created_at ASC LIMIT 8`;
 
   const nodes = [
     { id: "core", label: "VeriBook Core", type: "Core", x: 400, y: 220, color: "#a7c957", details: "Central orchestration engine running the real 7-stage agent pipeline." },
-    { id: "bank", label: "Treasury / Payment Rail", type: "Bank", x: 640, y: 120, color: "#a7c957", details: "Where an approved bill's payment would be disbursed from." },
-    { id: "chain", label: "Hash-Chain Ledger", type: "Blockchain", x: 640, y: 320, color: "#ffd60a", details: "The real, append-only decision hash chain — verified by GET /api/audit/verify." },
+    { id: "bank", label: "Payment Rail (simulated)", type: "Bank", x: 640, y: 120, color: "#a7c957", details: "Approved invoices are paid through a simulated rail: payments are recorded and posted to the ledger, but no money moves." },
+    { id: "chain", label: "Hash-Chained Decision Ledger", type: "Ledger", x: 640, y: 320, color: "#ffd60a", details: "Append-only: every decision, including each human approval, is chained to the one before it with SHA-256 — verified by GET /api/audit/verify. A tamper-evident log, not a blockchain." },
   ];
   const connections = [
     { from: "core", to: "bank", label: "Payment Instruction" },

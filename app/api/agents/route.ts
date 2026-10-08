@@ -1,16 +1,18 @@
 import { getSql } from "@/db/client";
+import { modelFor } from "@/lib/agent/llm";
 
 /**
- * GET /api/agents — the frontend's `mockAgents` shape, backed by real aggregates over the real
- * `decisions` table (one row per real pipeline stage that has ever actually run) rather than
- * the frontend's fictional fixed 5-agent roster. `avgSpeed` is genuinely measured
- * (ended_at - started_at) per decision, not a made-up number.
+ * GET /api/agents — one row per pipeline stage, backed by real aggregates over the `decisions`
+ * table. `avgSpeed` is measured (ended_at - started_at); `avgConfidence` is the mean confidence
+ * the stage itself reported (null for stages that report none — it is NOT an accuracy figure);
+ * `errorRate` is the share of this stage's runs that ended in an error. `model` is the model
+ * the stage is configured to use right now (lib/agent/llm.ts), or says it is deterministic.
  */
 const STAGE_META: Record<string, { name: string; role: string; description: string }> = {
   extract: {
     name: "Extraction Agent",
     role: "Line-Item & Header Extraction",
-    description: "Parses invoice line items, header fields, and totals — a deterministic parse for structured intake, an LLM pass for OCR'd documents.",
+    description: "Reads invoice fields off a document: a deterministic template parse first, an LLM only when that is incomplete. Confidence comes from real checks (required fields present, lines add up to the subtotal, subtotal + tax equals the total).",
   },
   validate: {
     name: "Pre-Match Validator",
@@ -44,6 +46,12 @@ const STAGE_META: Record<string, { name: string; role: string; description: stri
   },
 };
 
+const MODEL_LABEL: Record<string, () => string> = {
+  extract: () => `Template parser; ${modelFor("extractor")} when the template is incomplete`,
+  investigate: () => modelFor("investigator"),
+  verify: () => modelFor("verifier"),
+};
+
 const STAGE_ORDER = ["extract", "validate", "match", "investigate", "verify", "policy", "audit"];
 
 export async function GET() {
@@ -51,10 +59,11 @@ export async function GET() {
   const rows = await sql`
     SELECT node_id,
       COUNT(*)::int as total,
+      COUNT(*) FILTER (WHERE action_taken = 'error')::int as errors,
       AVG(confidence) as avg_confidence,
       AVG(EXTRACT(EPOCH FROM (ended_at::timestamptz - started_at::timestamptz)) * 1000) as avg_ms
     FROM decisions
-    WHERE node_id = ANY(${STAGE_ORDER})
+    WHERE node_id = ANY(${STAGE_ORDER}) AND superseded_by_id IS NULL
     GROUP BY node_id
   `;
   const byNode = new Map(rows.map((r: any) => [r.node_id, r]));
@@ -70,9 +79,10 @@ export async function GET() {
       name: meta.name,
       role: meta.role,
       status: total > 0 ? "Active" : "Idle",
-      model: nodeId === "investigate" || nodeId === "verify" ? (process.env.OPENAI_MODEL || "gpt-5-nano") : "Deterministic Engine",
+      model: MODEL_LABEL[nodeId]?.() ?? "Deterministic engine",
       description: meta.description,
-      accuracy: avgConfidence != null ? Math.round(avgConfidence * 1000) / 10 : 100,
+      avgConfidence: avgConfidence != null ? Math.round(avgConfidence * 1000) / 10 : null,
+      errorRate: total > 0 ? Math.round(((row?.errors ?? 0) / total) * 1000) / 10 : null,
       avgSpeed: avgMs != null ? `${Math.round(avgMs)}ms` : "—",
       totalProcessed: total,
     };

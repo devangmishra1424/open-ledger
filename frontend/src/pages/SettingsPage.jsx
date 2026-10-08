@@ -1,113 +1,88 @@
-import React, { useState, useEffect } from 'react';
-import GlassCard from '../components/GlassCard';
-import { Settings, Sliders, Key } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { api } from '../services/api';
+import { useToasts } from '../state/Toasts';
+import { Banner, Spinner } from '../components/ui';
+import { formatMoney } from '../lib/labels';
 
-const SettingsPage = () => {
-  const [confidence, setConfidence] = useState(95);
-  const [maxAmount, setMaxAmount] = useState('50000.00');
-  const [webhookUrl, setWebhookUrl] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState(null);
+export default function SettingsPage() {
+  const { system } = useOutletContext() ?? {};
+  const toast = useToasts();
+  const [saved, setSaved] = useState(null);
+  const [confidence, setConfidence] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api.getSettings().then((data) => {
-      if (!data) return;
-      setConfidence(data.autoApprovalConfidence);
-      setMaxAmount(String(data.maxAutoPaymentAmount));
-      setWebhookUrl(data.erpWebhookUrl ?? '');
-    });
+    api.getSettings()
+      .then((s) => { setSaved(s); setConfidence(String(s.autoApprovalConfidence)); setMaxAmount(String(s.maxAutoPaymentAmount)); })
+      .catch(setError);
   }, []);
 
-  const handleSave = async () => {
-    const amount = Number(maxAmount);
-    if (Number.isNaN(amount) || amount <= 0) {
-      alert('Enter a valid positive maximum auto-payment amount.');
-      return;
-    }
-    setIsSaving(true);
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
     try {
-      const result = await api.updateSettings({
-        autoApprovalConfidence: confidence,
-        maxAutoPaymentAmount: amount,
-        erpWebhookUrl: webhookUrl,
-      });
-      if (result?.success) {
-        setSavedAt(new Date().toLocaleTimeString());
-      } else {
-        alert('Could not save settings — the backend did not confirm it.');
-      }
+      const res = await api.updateSettings({ autoApprovalConfidence: Number(confidence), maxAutoPaymentAmount: Number(maxAmount) });
+      setSaved(res);
+      toast.success('Saved. The next invoice is checked against these limits.');
+    } catch (err) {
+      toast.error(err.message);
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
   };
 
+  const dirty = saved && (Number(confidence) !== saved.autoApprovalConfidence || Number(maxAmount) !== saved.maxAutoPaymentAmount);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%' }}>
-      <GlassCard style={{ padding: '24px' }}>
-        <h2 style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Settings size={24} color="#a7c957" />
-          Autonomous Ledger System Settings
-        </h2>
-        <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-          Configure AI agent confidence thresholds, auto-approval limits, and webhooks
+    <div className="vb-page">
+      <section className="vb-card vb-pad" aria-labelledby="guardrails">
+        <h2 id="guardrails">Auto-approval guardrails</h2>
+        <p className="vb-muted" style={{ lineHeight: 1.5, maxWidth: 680 }}>
+          An invoice that matches its purchase order and delivery cleanly is approved and paid without a person. These two limits can hold such an invoice back for a human look. They can only make the system more careful; they never approve anything the checks would not.
         </p>
-      </GlassCard>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px' }}>
-        <GlassCard style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Sliders size={18} color="#a7c957" />
-            Agent Thresholds
-          </h3>
-
-          <div>
-            <label style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-              Auto-Approval Confidence Limit (Currently {confidence.toFixed(1)}%)
+        {error && <Banner kind="error">Could not load settings: {error.message}</Banner>}
+        {!saved && !error && <Spinner label="Loading…" />}
+        {saved && (
+          <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 520 }}>
+            <label className="vb-field">
+              <span>Largest invoice that can be auto-approved</span>
+              <input type="number" min="0" step="any" required value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} />
+              <span className="vb-field-hint">Anything above {formatMoney(Number(maxAmount) || 0)} goes to a person, however clean it is.</span>
             </label>
-            <input
-              type="range" min="80" max="99" value={confidence}
-              onChange={(e) => setConfidence(Number(e.target.value))}
-              style={{ width: '100%', accentColor: '#a7c957' }}
-            />
-          </div>
-
-          <div>
-            <label style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-              Maximum Auto-Payment Amount (USD)
+            <label className="vb-field">
+              <span>Minimum AI confidence to auto-approve (%)</span>
+              <input type="number" min="0" max="100" step="any" required value={confidence} onChange={(e) => setConfidence(e.target.value)} />
+              <span className="vb-field-hint">If the Investigator reports less than {confidence || 0}% sure, a person decides. Models are not well calibrated, so treat this as a coarse safety net.</span>
             </label>
-            <input
-              type="text" className="filter-select font-mono" style={{ width: '100%' }}
-              value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)}
-            />
-          </div>
-        </GlassCard>
+            <div><button type="submit" className="vb-btn vb-btn-primary" disabled={saving || !dirty}>{saving ? <Spinner label="Saving…" /> : 'Save limits'}</button></div>
+          </form>
+        )}
+      </section>
 
-        <GlassCard style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Key size={18} color="#a7c957" />
-            API & Webhooks
-          </h3>
-
-          <div>
-            <label style={{ fontSize: '13px', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-              ERP Webhook Endpoint
-            </label>
-            <input
-              type="text" className="filter-select font-mono" style={{ width: '100%' }}
-              placeholder="https://your-erp.example.com/webhooks/ap"
-              value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)}
-            />
-          </div>
-
-          <button className="btn-primary" style={{ marginTop: 'auto' }} onClick={handleSave} disabled={isSaving}>
-            <span>{isSaving ? 'Saving…' : 'Save Configuration'}</span>
-          </button>
-          {savedAt && <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>Saved at {savedAt}</p>}
-        </GlassCard>
-      </div>
+      <section className="vb-card vb-pad" aria-labelledby="config">
+        <h2 id="config">How this system is configured</h2>
+        <p className="vb-muted" style={{ lineHeight: 1.5, maxWidth: 680 }}>Read from the running server, so what you see here is what is actually happening.</p>
+        {!system ? <Spinner label="Loading…" /> : (
+          <dl className="vb-kv">
+            <dt>AI provider</dt>
+            <dd>{system.llm.configured ? system.llm.provider : <span style={{ color: 'var(--vb-danger)' }}>Not configured: documents the template cannot read, and every AI step, will fail</span>}</dd>
+            <dt>Reads documents</dt><dd className="vb-mono">{system.llm.models.extractor} <span className="vb-dim">(after the template parser)</span></dd>
+            <dt>Investigates exceptions</dt><dd className="vb-mono">{system.llm.models.investigator}</dd>
+            <dt>Double-checks</dt><dd className="vb-mono">{system.llm.models.verifier} <span className="vb-dim">(a different model family on purpose)</span></dd>
+            <dt>Payments</dt><dd><strong>{system.paymentRail.mode === 'simulated' ? 'Simulated' : system.paymentRail.mode}</strong>. Payments are recorded and posted to the ledger; no money moves.</dd>
+            <dt>Vendor callbacks</dt><dd>Made by a person. No automated call is placed; the person records the answer and a second person signs off.</dd>
+            <dt>Sign-in</dt><dd>None yet. Reviewer names are self-declared, so “a different person” checks compare typed names. Production would put real accounts here.</dd>
+            <dt>Audit trail</dt>
+            <dd>
+              <span className="vb-chain"><span className={`vb-dot ${system.chain.valid ? 'vb-dot-ok' : 'vb-dot-bad'}`} />
+                {system.chain.valid ? `Intact: ${system.chain.checked} records verified from the first` : `ALTERED at record ${system.chain.brokenAt}`}</span>
+            </dd>
+          </dl>
+        )}
+      </section>
     </div>
   );
-};
-
-export default SettingsPage;
+}

@@ -1,5 +1,5 @@
 import { getDecisionsForInvoice } from "@/lib/ledger/decisions";
-import { getLlmClient, modelFor, explainLlmError } from "@/lib/agent/llm";
+import { getLlmClient, modelFor, reasoningEffortFor, explainLlmError } from "@/lib/agent/llm";
 import type { Decision } from "@/lib/types";
 
 /**
@@ -19,7 +19,7 @@ import type { Decision } from "@/lib/types";
  */
 
 const TIMEOUT_MS = 30_000;
-const MAX_RETRIES = 1;
+const MAX_RETRIES = 4; // transient 429/5xx only, with backoff (see lib/agent/loop.ts)
 
 export interface ExplainResult {
   answer: string;
@@ -92,6 +92,7 @@ export async function explain(invoiceId: string, decisionId: string, question: s
           { role: "user", content: JSON.stringify({ question, decisions: contextPayload }) },
         ],
         max_tokens: 4000,
+        ...(reasoningEffortFor(model) ? { reasoning_effort: reasoningEffortFor(model) } : {}),
       },
       { timeout: TIMEOUT_MS, maxRetries: MAX_RETRIES },
     );

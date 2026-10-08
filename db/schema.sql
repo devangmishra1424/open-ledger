@@ -167,7 +167,7 @@ CREATE TABLE pbc_evidence_files (
 -- thresholds are unit-tested against the spec's own worked examples as fixed constants today).
 CREATE TABLE app_settings (
   id TEXT PRIMARY KEY DEFAULT 'default',
-  auto_approval_confidence REAL NOT NULL DEFAULT 95.0,
+  auto_approval_confidence REAL NOT NULL DEFAULT 90.0,
   max_auto_payment_amount REAL NOT NULL DEFAULT 50000.00,
   erp_webhook_url TEXT,
   updated_at TEXT NOT NULL DEFAULT now()::text
