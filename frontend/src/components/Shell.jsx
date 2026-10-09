@@ -9,6 +9,7 @@ import AddInvoiceModal from './AddInvoiceModal';
 
 const TITLES = {
   '/': ['Inbox', 'Invoices waiting for a decision, and everything that has been decided'],
+  '/invoice': ['Invoice', 'Everything about one invoice, and what you can do about it'],
   '/audit': ['Audit', 'Auditor requests and the tamper-evident decision trail'],
   '/pipeline': ['Pipeline', 'How each automated step is performing'],
   '/network': ['Network', 'Vendors around the pipeline'],
@@ -22,6 +23,8 @@ export default function Shell() {
   const [system, setSystem] = useState(null);
   const location = useLocation();
   const base = '/' + (location.pathname.split('/')[1] || '');
+  // On an invoice page the menu shrinks to an icon rail: the invoice gets the room.
+  const compact = location.pathname.startsWith('/invoice');
   const [title, sub] = TITLES[base] ?? TITLES['/'];
 
   useEffect(() => {
@@ -35,18 +38,18 @@ export default function Shell() {
   const chain = system?.chain;
 
   return (
-    <div className="vb-app">
+    <div className={`vb-app${compact ? ' vb-app-compact' : ''}`}>
       <nav className="vb-side" aria-label="Main">
-        <div className="vb-brand"><span className="vb-brand-mark" aria-hidden="true">V</span><span>VeriBook</span></div>
+        <div className="vb-brand"><span className="vb-brand-mark" aria-hidden="true">V</span><span className="vb-brand-name">VeriBook</span></div>
         <div className="vb-nav">
-          <NavLink to="/" end className={({ isActive }) => `vb-nav-link ${isActive || location.pathname.startsWith('/invoice') ? 'active' : ''}`}>
-            <InboxIcon size={18} /> Inbox
+          <NavLink to="/" end title="Inbox" className={({ isActive }) => `vb-nav-link ${isActive || location.pathname.startsWith('/invoice') ? 'active' : ''}`}>
+            <InboxIcon size={18} /> <span className="vb-nav-label">Inbox</span>
             {counts.needs_attention > 0 && <span className="vb-nav-count" aria-label={`${counts.needs_attention} need attention`}>{counts.needs_attention}</span>}
           </NavLink>
-          <NavLink to="/audit" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ShieldCheck size={18} /> Audit</NavLink>
-          <NavLink to="/pipeline" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Activity size={18} /> Pipeline</NavLink>
-          <NavLink to="/network" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Network size={18} /> Network</NavLink>
-          <NavLink to="/settings" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><SlidersHorizontal size={18} /> Settings</NavLink>
+          <NavLink to="/audit" title="Audit" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ShieldCheck size={18} /> <span className="vb-nav-label">Audit</span></NavLink>
+          <NavLink to="/pipeline" title="Pipeline" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Activity size={18} /> <span className="vb-nav-label">Pipeline</span></NavLink>
+          <NavLink to="/network" title="Network" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Network size={18} /> <span className="vb-nav-label">Network</span></NavLink>
+          <NavLink to="/settings" title="Settings" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><SlidersHorizontal size={18} /> <span className="vb-nav-label">Settings</span></NavLink>
         </div>
         <div className="vb-side-spacer" />
         <div className="vb-side-foot">

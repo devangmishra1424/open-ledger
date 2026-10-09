@@ -143,6 +143,13 @@ describe("toFrontendInvoice", () => {
     expect(v.actions.contest.allowed).toBe(true);
   });
 
+  it("an older record (a failed AI step, policy reason recorded as CLEAN_MATCH) is still shown as a system failure", () => {
+    reasons.set("R99_AGENT_ERROR", { name: "Agent Error", description: "A pipeline stage failed." });
+    const v = build("exception", [d("extract"), d("match", { actionTaken: "escalate_l1", reasonCode: "EXC-CREDIT_MEMO" }), d("investigate", { actionTaken: "error", reasonCode: "R99_AGENT_ERROR", claims: ["Investigator failed: timed out"] }), d("policy", { actionTaken: "block", reasonCode: "CLEAN_MATCH" })]);
+    expect(v.summary.headline).toBe("The automated review did not finish");
+    expect(v.reason?.code).toBe("R99_AGENT_ERROR");
+  });
+
   it("confidence is the mean of what stages reported, or null — never a made-up 100", () => {
     expect(build("exception", [d("extract", { confidence: 1 }), d("investigate", { confidence: 0.8 })]).confidenceScore).toBe(90);
     expect(build("exception", [d("match"), d("policy")]).confidenceScore).toBeNull();

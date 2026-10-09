@@ -29,9 +29,28 @@ const ACTION_WORDS = {
   human_contested: 'Challenged',
 };
 
+/** Models write actions as "auto-approve" or with a non-breaking hyphen; the engine writes auto_approve. One spelling for lookups. */
+export function normalizeAction(action) {
+  return action ? action.trim().toLowerCase().replace(/[-\u2010-\u2015\s]+/g, '_') : action;
+}
+
 export function actionWords(action) {
   if (!action) return 'No action recorded';
-  return ACTION_WORDS[action] ?? action.replace(/_/g, ' ');
+  const key = normalizeAction(action);
+  return ACTION_WORDS[key] ?? key.replace(/_/g, ' ');
+}
+
+/** The headline result of one recorded step, worded for what that kind of step does. */
+export function outcomeWords(decision) {
+  const a = normalizeAction(decision.actionTaken);
+  if (a === 'error') return 'Failed';
+  if (decision.nodeId === 'audit' && a === 'auto_approve') return 'Posted to the ledger and paid';
+  if (decision.nodeId === 'audit' && ['block', 'block_fraud_flag', 'escalate_l1', 'escalate_l2'].includes(a)) return 'Not posted: held for a person';
+  if (decision.nodeId === 'audit' && a === 'auto_reject') return 'Not posted: rejected';
+  if (decision.nodeId === 'policy') return `Decided: ${actionWords(a).toLowerCase()}`;
+  if (decision.nodeId === 'investigate') return `Recommended: ${actionWords(a).toLowerCase()}`;
+  if (decision.nodeId === 'verify') return a === 'disagreement' ? 'Disagreed with the first AI' : `Agreed: ${actionWords(a).toLowerCase()}`;
+  return actionWords(a);
 }
 
 /** Who/what produced a decision, for display: a model id, an engine, or a person. */

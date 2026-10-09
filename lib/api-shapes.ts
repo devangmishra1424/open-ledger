@@ -1,6 +1,7 @@
 import { getSql } from "@/db/client";
 import { checkHumanAction } from "@/lib/bill-workflow";
 import { detectBankChangeGates, type BankChangeGateCheck } from "@/lib/ledger/bank-change-review";
+import { buildThreeWay, type ThreeWay } from "@/lib/three-way";
 import type { BillStatus } from "@/lib/types";
 
 /**
@@ -237,7 +238,11 @@ export function toFrontendInvoice(params: {
   const state = deriveState(status, paymentFailed);
   const holdActive = Boolean(gate?.gating) && state === "needs_attention" && !paymentFailed;
 
-  const reasonCode = (policy?.reasonCode && policy.reasonCode !== "CLEAN_MATCH") ? policy.reasonCode : null;
+  // A step that failed and left the policy decision with no real reason (older records were written
+  // with CLEAN_MATCH on a block caused by a failed AI step) is still a system failure, and is shown as one.
+  const failedStep = lastOf(machine, (d) => d.actionTaken === "error");
+  const policyReason = (policy?.reasonCode && policy.reasonCode !== "CLEAN_MATCH") ? policy.reasonCode : null;
+  const reasonCode = policyReason ?? (state === "needs_attention" && failedStep && !paymentFailed ? "R99_AGENT_ERROR" : null);
   const reasonInfo = reasonCode ? reasons.get(reasonCode) : undefined;
   const reason = reasonCode && reasonInfo ? { code: reasonCode, name: reasonInfo.name, description: reasonInfo.description } : null;
 
@@ -422,6 +427,42 @@ export async function getFrontendInvoice(billId: string | undefined | null): Pro
   const rows = await getSql()`SELECT * FROM vendor_bills WHERE id = ${billId}`;
   if (rows.length === 0) return undefined;
   return (await assemble(rows))[0];
+}
+
+/** The single-invoice view: everything in the list view plus what a reviewer needs to understand the case. */
+export interface FrontendInvoiceDetail extends FrontendInvoice {
+  /** Ordered vs received vs invoiced, line by line; null for an invoice with no purchase order. */
+  threeWay: ThreeWay | null;
+  /** Every reason code mapped to its plain name, so any code mentioned in a recorded claim can be named. */
+  reasonNames: Record<string, string>;
+}
+
+export async function getFrontendInvoiceDetail(billId: string | undefined | null): Promise<FrontendInvoiceDetail | undefined> {
+  if (!billId) return undefined;
+  const sql = getSql();
+  const rows = await sql`SELECT * FROM vendor_bills WHERE id = ${billId}`;
+  if (rows.length === 0) return undefined;
+  const bill = rows[0];
+  const [view] = await assemble(rows);
+
+  const reasonRows = await sql`SELECT code, name FROM reason_codes`;
+  const reasonNames = Object.fromEntries(reasonRows.map((r: any) => [r.code as string, r.name as string]));
+
+  let threeWay: ThreeWay | null = null;
+  if (bill.po_id) {
+    const [poRows, poLines, receipts, billLines] = await Promise.all([
+      sql`SELECT po_number, status, po_type, currency, max_value_ceiling FROM purchase_orders WHERE id = ${bill.po_id}`,
+      sql`SELECT id, line_number, description, uom, qty_ordered, unit_price, tolerance_pct FROM purchase_order_lines WHERE po_id = ${bill.po_id}`,
+      sql`SELECT id, receipt_date, receiver_name, condition, final_delivery_indicator FROM goods_receipts WHERE po_id = ${bill.po_id} ORDER BY receipt_date`,
+      sql`SELECT id, description, uom, qty_invoiced, unit_price FROM vendor_bill_lines WHERE vendor_bill_id = ${bill.id}`,
+    ]);
+    if (poRows.length > 0) {
+      const receiptIds = receipts.map((r: any) => r.id);
+      const receiptLines = receiptIds.length === 0 ? [] : await sql`SELECT goods_receipt_id, po_line_id, qty_received FROM goods_receipt_lines WHERE goods_receipt_id IN ${sql(receiptIds)}`;
+      threeWay = buildThreeWay({ po: poRows[0] as any, poLines: poLines as any, receipts: receipts as any, receiptLines: receiptLines as any, billLines: billLines as any });
+    }
+  }
+  return { ...view, threeWay, reasonNames };
 }
 
 export const DEFAULT_LIST_LIMIT = 100;
