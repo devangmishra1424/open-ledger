@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { TransactionSql } from "postgres";
 import { getSql } from "@/db/client";
 import { HttpError } from "@/lib/http";
 
@@ -89,29 +90,39 @@ export function normalizeBillInput(input: NewBillInput, today = new Date().toISO
   return { lines, subtotal, tax: round2(tax), total: round2(total), invoiceDate, dueDate: input.dueDate ?? null, currency };
 }
 
+/** One payee however it is typed: case and runs of spaces do not matter. Legal suffixes and punctuation are NOT folded: "Acme Ltd" and "Acme Inc" can be different legal entities, and merging payees is a fraud risk. */
+export function vendorKey(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+type Tx = TransactionSql;
+
+/** The vendor by id (404 if unknown) or by name (matched by vendorKey, created with trust tier 'new' when there is none). Must run inside the caller's transaction. */
+export async function findOrCreateVendor(tx: Tx, input: { vendorId?: string; vendorName?: string }): Promise<{ vendorId: string; vendorCreated: boolean }> {
+  if (input.vendorId) {
+    const rows = await tx`SELECT id FROM vendors WHERE id = ${input.vendorId}`;
+    if (rows.length === 0) throw new HttpError(404, `no vendor found with id '${input.vendorId}'`);
+    return { vendorId: input.vendorId, vendorCreated: false };
+  }
+  const name = input.vendorName?.trim();
+  if (!name) throw new HttpError(400, "vendor name is required");
+  // [[:space:]] rather than \s: a backslash inside a tagged template is dropped before it reaches the database.
+  const existing = await tx`
+    SELECT id FROM vendors
+    WHERE lower(btrim(regexp_replace(name, '[[:space:]]+', ' ', 'g'))) = ${vendorKey(name)}
+    ORDER BY created_at, id LIMIT 1`;
+  if (existing.length > 0) return { vendorId: existing[0].id, vendorCreated: false };
+  const vendorId = randomUUID();
+  await tx`INSERT INTO vendors (id, name, trust_tier) VALUES (${vendorId}, ${name.slice(0, 200)}, 'new')`;
+  return { vendorId, vendorCreated: true };
+}
+
 export async function createBill(input: NewBillInput): Promise<CreatedBill> {
   const n = normalizeBillInput(input);
   const sql = getSql();
 
   return sql.begin(async (tx) => {
-    let vendorId: string;
-    let vendorCreated = false;
-    if (input.vendorId) {
-      const rows = await tx`SELECT id FROM vendors WHERE id = ${input.vendorId}`;
-      if (rows.length === 0) throw new HttpError(404, `no vendor found with id '${input.vendorId}'`);
-      vendorId = input.vendorId;
-    } else {
-      const name = input.vendorName?.trim();
-      if (!name) throw new HttpError(400, "vendor name is required");
-      const existing = await tx`SELECT id FROM vendors WHERE name = ${name}`;
-      if (existing.length > 0) {
-        vendorId = existing[0].id;
-      } else {
-        vendorId = randomUUID();
-        vendorCreated = true;
-        await tx`INSERT INTO vendors (id, name, trust_tier) VALUES (${vendorId}, ${name.slice(0, 200)}, 'new')`;
-      }
-    }
+    const { vendorId, vendorCreated } = await findOrCreateVendor(tx, input);
 
     let poId: string | null = input.poId ?? null;
     if (!poId && input.poNumber) {

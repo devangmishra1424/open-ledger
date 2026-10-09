@@ -4,14 +4,11 @@ import { getFrontendInvoice } from "@/lib/api-shapes";
 import { createBill } from "@/lib/bills";
 import { runInBackground } from "@/lib/background";
 import { handle, HttpError, optionalString, readJsonBody, requireString } from "@/lib/http";
+import { extractPdfText, isPdfDataUrl } from "@/lib/pdf-text";
 
 export const maxDuration = 60; // extraction may call an LLM, and the pipeline continues after the response
 
-// Next.js ESM interop fallback for pdf-parse
-const pdfParse = require("pdf-parse");
-
 const MAX_TEXT_CHARS = 200_000;
-const MAX_PDF_BYTES = 8 * 1024 * 1024;
 
 /**
  * POST /api/invoices/ingest — an invoice as a document: { rawText } (plain text, or a
@@ -33,17 +30,7 @@ export const POST = handle("POST /api/invoices/ingest", async (req) => {
   let rawText = requireString(body, "rawText", { max: 12_000_000 });
   const vendorFallback = optionalString(body, "vendorName", { max: 200 });
 
-  if (rawText.startsWith("data:application/pdf;base64,")) {
-    const buffer = Buffer.from(rawText.slice("data:application/pdf;base64,".length), "base64");
-    if (buffer.length > MAX_PDF_BYTES) throw new HttpError(413, `PDF is too large (max ${MAX_PDF_BYTES / 1024 / 1024} MB)`);
-    try {
-      const parseFunc = pdfParse.default || pdfParse;
-      rawText = (await parseFunc(buffer)).text;
-    } catch (e) {
-      console.error("PDF parse error:", e);
-      throw new HttpError(400, "could not read text from this PDF (is it a scan? try pasting the text)");
-    }
-  }
+  if (isPdfDataUrl(rawText)) rawText = await extractPdfText(rawText);
   if (rawText.length > MAX_TEXT_CHARS) throw new HttpError(413, `document text is too long (max ${MAX_TEXT_CHARS} characters)`);
   if (rawText.trim() === "") throw new HttpError(422, "the document contains no readable text");
 
@@ -78,6 +65,7 @@ export const POST = handle("POST /api/invoices/ingest", async (req) => {
       method: extraction.method,
       confidence: s.confidence,
       uncertainFields: s.uncertain_fields,
+      poReference: s.po_reference, // the PO number the document itself cites, whether or not one is on file
       fallbackReason: extraction.fallbackReason ?? null,
     },
   }, { status: 201 });

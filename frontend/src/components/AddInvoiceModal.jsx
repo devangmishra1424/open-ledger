@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Trash2, Upload } from 'lucide-react';
 import { api } from '../services/api';
 import { useInvoices } from '../state/Invoices';
@@ -118,6 +118,12 @@ function FromDocument({ onClose }) {
             <ul className="vb-claims" style={{ marginTop: 6 }}>{ex.uncertainFields.map((f) => <li key={f}>{f}</li>)}</ul>
           )}
         </Banner>
+        {ex.poReference && created.poNumber === 'Non-PO' && (
+          <Banner kind="warn">
+            <strong>No purchase order {ex.poReference} is on file for this vendor,</strong> so this invoice is treated as a non-PO invoice and cannot be three-way matched.
+            {' '}<Link to="/orders" onClick={onClose}>Add the PO and its goods receipt</Link> first, then add the invoice again under a new invoice number.
+          </Banner>
+        )}
         <div className="vb-modal-actions">
           <button type="button" className="vb-btn vb-btn-primary" onClick={() => afterCreate(created)}>Open the invoice</button>
         </div>
@@ -129,6 +135,7 @@ function FromDocument({ onClose }) {
     <>
       <p className="vb-muted" style={{ margin: 0, fontSize: 14 }}>
         Paste the text of an invoice or upload a PDF or text file. It is read automatically; anything it is unsure of is flagged for a person instead of being guessed.
+        {' '}For a three-way match the purchase order and goods receipt must already be on file (<Link to="/orders" onClick={onClose}>Orders</Link>).
       </p>
       <label className="vb-field">
         <span>Invoice text</span>

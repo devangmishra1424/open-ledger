@@ -2,6 +2,7 @@ import { EXTRACTOR_PROMPT } from "@/lib/agent/prompts";
 import { SUBMIT_EXTRACTION } from "@/lib/agent/tools";
 import { runToolLoop, type AgentLoopResult } from "@/lib/agent/loop";
 import { llmConfigured, modelFor, normalizeConfidence } from "@/lib/agent/llm";
+import { parseLineRow, parseTotalsLine, TABLE_HEADER } from "@/lib/line-rows";
 
 /** Matches submit_extraction's parameter schema in lib/agent/tools.ts exactly. */
 export interface ExtractionSubmission {
@@ -122,7 +123,7 @@ function detectCurrency(text: string): string | null {
 }
 
 /** Header lines that are boilerplate, not a vendor: copy markers, page counters, document titles. */
-const BOILERPLATE_LINE = /^(?:(?:tax\s+)?invoice|original(?:\s+for\s+\w+)?|duplicate(?:\s+for\s+\w+)?|triplicate|copy|page\s+\d+(?:\s+of\s+\d+)?|bill|receipt|statement|credit\s+(?:note|memo)|proforma(?:\s+invoice)?)$/i;
+const BOILERPLATE_LINE = /^(?:(?:tax\s+)?invoice|original(?:\s+for\s+\w+)?|duplicate(?:\s+for\s+\w+)?|triplicate|copy|page\s+\d+(?:\s+of\s+\d+)?|bill|receipt|statement|credit\s+(?:note|memo)|proforma(?:\s+invoice)?|purchase\s+order|goods\s+receipt(?:\s+note)?)$/i;
 /** Address / contact lines that sit in a letterhead near the vendor name but are not it. */
 const CONTACT_LINE = /@|www\.|https?:|^\d|\+?\d[\d\s().-]{7,}\d|\b(?:street|st\.|road|rd\.|avenue|ave\.|blvd|suite|floor|p\.?o\.? box)\b/i;
 
@@ -155,6 +156,8 @@ export function parseTemplateInvoice(invoiceText: string): ExtractionSubmission 
   };
 
   let inLineItems = false;
+  // A "Description  Qty  Unit Price  Amount" header was seen: rows and totals are read as a table (lib/line-rows.ts).
+  let tableMode = false;
   let current: { description?: string; quantity?: number; unit_price?: number } = {};
   const flush = () => {
     if (current.description && current.quantity != null && current.unit_price != null) {
@@ -166,6 +169,22 @@ export function parseTemplateInvoice(invoiceText: string): ExtractionSubmission 
   for (const line of lines) {
     let m: RegExpMatchArray | null;
     if (/^line\s*items\s*:?$/i.test(line)) { inLineItems = true; continue; }
+    if (!tableMode && TABLE_HEADER.test(line)) { tableMode = true; inLineItems = true; continue; }
+    if (tableMode) {
+      const totals = parseTotalsLine(line);
+      if (totals) {
+        inLineItems = false;
+        if (totals.kind === "subtotal") s.subtotal = totals.amount;
+        else if (totals.kind === "tax") s.tax = (s.tax ?? 0) + totals.amount; // several tax lines (CGST + SGST) add up
+        else s.total = totals.amount;
+        continue;
+      }
+      if (inLineItems) {
+        const row = parseLineRow(line);
+        if (row) s.line_items.push({ description: row.description, quantity: row.quantity, unit_price: row.unitPrice });
+        continue; // a line in the table that is not a row (a wrapped description, a note) is skipped, never guessed into one
+      }
+    }
     if (inLineItems && (/^-{3,}$/.test(line) || RE.subtotal.test(line) || RE.total.test(line) || /^please make all checks/i.test(line))) {
       flush();
       inLineItems = false;

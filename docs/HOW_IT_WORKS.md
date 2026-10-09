@@ -15,15 +15,26 @@ Rule of the whole design: **deterministic code decides the money; AI advises, an
 
 ## 1. Reading an invoice (`lib/agent/extractor.ts`)
 
-- **Order of attempts.** (1) A deterministic template parser reads labelled fields, line items in two layouts, and amounts. If it finds every required field *and the arithmetic reconciles*, that is the answer; no AI call. (2) Otherwise an LLM reads the document through a single forced tool call. (3) If the LLM is unavailable, the partial template result comes back at low confidence with the reason attached.
+- **Order of attempts.** (1) A deterministic template parser reads labelled fields, line items in three layouts (block, inline, and a `Description / Qty / Unit Price / Amount` table, `lib/line-rows.ts`), and amounts. If it finds every required field *and the arithmetic reconciles*, that is the answer; no AI call. (2) Otherwise an LLM reads the document through a single forced tool call. (3) If the LLM is unavailable, the partial template result comes back at low confidence with the reason attached.
 - **Confidence is computed, not asked for.** `assessExtraction` runs checks: vendor, invoice number, date, line items, total present; lines sum to the subtotal; subtotal + tax equals the total. Score = checks passed / checks run, capped at 0.95 (template) or 0.90 (LLM). A model's own confidence can only lower it. Below 0.85 the pipeline raises EXC-LAYOUT and a person looks.
+- **Table rows are verified, not guessed.** A row is read only when its amount equals quantity x unit price to the cent; a row that does not reconcile is left out, the lines then fail to sum to the subtotal, and the document goes to the AI or a person. Colon-less totals (`Subtotal 2,140.00`, `Tax (8%) 171.20`, several CGST/SGST lines added up) are read only after a table header has been seen.
+- **PDFs.** `lib/pdf-text.ts` takes the text layer with `pdf-parse` 2.x (a class; the route had been calling it as the old 1.x function, so every PDF upload failed until a test with a real PDF caught it). There is no OCR: a scan gets a 422 saying so.
 - **Why.** A model's self-reported confidence is poorly calibrated; arithmetic that has to add up is an independent, cheap signal. It also means the common case costs no AI call.
 - **Where it is weak.** The vendor name is the one field arithmetic can't verify. A `Vendor:` label is trusted; otherwise it is the first non-boilerplate, non-contact header line and is reported as `uncertain_fields`. The first benchmark missed that this heuristic was wrong on 44 of 125 ordinary invoices; see `docs/EVAL.md`.
 - **If asked "why not just use an LLM for everything?"** Cost, latency, rate limits, and no way to tell when it is wrong. The checks give a defensible "send to a human" signal.
 
 ## 2. Intake (`lib/bills.ts`, `app/api/invoices*`)
 
-Validated at the edge (400 malformed, 422 when the stated total isn't lines + tax, 409 if this vendor already sent this number), written in one transaction (vendor, bill, lines together), then the pipeline runs after the response via Next's `after()` so a serverless host doesn't freeze it half-way. The invoice's own tax and total are stored: an earlier version stored the sum of the lines and dropped tax, recording a $810 invoice as a $750 liability.
+Validated at the edge (400 malformed, 422 when the stated total isn't lines + tax, 409 if this vendor already sent this number), written in one transaction (vendor, bill, lines together), then the pipeline runs after the response via Next's `after()` so a serverless host doesn't freeze it half-way. The vendor is matched by name ignoring case and runs of spaces (`vendorKey`), not legal suffixes or punctuation: "Acme Ltd" and "Acme Inc" can be different legal entities, and merging payees is a fraud risk. An unknown vendor is created with trust tier `new`. The invoice's own tax and total are stored: an earlier version stored the sum of the lines and dropped tax, recording a $810 invoice as a $750 liability.
+
+### 2b. Where the PO and the goods receipt come from (`lib/purchase-orders.ts`, `app/api/purchase-orders*`, the Orders screen)
+
+Only the invoice arrives from outside. In a real AP system the PO is created by procurement and the receipt by the warehouse, and both reach AP by ERP sync. There is no ERP here, so they come from the seed script **or are entered on the Orders screen** (or read from a PO document into an editable draft, deterministic parser only; nothing is saved until the person presses Save). The invoice is linked to its PO by the PO number the document cites, within the same vendor; if there is none on file the invoice is treated as non-PO and says so.
+
+- A PO number is unique: submitting it twice is a 409. A receipt is not naturally idempotent (the same delivery twice would double the goods received), so an identical receipt (same PO, date, receiver, condition, quantities) is refused with 409, and receipts for one PO are serialized with `SELECT ... FOR UPDATE`. Both are covered by concurrency tests that were mutation-checked.
+- Only `accepted` receipts count as received; a `damaged` or `rejected` one is recorded but does not clear a line.
+- Dates matter to the match: an invoice dated more than 7 days before the earliest receipt raises EXC-BEFORE_RCV.
+- Not built: PO/receipt documents in free-form layouts (no AI reader for them), UOM on invoice lines, FX on POs (rate is 1.0), blanket POs from the screen.
 
 ## 3. Pre-match gates and the matching engine (`lib/matching/`, `lib/pipeline/match-stage.ts`)
 
@@ -87,6 +98,8 @@ Money, quantities and rates were `REAL` (4-byte float). Rehearsing the migration
 ## 13. What changed in the October 2026 refinement pass (so claims stay honest)
 
 Everything above existed in some form from the hackathon build **except** the following, which were added or rebuilt on 8 October 2026: the isolated test schema and destructive-script guards; the shared tool loop, model configuration, and provider-failure handling; the hybrid extractor with computed confidence; the simulated payment rail and the manual, maker/checker bank-change flow (plus its routes); human decisions in the hash chain with the transaction and race handling; the deterministic floor on AI reconsideration; Settings guardrails actually enforced; invoice intake validation; the read model and the inbox UI; the extraction eval and benchmarks; NUMERIC money. If an interviewer asks what was built when, this is the answer; do not describe these as part of the original build.
+
+**Added on 10 October 2026:** PDF upload fixed (it was broken, see section 1); table-layout invoice rows; case-insensitive vendor matching; entering a PO and a goods receipt by hand or from a PO document, with the Orders screen; the "cited PO is not on file" warning after an invoice upload. Tests: `pdf-text`, `line-rows`, `extractor-table`, `purchase-orders` (real PDFs generated in the tests).
 
 ## 14. What I would do next
 

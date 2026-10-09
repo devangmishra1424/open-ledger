@@ -65,6 +65,12 @@ export const api = {
   createInvoice: (invoice) => request('/invoices', { method: 'POST', body: invoice }),
   ingestInvoice: (rawText, vendorName) => request('/invoices/ingest', { method: 'POST', body: { rawText, vendorName }, timeout: LONG_TIMEOUT_MS }),
 
+  // --- Purchase orders and goods receipts (the other two documents of a three-way match) ---
+  getPurchaseOrders: () => request('/purchase-orders?limit=200'),
+  createPurchaseOrder: (po) => request('/purchase-orders', { method: 'POST', body: po }),
+  parsePurchaseOrder: (rawText) => request('/purchase-orders/parse', { method: 'POST', body: { rawText }, timeout: LONG_TIMEOUT_MS }),
+  recordReceipt: (poId, receipt) => request(`/purchase-orders/${encodeURIComponent(poId)}/receipts`, { method: 'POST', body: receipt }),
+
   // --- Human decisions (reviewerName is required by the server: it is recorded in the hash chain) ---
   approveInvoice: (id, reviewerName, reason) => request(`/invoices/${encodeURIComponent(id)}/approve`, { method: 'POST', body: { reviewerName, reason }, timeout: LONG_TIMEOUT_MS }),
   rejectInvoice: (id, reviewerName, reason) => request(`/invoices/${encodeURIComponent(id)}/reject`, { method: 'POST', body: { reviewerName, reason } }),

@@ -5,6 +5,7 @@ import { ReviewerProvider } from './state/Reviewer';
 import { InvoicesProvider } from './state/Invoices';
 import Shell from './components/Shell';
 import Inbox from './pages/Inbox';
+import PurchaseOrders from './pages/PurchaseOrders';
 import AuditTrail from './pages/AuditTrail';
 import Pipeline from './pages/Pipeline';
 import EcosystemMap from './pages/EcosystemMap';
@@ -21,6 +22,7 @@ export default function App() {
             <Route element={<Shell />}>
               <Route index element={<Inbox />} />
               <Route path="invoice/:id" element={<Inbox />} />
+              <Route path="orders" element={<PurchaseOrders />} />
               <Route path="audit" element={<AuditTrail />} />
               <Route path="pipeline" element={<Pipeline />} />
               <Route path="network" element={<EcosystemMap />} />
