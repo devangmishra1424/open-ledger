@@ -231,6 +231,13 @@ export async function recordReceipt(poId: string, input: NewReceipt): Promise<{ 
   });
 }
 
+/** The vendor a PO number belongs to, or null if no PO has that number. Used to explain why an invoice that cites a PO did not match it. */
+export async function poVendorName(poNumber: string): Promise<string | null> {
+  const rows = await getSql()`
+    SELECT v.name FROM purchase_orders po JOIN vendors v ON v.id = po.vendor_id WHERE po.po_number = ${poNumber.trim()}`;
+  return rows[0]?.name ?? null;
+}
+
 export interface PoSummary {
   id: string;
   poNumber: string;

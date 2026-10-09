@@ -12,6 +12,7 @@ import { createPurchaseOrder, recordReceipt, listPurchaseOrders, normalizePurcha
 import { POST as postPo, GET as getPos } from "@/app/api/purchase-orders/route";
 import { POST as postReceipt } from "@/app/api/purchase-orders/[id]/receipts/route";
 import { POST as parsePo } from "@/app/api/purchase-orders/parse/route";
+import { POST as ingest } from "@/app/api/invoices/ingest/route";
 import { makePdfDataUrl } from "./helpers/make-pdf";
 
 const sql = getSql();
@@ -202,5 +203,41 @@ describe("routes", () => {
     expect(unreadable.missing).toEqual(expect.arrayContaining(["the PO number", "the line items"]));
     expect((await sql`SELECT count(*)::int AS n FROM purchase_orders`)[0].n).toBe(before);
     expect((await parsePo(req({}), undefined)).status).toBe(400);
+  });
+});
+
+describe("an invoice that cites a PO it cannot match says why", () => {
+  const invoiceText = (vendor: string, number: string, po: string) =>
+    `${vendor}
+INVOICE
+Invoice Number: ${number}
+Invoice Date: 2026-10-05
+Purchase Order: ${po}
+
+Line Items:
+1. Widget
+   Qty: 5
+   Unit Price: $10.00
+---
+Subtotal: $50.00
+Total Amount Due: $50.00
+`;
+
+  it("names the vendor the PO belongs to when the vendor names differ", async () => {
+    await createPurchaseOrder({ vendorName: `${TAG} Acme Corporation`, poNumber: `${TAG}-X1`, lines });
+    const res = await ingest(req({ rawText: invoiceText(`${TAG} Acme Corp`, `${TAG}-XI1`, `${TAG}-X1`) }), undefined);
+    const body = await res.json();
+    expect(body.poNumber).toBe("Non-PO");
+    expect(body.extraction).toMatchObject({ poReference: `${TAG}-X1`, poOnFileFor: `${TAG} Acme Corporation` });
+  });
+
+  it("poOnFileFor is null when no PO has that number, and when the PO did match", async () => {
+    const none = await (await ingest(req({ rawText: invoiceText(`${TAG} Solo Co`, `${TAG}-XI2`, `${TAG}-NOPE`) }), undefined)).json();
+    expect(none.extraction).toMatchObject({ poReference: `${TAG}-NOPE`, poOnFileFor: null });
+
+    await createPurchaseOrder({ vendorName: `${TAG} Same Co`, poNumber: `${TAG}-X3`, lines });
+    const matched = await (await ingest(req({ rawText: invoiceText(`${TAG} SAME co`, `${TAG}-XI3`, `${TAG}-X3`) }), undefined)).json();
+    expect(matched.poNumber).toBe(`${TAG}-X3`);
+    expect(matched.extraction.poOnFileFor).toBeNull();
   });
 });

@@ -118,12 +118,17 @@ function FromDocument({ onClose }) {
             <ul className="vb-claims" style={{ marginTop: 6 }}>{ex.uncertainFields.map((f) => <li key={f}>{f}</li>)}</ul>
           )}
         </Banner>
-        {ex.poReference && created.poNumber === 'Non-PO' && (
+        {ex.poReference && created.poNumber === 'Non-PO' && (ex.poOnFileFor ? (
           <Banner kind="warn">
-            <strong>No purchase order {ex.poReference} is on file for this vendor,</strong> so this invoice is treated as a non-PO invoice and cannot be three-way matched.
+            <strong>{ex.poReference} belongs to &ldquo;{ex.poOnFileFor}&rdquo;, but this invoice is from &ldquo;{created.vendor}&rdquo;,</strong> so it cannot be matched to that order and is treated as a non-PO invoice.
+            {' '}A PO only matches an invoice from the same vendor name (case and spacing do not matter). Check the names on both documents.
+          </Banner>
+        ) : (
+          <Banner kind="warn">
+            <strong>No purchase order {ex.poReference} is on file,</strong> so this invoice is treated as a non-PO invoice and cannot be three-way matched.
             {' '}<Link to="/orders" onClick={onClose}>Add the PO and its goods receipt</Link> first, then add the invoice again under a new invoice number.
           </Banner>
-        )}
+        ))}
         <div className="vb-modal-actions">
           <button type="button" className="vb-btn vb-btn-primary" onClick={() => afterCreate(created)}>Open the invoice</button>
         </div>

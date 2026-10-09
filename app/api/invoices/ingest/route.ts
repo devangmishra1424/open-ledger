@@ -5,6 +5,7 @@ import { createBill } from "@/lib/bills";
 import { runInBackground } from "@/lib/background";
 import { handle, HttpError, optionalString, readJsonBody, requireString } from "@/lib/http";
 import { extractPdfText, isPdfDataUrl } from "@/lib/pdf-text";
+import { poVendorName } from "@/lib/purchase-orders";
 
 export const maxDuration = 60; // extraction may call an LLM, and the pipeline continues after the response
 
@@ -59,6 +60,8 @@ export const POST = handle("POST /api/invoices/ingest", async (req) => {
   runInBackground(`runPipeline(${created.billId})`, () => runPipeline(created.billId, { extraction }));
 
   const invoice = await getFrontendInvoice(created.billId);
+  // The document cites a PO but none matched this vendor: say whose PO it is, if it exists at all, so the person can see a name mismatch.
+  const poOnFileFor = s.po_reference && invoice?.poNumber === "Non-PO" ? await poVendorName(s.po_reference) : null;
   return Response.json({
     ...invoice,
     extraction: {
@@ -66,6 +69,7 @@ export const POST = handle("POST /api/invoices/ingest", async (req) => {
       confidence: s.confidence,
       uncertainFields: s.uncertain_fields,
       poReference: s.po_reference, // the PO number the document itself cites, whether or not one is on file
+      poOnFileFor, // set when that PO exists but belongs to a different vendor name
       fallbackReason: extraction.fallbackReason ?? null,
     },
   }, { status: 201 });
