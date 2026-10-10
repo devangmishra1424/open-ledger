@@ -35,7 +35,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       # Deterministic extraction benchmark; fails if any damaged document is let through unflagged.
-      - run: npm run eval
+      - run: npx tsx scripts/eval.ts   # not `npm run eval`: that script passes --env-file=.env, and CI has no .env file
 
   frontend:
     runs-on: ubuntu-latest
