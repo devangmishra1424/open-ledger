@@ -1,7 +1,7 @@
 import { verifierPrompt } from "@/lib/agent/prompts";
 import { EVIDENCE_TOOLS, SUBMIT_VERIFICATION, executeTool } from "@/lib/agent/tools";
-import { runChatCompletionsLoop } from "@/lib/agent/loop-chat-completions";
-import type { AgentLoopResult } from "@/lib/agent/loop-responses";
+import { runToolLoop, type AgentLoopResult } from "@/lib/agent/loop";
+import { normalizeConfidence } from "@/lib/agent/llm";
 import type { HumanReconsiderationContext } from "@/lib/agent/investigator";
 
 /** Matches submit_verification's parameter schema in lib/agent/tools.ts exactly. */
@@ -13,7 +13,7 @@ export interface VerificationSubmission {
 }
 
 /**
- * TensorMux (glm-4-7-flash) as an independent second opinion — only invoked by the pipeline
+ * An independent second opinion from a different model family than the Investigator (lib/agent/llm.ts) — only invoked by the pipeline
  * for Tier-2-eligible decisions (ENGINE.md §2.5), never for a plain rule-triggered block with
  * nothing to adjudicate. Given the same MatchResult AND the Investigator's own conclusion, so
  * it can explicitly agree or flag disagreement — not a second blind investigation.
@@ -24,11 +24,14 @@ export async function verify(invoiceId: string, matchResult: unknown, investigat
     payload.human_question = humanContext.question;
     if (humanContext.additionalContext) payload.human_additional_context = humanContext.additionalContext;
   }
-  return runChatCompletionsLoop<VerificationSubmission>({
+  const result = await runToolLoop<VerificationSubmission>({
+    role: "verifier",
     instructions: verifierPrompt(invoiceId),
     initialInput: JSON.stringify(payload),
     tools: [...EVIDENCE_TOOLS, SUBMIT_VERIFICATION],
     submissionToolName: "submit_verification",
     executeTool,
   });
+  result.submission.confidence = normalizeConfidence(result.submission.confidence);
+  return result;
 }

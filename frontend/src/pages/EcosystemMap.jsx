@@ -2,27 +2,30 @@ import React, { useState, useEffect } from 'react';
 import GlassCard from '../components/GlassCard';
 import { Network, Building2, Landmark, Bot, ShieldCheck, Zap } from 'lucide-react';
 import { api } from '../services/api';
+import { Banner } from '../components/ui';
 import './EcosystemMap.css';
 
 const ICON_BY_TYPE = {
   Core: Bot,
   Vendor: Building2,
   Bank: Landmark,
-  Blockchain: ShieldCheck,
+  Ledger: ShieldCheck,
 };
 
 const EcosystemMap = () => {
   const [nodes, setNodes] = useState([]);
   const [connections, setConnections] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     const fetchEcosystem = () => api.getEcosystem().then((data) => {
-      if (cancelled || !data) return;
+      if (cancelled) return;
       setNodes(data.nodes ?? []);
       setConnections(data.connections ?? []);
-    });
+      setError(null);
+    }).catch((e) => { if (!cancelled) setError(e); });
     fetchEcosystem();
     const interval = setInterval(fetchEcosystem, 15000);
     return () => { cancelled = true; clearInterval(interval); };
@@ -32,20 +35,21 @@ const EcosystemMap = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%' }}>
+      {error && <Banner kind="error">Could not load the network: {error.message}</Banner>}
       <GlassCard style={{ padding: '24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <h2 style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '10px' }}>
               <Network size={24} color="#a7c957" />
-              Connected Financial Ecosystem Topology
+              Vendors around the pipeline
             </h2>
             <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Real vendors from your ledger, arranged around the core pipeline
+              Real vendors from your ledger, arranged around the core pipeline. Red means flagged.
             </p>
           </div>
           <span className="status-chip clean">
             <span className="status-dot" />
-            {connections.length} Active Links
+            {nodes.filter((n) => n.type === 'Vendor').length} vendors
           </span>
         </div>
       </GlassCard>

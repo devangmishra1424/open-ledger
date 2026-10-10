@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { getEmbedding, cosineSimilarity } from "@/lib/embeddings";
+import { liveEmbeddings } from "./helpers/live-llm";
 
 describe("cosineSimilarity — pure math, no API call", () => {
   it("returns 1 for identical vectors", () => {
@@ -38,7 +39,7 @@ describe("cosineSimilarity — pure math, no API call", () => {
  * zero mocks (see tests/extractor.test.ts), so this proves the actual wire call and
  * response-shape parsing, not just type compatibility.
  */
-describe("getEmbedding() — real OpenAI embeddings API call", () => {
+describe.skipIf(!liveEmbeddings)("getEmbedding() — real OpenAI embeddings API call", () => {
   it("embeds similar sentences closer together than unrelated ones", async () => {
     const [invoiceMismatch, billMismatch, catOnWindowsill] = await Promise.all([
       getEmbedding("The invoice total does not match the purchase order amount."),

@@ -1,40 +1,66 @@
-# Open Ledger
+# VeriBook (Open Ledger)
 
-An Accounts-Payable agent (3-way match: PO ↔ Goods Receipt ↔ Invoice) that handles a comprehensive, closed exception taxonomy, routes anything uncertain through tiered human review, and — unlike everything else in this space — is genuinely not a black box: every agent, every handoff, every decision is interrogable, contestable, and backed by an immutable, hash-chained ledger. Built for Syndicate by Maximor, Track 2: Autonomous Office of the CFO.
+Accounts-payable invoice processing with a three-way match (purchase order, goods receipt, invoice). Invoices come in, are read, checked against the PO and the delivery, and either approved and posted to a double-entry ledger or put in front of a person with the reason. Every decision, including each human approval, is chained to the one before it with SHA-256, so the history is tamper-evident.
 
-**Status: design complete, code not yet started.** Everything below is ready to build from — no remaining open design questions.
+It is a working system, not a mock-up, and it is explicit about what is real and what is simulated.
 
-## Start here, based on your role
+## The idea in one paragraph
 
-**If you're building the UI:** read `DESIGN.md` §9 (screens) → the [published mockup](https://claude.ai/code/artifact/df6f8464-5edc-4b92-beb2-4890a7c46a40) → `UI_DESIGN_BRIEF.md` (motion/interaction direction, what to avoid) → `ENGINE.md` §7 (the full API contract you're building against — this is the corrected pointer; an earlier draft of this README sent you to `BUILD.md` §7, which is actually the Dodo Payments section, not the API) → `BUILD.md` §9 (your exact file ownership).
+Deterministic code makes the money decisions; AI is used where judgment is needed and is never allowed to loosen a rule. A rules engine does the matching and applies the approval policy. An AI Investigator looks into exceptions with tools (vendor history, PO lookup), a second AI from a different model family double-checks it, and either can only make the outcome *stricter*. People decide the rest, and what they decide is recorded in the same audit chain as the machine's steps.
 
-**If you're building the engine:** read `docs/ap-three-way-match-spec.md` (the exact matching/exception logic) → `ENGINE.md` (runtime architecture) → `ALGORITHMS.md` (every pseudocode/prompt detail, nothing left unspecified) → `BUILD.md` §1-§6 (repo structure, schema, types, API) and §9 (your file ownership).
+## What is real and what is simulated
 
-**If you want the full picture first:** `DESIGN.md` → `docs/ap-three-way-match-spec.md` → `ENGINE.md` → `AUDIT.md` → `BUILD.md` → `ALGORITHMS.md` → `AUDIT_FINAL.md` (honest winnability audit) → `CITATIONS.md` (sources for every specific factual claim, including one correction) → `UI_DESIGN_BRIEF.md`. `SPEC.md` is superseded, kept for history only.
-
-## First two commits, before anyone branches into their own half
-
-1. `db/schema.sql` and `lib/types.ts`, copied verbatim from `BUILD.md` §2/§3.
-2. `npm install && npm run migrate` works, empty pages render.
-
-## File ownership (full detail in `BUILD.md` §9)
-
-| Owner | Scope |
+| | Status |
 |---|---|
-| Engine + AO | `db/` (except `schema.sql`, shared), `lib/matching/`, `lib/ledger/`, `lib/agent/`, `lib/pipeline/`, matching/pipeline tests, driving the AO sessions |
-| UI + Wiring | `components/`, `app/**/page.tsx`, `app/api/*`, `lib/audit/`, `lib/embeddings.ts`, `lib/explain.ts`, `scripts/`, `lib/voice.ts`, `lib/payments/dodo.ts`, `tests/eval.test.ts` |
-| Shared | `lib/types.ts`, `db/schema.sql` — agree before changing |
+| Reading invoices | Real. A deterministic template parser first; an LLM only for layouts it cannot read. Confidence is computed from checks (required fields, lines add up, subtotal + tax = total), not taken from the model. |
+| Three-way matching, tolerances, exception taxonomy (14 codes), approval policy | Real. Deterministic; from the written spec in `docs/ap-three-way-match-spec.md`. |
+| AI investigation and second-opinion review | Real, on Groq (`openai/gpt-oss-120b` and `qwen/qwen3.8-27b` by default, configurable). Subject to the provider's free-tier quotas. |
+| Double-entry ledger, accounting periods | Real. Balanced journal entries in Postgres; a month's period is opened on first use; closed periods block posting. |
+| Audit chain | Real. Append-only, SHA-256 chained, recomputed from the first record on demand. Tamper-evident, not a blockchain. |
+| **Payments** | **Simulated.** Recorded and posted (Dr AP / Cr Cash), no money moves. Every screen says so. |
+| **Vendor bank-detail callbacks** | **Manual.** A person phones the vendor and records the answer; a different person signs off. No automated call is placed. |
+| **Sign-in** | **None.** Reviewer names are self-declared. "A different person" checks compare typed names. |
 
-## Run it (once code exists)
+## Try it
 
 ```bash
 npm install
-npm run seed
-npm run dev
+cp .env.example .env            # DATABASE_URL (Supabase/Postgres), GROQ_API_KEY
+# one-time: a demo database schema, separate from the live tables
+DB_SCHEMA=veribook_demo npm run migrate
+DB_SCHEMA=veribook_demo npm run seed       # 8 invoices through the real pipeline (uses AI quota)
+npm run dev:demo                 # API on :3001, against the demo schema
+npm --prefix frontend install && npm --prefix frontend run dev   # UI on :5173
 ```
 
-No Docker, no login screen, no auth to click through.
+Open the inbox. Six invoices will be waiting, each for a different reason: a bank-detail change on the vendor, a price variance, a unit-of-measure mismatch, a missing PO, a blanket-PO ceiling, a credit memo. Open the bank-detail one and walk the verification: log the call, record the vendor's answer, then switch name (sidebar) and sign off as a second person; only then can it be approved.
 
-## What track, and what's genuinely novel
+`npm run migrate` and the demo-wipe scripts refuse to touch the live schema without `--yes`.
 
-Track 2, Autonomous Office of the CFO. The differentiator isn't "AI does AP" — every well-funded competitor already claims that. It's that the full closed loop (detect → gather evidence → propose with cited evidence → tiered approval → post to ledger) is genuinely inspectable and contestable at every step, backed by an accounting-correct, event-sourced ledger, not a status column. See `AUDIT_FINAL.md` for the honest, judge's-eye assessment of where this stands and what's still a risk.
+## Checks
+
+```bash
+npm run typecheck
+npm test                        # runs in its own schema (veribook_test); live tables are never touched
+SKIP_LIVE_LLM=1 npm test        # skip the suites that call the AI provider and spend quota
+npm run eval                    # extraction benchmark: deterministic, no cost  (docs/EVAL.md)
+npm run bench:llm -- 6          # compare candidate models for the Investigator
+```
+
+## Where to read next
+
+- **`docs/HOW_IT_WORKS.md`**: each feature, how it works, why it was built that way, how it fails, and what is still weak. Written to be explained from.
+- **`docs/EVAL.md`**: what was measured, how, and what the numbers do not show.
+- `docs/ap-three-way-match-spec.md`: the matching and exception spec the engine implements.
+- `DESIGN.md`, `ENGINE.md`, `ALGORITHMS.md`, `BUILD.md`, `AUDIT*.md`, `UI_DESIGN_BRIEF.md`, `SPEC.md`: the original design documents from before the code existed. They describe intent and some of it has since changed (the AI provider, the payment rail, the UI); where they disagree with `docs/HOW_IT_WORKS.md`, the latter is right.
+
+## Known limits
+
+- Single tenant, no authentication, no roles. Reviewer identity is a typed name.
+- Only the invoice is read from a document. The purchase order and goods receipt are records (seeded, or entered on the Orders screen; a PO document can be read into an editable draft, deterministic parser only). A receipt document is not read.
+- PDFs need a text layer; there is no OCR, so a scan is refused with a clear message. An invoice in a layout neither the template parser nor the AI can read goes to a person.
+- Payments are a simulation, made at approval rather than scheduled by due date or early-payment terms.
+- One currency in the ledger: invoices carry a currency, but there is no FX conversion and amounts are not summed across currencies.
+- Money columns are `REAL` (float4) in the live database; a `NUMERIC` migration is written but needs to be applied deliberately (see `docs/HOW_IT_WORKS.md`).
+- No goods-receipt accrual (GR/IR clearing); bills post Dr Expense / Cr AP.
+- AI steps depend on a provider whose free tier caps tokens per minute and per day; a capped step stops the invoice for a person with the reason, and "Retry AI review" re-runs it.

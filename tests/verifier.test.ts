@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getSql } from "@/db/client";
 import { verify } from "@/lib/agent/verifier";
+import { liveLlm } from "./helpers/live-llm";
 
 /**
- * Real call against the live TensorMux endpoint (glm-4-7-flash, Chat Completions-compatible)
- * AND the live Supabase DB — verifies the Chat Completions tool-calling loop (assistant
+ * Real call against the live LLM provider (the Verifier model, lib/agent/llm.ts)
+ * AND the (test-schema) Supabase DB — verifies the Chat Completions tool-calling loop (assistant
  * tool_calls -> role:"tool" messages -> next turn -> submit_verification) end-to-end.
  */
 
@@ -27,7 +28,7 @@ afterAll(async () => {
   await sql`DELETE FROM vendors WHERE id = ${vendorId}`;
 });
 
-describe("verify() — real multi-turn TensorMux Chat Completions loop", () => {
+describe.skipIf(!liveLlm)("verify() — real multi-turn tool loop (independent model family)", () => {
   it("reaches an independent verdict given the same MatchResult and the Investigator's conclusion", async () => {
     const matchResult = { exception_types: ["EXC-NON_PO"], amount_impact: 15000, po_reference: null };
     const investigation = {

@@ -143,20 +143,34 @@ const HASH_CHAIN_LOCK_KEY = 9081726354;
 export async function writeDecision(input: WriteDecisionInput): Promise<Decision> {
   const sql = getSql();
 
+  // Fast path outside any lock: a retry of something already written costs one cheap read.
   if (input.idempotencyKey) {
     const existing = await sql`SELECT * FROM decisions WHERE idempotency_key = ${input.idempotencyKey}`;
     if (existing.length > 0) return fromRow(existing[0]); // already written — don't double-post (ENGINE.md §5)
   }
 
-  return sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(${HASH_CHAIN_LOCK_KEY})`;
+  return sql.begin((tx) => writeDecisionInTx(tx, input));
+}
 
-    const last = await tx`SELECT hash FROM decisions ORDER BY seq DESC LIMIT 1`;
-    const prevHash: string | null = last.length > 0 ? last[0].hash : null;
+/**
+ * writeDecision inside a transaction the caller already owns — so a state change and the
+ * decision that records it commit or roll back together (lib/ledger/human-review.ts).
+ *
+ * The idempotency check is repeated HERE, under the chain lock: two concurrent calls with the
+ * same key can both pass the unlocked fast path above, and without this the second would die
+ * on the UNIQUE(idempotency_key) constraint instead of returning the first call's decision.
+ */
+export async function writeDecisionInTx(tx: TransactionSql<{}>, input: WriteDecisionInput): Promise<Decision> {
+  await tx`SELECT pg_advisory_xact_lock(${HASH_CHAIN_LOCK_KEY})`;
 
-    const decision = await buildAndInsertDecision(tx, input, prevHash);
-    return decision;
-  });
+  if (input.idempotencyKey) {
+    const existing = await tx`SELECT * FROM decisions WHERE idempotency_key = ${input.idempotencyKey}`;
+    if (existing.length > 0) return fromRow(existing[0]);
+  }
+
+  const last = await tx`SELECT hash FROM decisions ORDER BY seq DESC LIMIT 1`;
+  const prevHash: string | null = last.length > 0 ? last[0].hash : null;
+  return buildAndInsertDecision(tx, input, prevHash);
 }
 
 async function buildAndInsertDecision(

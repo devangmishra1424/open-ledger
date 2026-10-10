@@ -1,85 +1,76 @@
-import { getSql } from "@/db/client";
 import { extract } from "@/lib/agent/extractor";
 import { runPipeline } from "@/lib/pipeline/orchestrator";
 import { getFrontendInvoice } from "@/lib/api-shapes";
+import { createBill } from "@/lib/bills";
+import { runInBackground } from "@/lib/background";
+import { handle, HttpError, optionalString, readJsonBody, requireString } from "@/lib/http";
+import { extractPdfText, isPdfDataUrl } from "@/lib/pdf-text";
+import { poVendorName } from "@/lib/purchase-orders";
+
+export const maxDuration = 60; // extraction may call an LLM, and the pipeline continues after the response
+
+const MAX_TEXT_CHARS = 200_000;
 
 /**
- * POST /api/invoices/ingest — the real document-ingestion path: takes raw, unstructured
- * invoice text (what you'd get from an uploaded .txt/email/OCR dump) and runs it through the
- * real Extraction Agent (lib/agent/extractor.ts, a real OpenAI call) to pull out vendor,
- * invoice number, PO reference, and line items — then hands the result to the same real
- * pipeline every other invoice goes through. This is the one real LLM extraction call; once
- * the lines exist, runPipeline's own extract stage takes the deterministic "already parsed"
- * path (lib/pipeline/orchestrator.ts's runExtractStage), same as every structured demo fixture.
+ * POST /api/invoices/ingest — an invoice as a document: { rawText } (plain text, or a
+ * data:application/pdf;base64,... URL) and an optional { vendorName } used only when the
+ * document's own vendor can't be read.
  *
- * Body: { rawText: string, vendorName?: string } — vendorName is a fallback only, used when
- * the extractor couldn't read a vendor name off the document itself.
+ * lib/agent/extractor.ts reads the fields (a deterministic template parse first, an LLM only
+ * when that is incomplete) and scores its own confidence from real checks: required fields
+ * present, lines add up to the subtotal, subtotal + tax equals the total. That extraction is
+ * handed to the pipeline so the ledger records WHO read the document and how sure it was, and a
+ * low-confidence read is stopped at the layout check (EXC-LAYOUT) for a person instead of being
+ * paid on a guess.
+ *
+ * 422 when nothing usable could be read (no vendor, or no line items), with what was missing.
+ * 409 if this vendor already sent this invoice number.
  */
-export async function POST(req: Request) {
-  const sql = getSql();
-  const body = await req.json().catch(() => ({}));
-  const rawText: string = body.rawText ?? "";
-  if (!rawText.trim()) {
-    return Response.json({ error: "rawText is required — nothing to ingest" }, { status: 400 });
+export const POST = handle("POST /api/invoices/ingest", async (req) => {
+  const body = await readJsonBody(req);
+  let rawText = requireString(body, "rawText", { max: 12_000_000 });
+  const vendorFallback = optionalString(body, "vendorName", { max: 200 });
+
+  if (isPdfDataUrl(rawText)) rawText = await extractPdfText(rawText);
+  if (rawText.length > MAX_TEXT_CHARS) throw new HttpError(413, `document text is too long (max ${MAX_TEXT_CHARS} characters)`);
+  if (rawText.trim() === "") throw new HttpError(422, "the document contains no readable text");
+
+  const extraction = await extract(rawText);
+  const s = extraction.submission;
+
+  const vendorName = s.vendor_name ?? vendorFallback;
+  if (!vendorName) throw new HttpError(422, "could not read a vendor name from this document — pass vendorName");
+  if (s.line_items.length === 0) {
+    throw new HttpError(422, `could not read any line items from this document (${extraction.fallbackReason ?? "extraction found none"})`);
   }
 
-  const { submission, toolCalls } = await extract(rawText);
+  const created = await createBill({
+    vendorName,
+    poNumber: s.po_reference,
+    invoiceNumber: s.invoice_number,
+    invoiceDate: s.invoice_date,
+    currency: s.currency,
+    lines: s.line_items.map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unit_price })),
+    tax: s.tax,
+    total: s.total,
+    rawSource: rawText,
+    strictTotals: false, // a mismatch is already reflected in the extraction's confidence
+  });
 
-  const vendorName = submission.vendor_name ?? body.vendorName ?? "Unknown Vendor";
-  const existingVendor = await sql`SELECT id FROM vendors WHERE name = ${vendorName}`;
-  let vendorId: string;
-  if (existingVendor.length > 0) {
-    vendorId = existingVendor[0].id;
-  } else {
-    vendorId = crypto.randomUUID();
-    await sql`INSERT INTO vendors (id, name, trust_tier) VALUES (${vendorId}, ${vendorName}, 'new')`;
-  }
+  runInBackground(`runPipeline(${created.billId})`, () => runPipeline(created.billId, { extraction }));
 
-  let poId: string | null = null;
-  if (submission.po_reference) {
-    const poRows = await sql`SELECT id FROM purchase_orders WHERE po_number = ${submission.po_reference} AND vendor_id = ${vendorId}`;
-    poId = poRows[0]?.id ?? null; // not found -> genuinely non-PO, not fabricated
-  }
-
-  const lineItems = submission.line_items ?? [];
-  const totalAmount = lineItems.length > 0
-    ? lineItems.reduce((s, it) => s + it.quantity * it.unit_price, 0)
-    : (submission.total ?? 0);
-
-  const billId = crypto.randomUUID();
-  const invoiceNumber = submission.invoice_number ?? `INGEST-${billId.slice(0, 8)}`;
-  const today = new Date().toISOString().slice(0, 10);
-
-  await sql`
-    INSERT INTO vendor_bills (id, vendor_id, po_id, invoice_number, invoice_date, currency, subtotal, total_amount, raw_source)
-    VALUES (${billId}, ${vendorId}, ${poId}, ${invoiceNumber}, ${submission.invoice_date ?? today},
-      ${submission.currency ?? "USD"}, ${submission.subtotal ?? totalAmount}, ${totalAmount}, ${rawText})
-  `;
-
-  // A default expense account so an approval can actually post even when this line never
-  // matches a PO line (postBillApproval's only other source for one) — found live: a clean
-  // non-PO invoice reached auto_approve, then failed to post with no GL account anywhere to
-  // fall back to, and sat in "error" instead of "posted".
-  const defaultGlRows = await sql`SELECT id FROM chart_of_accounts WHERE account_number = '6000'`;
-  const defaultGlAccountId: string | null = defaultGlRows[0]?.id ?? null;
-
-  for (const item of lineItems) {
-    await sql`
-      INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, gl_account_id)
-      VALUES (${crypto.randomUUID()}, ${billId}, ${item.description}, ${item.quantity}, ${item.unit_price}, ${defaultGlAccountId})
-    `;
-  }
-
-  // Fire-and-forget — same pattern as POST /api/invoices.
-  runPipeline(billId).catch((err) => console.error(`runPipeline failed for ingested bill ${billId}:`, err));
-
-  const invoice = await getFrontendInvoice(billId);
+  const invoice = await getFrontendInvoice(created.billId);
+  // The document cites a PO but none matched this vendor: say whose PO it is, if it exists at all, so the person can see a name mismatch.
+  const poOnFileFor = s.po_reference && invoice?.poNumber === "Non-PO" ? await poVendorName(s.po_reference) : null;
   return Response.json({
-    ...(invoice ?? { id: billId, status: "processing" }),
+    ...invoice,
     extraction: {
-      confidence: submission.confidence,
-      uncertainFields: submission.uncertain_fields,
-      toolCallCount: toolCalls.length,
+      method: extraction.method,
+      confidence: s.confidence,
+      uncertainFields: s.uncertain_fields,
+      poReference: s.po_reference, // the PO number the document itself cites, whether or not one is on file
+      poOnFileFor, // set when that PO exists but belongs to a different vendor name
+      fallbackReason: extraction.fallbackReason ?? null,
     },
   }, { status: 201 });
-}
+});

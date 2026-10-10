@@ -1,6 +1,7 @@
 import { investigatorPrompt } from "@/lib/agent/prompts";
 import { EVIDENCE_TOOLS, SUBMIT_INVESTIGATION, executeTool } from "@/lib/agent/tools";
-import { runResponsesLoop, type AgentLoopResult } from "@/lib/agent/loop-responses";
+import { runToolLoop, type AgentLoopResult } from "@/lib/agent/loop";
+import { normalizeConfidence } from "@/lib/agent/llm";
 
 /** Matches submit_investigation's parameter schema in lib/agent/tools.ts exactly. */
 export interface InvestigationSubmission {
@@ -31,11 +32,14 @@ export async function investigate(invoiceId: string, matchResult: unknown, human
     payload.human_question = humanContext.question;
     if (humanContext.additionalContext) payload.human_additional_context = humanContext.additionalContext;
   }
-  return runResponsesLoop<InvestigationSubmission>({
+  const result = await runToolLoop<InvestigationSubmission>({
+    role: "investigator",
     instructions: investigatorPrompt(invoiceId),
     initialInput: JSON.stringify(payload),
     tools: [...EVIDENCE_TOOLS, SUBMIT_INVESTIGATION],
     submissionToolName: "submit_investigation",
     executeTool,
   });
+  result.submission.confidence = normalizeConfidence(result.submission.confidence);
+  return result;
 }

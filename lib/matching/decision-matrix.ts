@@ -19,6 +19,13 @@
 
 export type Action = "auto_approve" | "auto_reject" | "escalate_l1" | "escalate_l2" | "block" | "block_fraud_flag";
 
+const ALL_ACTIONS: readonly Action[] = ["auto_approve", "auto_reject", "escalate_l1", "escalate_l2", "block", "block_fraud_flag"];
+
+/** Narrows free text (an LLM's recommendation, a DB column) to a real Action, or undefined — never a cast. */
+export function asAction(value: string | null | undefined): Action | undefined {
+  return ALL_ACTIONS.find((a) => a === value);
+}
+
 export type ExceptionCode =
   | "EXC-NO_PO" | "EXC-BEFORE_RCV" | "EXC-PRICE_VAR" | "EXC-QTY_VAR" | "EXC-DUPLICATE"
   | "EXC-NON_PO" | "EXC-CREDIT_MEMO" | "EXC-PARTIAL" | "EXC-CURRENCY" | "EXC-TAX_VAR"

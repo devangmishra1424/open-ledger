@@ -1,27 +1,23 @@
-import { getSql } from "@/db/client";
-import { postBillApproval } from "@/lib/ledger/journal";
+import { approveInvoice } from "@/lib/ledger/human-review";
 import { getFrontendInvoice } from "@/lib/api-shapes";
+import { handle, optionalString, readJsonBody, reviewerName } from "@/lib/http";
 
-/** POST /api/invoices/:id/approve — a human review action (schema's `reviews.action='approve'`). Posts the real journal entry if not already posted. */
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+/**
+ * POST /api/invoices/:id/approve — a human approves an invoice that is waiting on a person.
+ * Body: { reviewerName, reason? }. Posts it to the ledger, records who approved it in the hash
+ * chain, and pays it. 409 if its state doesn't allow approval (already rejected, bank-detail
+ * change not yet verified, still processing); approving an already-approved invoice is a no-op.
+ */
+export const POST = handle("POST /api/invoices/:id/approve", async (req, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
-  const sql = getSql();
-  const body = await req.json().catch(() => ({}));
-  const reviewerName: string = body.reviewerName ?? "demo-reviewer";
-
-  const billRows = await sql`SELECT status FROM vendor_bills WHERE id = ${id}`;
-  if (billRows.length === 0) return Response.json({ error: `no invoice found with id '${id}'` }, { status: 404 });
-
-  await sql`INSERT INTO reviews (id, invoice_id, reviewer_name, action, note) VALUES (${crypto.randomUUID()}, ${id}, ${reviewerName}, 'approve', ${body.reason ?? null})`;
-
-  if (!["posted", "paid"].includes(billRows[0].status)) {
-    try {
-      await postBillApproval(id);
-    } catch (e) {
-      return Response.json({ error: `could not post: ${e instanceof Error ? e.message : String(e)}` }, { status: 422 });
-    }
-  }
-
+  const body = await readJsonBody(req);
+  const outcome = await approveInvoice({ billId: id, reviewer: reviewerName(body), note: optionalString(body, "reason") });
   const invoice = await getFrontendInvoice(id);
-  return Response.json({ success: true, invoice });
-}
+  return Response.json({
+    success: true,
+    alreadyDone: outcome.alreadyDone,
+    payment: outcome.payment ? { reference: outcome.payment.reference, simulated: outcome.payment.simulated } : undefined,
+    paymentError: outcome.paymentError,
+    invoice,
+  });
+});

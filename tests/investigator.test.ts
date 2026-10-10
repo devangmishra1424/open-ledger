@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { getSql } from "@/db/client";
 import { investigate } from "@/lib/agent/investigator";
+import { liveLlm } from "./helpers/live-llm";
 
 /**
  * Real call against the live OpenAI API (gpt-5-nano) AND the live Supabase DB — this is the
@@ -29,7 +30,7 @@ afterAll(async () => {
   await sql`DELETE FROM vendors WHERE id = ${vendorId}`;
 });
 
-describe("investigate() — real multi-turn OpenAI Responses API loop", () => {
+describe.skipIf(!liveLlm)("investigate() — real multi-turn tool loop", () => {
   it("gathers real evidence via tool calls before concluding on a flagged-vendor, no-PO high-dollar invoice", async () => {
     const matchResult = {
       exception_types: ["EXC-NON_PO"],
