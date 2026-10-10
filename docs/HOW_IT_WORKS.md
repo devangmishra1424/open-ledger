@@ -93,7 +93,7 @@ An inbox, not a dashboard: tabs for what needs a person, what is processing, wha
 
 ## 12. Money is exact
 
-Money, quantities and rates were `REAL` (4-byte float). Rehearsing the migration on the demo data showed it directly: `SUM(total_amount)` over eight invoices returned **112460**; the true total is **112,460.50**. Columns are now `NUMERIC` (exact), read by the driver as JS numbers, and a test round-trips a $16,777,217.03 invoice and balances its ledger entry to the cent. `db/migrations/003_money_numeric.sql` converts a populated database; it has been rehearsed on a copy but **not applied to the live database** (review it first; float4 converts to numeric at 6 significant digits, so an amount above roughly $100,000 stored with cents may lose them; the demo data is well below that).
+Money, quantities and rates were `REAL` (4-byte float). Rehearsing the migration on the demo data showed it directly: `SUM(total_amount)` over eight invoices returned **112460**; the true total is **112,460.50**. Columns are now `NUMERIC` (exact), read by the driver as JS numbers, and a test round-trips a $16,777,217.03 invoice and balances its ledger entry to the cent. `db/migrations/003_money_numeric.sql` converted the populated database. It was rehearsed on a copy first and **applied to the live database on 10 October 2026** after a full JSON backup. Before and after: row counts identical, largest amount (10,000.00) identical, the decision hash chain tip unchanged and the chain verifies, and 25 columns moved from REAL to NUMERIC (only the two model-confidence scores stay REAL). Float4 converts to numeric at 6 significant digits, so an amount above roughly $100,000 stored with cents could have lost them; the live data's largest amount is $10,000, so nothing was affected. Nothing is deployed anywhere: the app runs locally against this database.
 
 ## 13. What changed in the October 2026 refinement pass (so claims stay honest)
 
@@ -106,6 +106,6 @@ Everything above existed in some form from the hackathon build **except** the fo
 1. Real authentication and roles, so "a different person" is not a typed name.
 2. Schedule payments by due date and terms (and early-payment discounts) instead of paying at approval.
 3. A real payment rail behind `triggerPayment`, calling the provider *before* writing anything and failing closed.
-4. Apply the NUMERIC migration and add a currency-aware ledger (FX at posting).
+4. Add a currency-aware ledger (FX at posting).
 5. Anchor the chain's latest hash outside the database.
 6. A labelled corpus of real invoices to replace the synthetic eval, and a paid AI tier (or on-premise model) so quotas stop being a failure mode.

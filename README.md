@@ -61,6 +61,5 @@ npm run bench:llm -- 6          # compare candidate models for the Investigator
 - PDFs need a text layer; there is no OCR, so a scan is refused with a clear message. An invoice in a layout neither the template parser nor the AI can read goes to a person.
 - Payments are a simulation, made at approval rather than scheduled by due date or early-payment terms.
 - One currency in the ledger: invoices carry a currency, but there is no FX conversion and amounts are not summed across currencies.
-- Money columns are `REAL` (float4) in the live database; a `NUMERIC` migration is written but needs to be applied deliberately (see `docs/HOW_IT_WORKS.md`).
 - No goods-receipt accrual (GR/IR clearing); bills post Dr Expense / Cr AP.
 - AI steps depend on a provider whose free tier caps tokens per minute and per day; a capped step stops the invoice for a person with the reason, and "Retry AI review" re-runs it.
