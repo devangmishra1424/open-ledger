@@ -17,6 +17,7 @@ Deterministic code makes the money decisions; AI is used where judgment is neede
 | AI investigation and second-opinion review | Real, on Groq (`openai/gpt-oss-120b` and `qwen/qwen3.8-27b` by default, configurable). Subject to the provider's free-tier quotas. |
 | Double-entry ledger, accounting periods | Real. Balanced journal entries in Postgres; a month's period is opened on first use; closed periods block posting. |
 | Audit chain | Real. Append-only, SHA-256 chained, recomputed from the first record on demand. Tamper-evident, not a blockchain. |
+| Ask by voice | Real, read-only. The browser's own speech recognition and voice, on top of the existing explain endpoint (answers only from recorded decisions). Chrome and Edge for the microphone; typing works everywhere. See `docs/HOW_IT_WORKS.md` section 10b. |
 | **Payments** | **Simulated.** Recorded and posted (Dr AP / Cr Cash), no money moves. Every screen says so. |
 | **Vendor bank-detail callbacks** | **Manual.** A person phones the vendor and records the answer; a different person signs off. No automated call is placed. |
 | **Sign-in** | **None.** Reviewer names are self-declared. "A different person" checks compare typed names. |
@@ -62,4 +63,5 @@ npm run bench:llm -- 6          # compare candidate models for the Investigator
 - Payments are a simulation, made at approval rather than scheduled by due date or early-payment terms.
 - One currency in the ledger: invoices carry a currency, but there is no FX conversion and amounts are not summed across currencies.
 - No goods-receipt accrual (GR/IR clearing); bills post Dr Expense / Cr AP.
+- Voice input is the browser's: Chrome and Edge only, over https or localhost, and the recording goes to the browser vendor's speech service. Misheard words give a wrong answer, never an action.
 - AI steps depend on a provider whose free tier caps tokens per minute and per day; a capped step stops the invoice for a person with the reason, and "Retry AI review" re-runs it.

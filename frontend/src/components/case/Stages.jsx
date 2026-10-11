@@ -4,7 +4,10 @@ import { api } from '../../services/api';
 import { useToasts } from '../../state/Toasts';
 import { Spinner } from '../ui';
 import Narrative from './Narrative';
-import { actionWords, actorWords, normalizeAction, outcomeWords, shortHash, timeAgo, STAGE_HELP } from '../../lib/labels';
+import { ListenButton } from './AskVoice';
+import { useSpeech } from '../../lib/useSpeech';
+import { buildSpokenAnswer } from '../../lib/speech';
+import { actionWords, actorWords, groundingNote, normalizeAction, outcomeWords, shortHash, timeAgo, STAGE_HELP } from '../../lib/labels';
 
 const BAD = new Set(['error', 'payment_failed', 'disagreement']);
 const WARN = new Set(['escalate_l1', 'escalate_l2', 'block', 'block_fraud_flag', 'auto_reject', 'human_rejected', 'human_contested']);
@@ -31,6 +34,7 @@ function Claim({ text, reasonNames }) {
 /** One card per step: what the step is, what it concluded and who by, the reasoning, and a way to ask why. */
 export default function Stages({ invoice }) {
   const toast = useToasts();
+  const speech = useSpeech();
   const [explaining, setExplaining] = useState(null);
   const [answers, setAnswers] = useState({});
   const reasonNames = invoice.reasonNames ?? {};
@@ -87,8 +91,9 @@ export default function Stages({ invoice }) {
                 <div className="vb-explain" role="note">
                   <div className="vb-explain-label">Explained</div>
                   <Narrative text={a.answer || 'No explanation was returned.'} reasonNames={reasonNames} />
-                  <div className="vb-dim vb-small" style={{ marginTop: 6 }}>
-                    {a.grounded ? `Based on ${a.citedDecisionIds.length} recorded decision${a.citedDecisionIds.length === 1 ? '' : 's'}.` : 'This answer did not cite a recorded decision. Treat it with caution.'}
+                  <div className="vb-dim vb-small" style={{ marginTop: 6 }}>{groundingNote(a)}</div>
+                  <div className="vb-ask-actions">
+                    <ListenButton speech={speech} id={d.id} text={buildSpokenAnswer(a, { reasonNames })} />
                   </div>
                 </div>
               )}

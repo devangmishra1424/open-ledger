@@ -20,6 +20,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const result = await explain(id, decisionId, question);
     return Response.json({ success: true, ...result });
   } catch (e) {
-    return Response.json({ success: false, answer: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    const message = e instanceof Error ? e.message : String(e);
+    // `error` is what the web app's request helper shows; `answer` is kept for callers that already read it.
+    return Response.json({ success: false, error: message, answer: message }, { status: 500 });
   }
 }

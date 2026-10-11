@@ -27,6 +27,15 @@ export interface ExplainResult {
   grounded: boolean;
 }
 
+/**
+ * Which of `ids` the answer quotes in full. Models sometimes write the hyphens of an id as non-breaking or other Unicode
+ * hyphens (U+2011 seen in a live answer), which made a correctly cited answer count as "not grounded"; compare on plain ones.
+ */
+export function citedIds(answer: string, ids: string[]): string[] {
+  const plain = answer.replace(/[\u2010-\u2015\u2212]/g, "-");
+  return ids.filter((id) => plain.includes(id));
+}
+
 async function findCandidateDecisions(question: string, decisions: Decision[]): Promise<Decision[]> {
   // See the Stage A note above: all of the invoice's decisions, no ranking.
   return decisions;
@@ -102,7 +111,7 @@ export async function explain(invoiceId: string, decisionId: string, question: s
 
   const answer = response.choices[0]?.message?.content?.trim() || "";
   
-  const citedDecisionIds = context.map((d) => d.id).filter((id) => answer.includes(id));
+  const citedDecisionIds = citedIds(answer, context.map((d) => d.id));
   const grounded = citedDecisionIds.length > 0;
 
   return { answer, citedDecisionIds, grounded };
