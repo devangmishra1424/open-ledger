@@ -96,3 +96,9 @@ export function timeAgo(iso, now = Date.now()) {
 export function shortHash(hash) {
   return hash ? `${hash.slice(0, 8)}…${hash.slice(-4)}` : '';
 }
+
+/** The note under an explained answer: how many recorded decisions it cites, or a caution if none. One wording for the whole page. */
+export function groundingNote(answer) {
+  if (answer.grounded) return `Based on ${answer.citedDecisionIds.length} recorded decision${answer.citedDecisionIds.length === 1 ? '' : 's'}.`;
+  return 'This answer did not cite a recorded decision. Treat it with caution.';
+}

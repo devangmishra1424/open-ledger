@@ -325,6 +325,30 @@ body { background: var(--vb-bg); }
 .vb-tech dt { color: var(--vb-dim); }
 .vb-tech dd { margin: 0; word-break: break-all; }
 .vb-explain-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--vb-info); font-weight: 700; margin-bottom: 6px; }
+/* Ask about this invoice (typed or spoken) */
+.vb-ask { display: flex; flex-direction: column; gap: 12px; }
+.vb-ask-row { display: flex; gap: 8px; align-items: stretch; }
+.vb-ask-input { flex: 1 1 auto; min-width: 0; }
+.vb-ask-mic { width: 44px; min-width: 44px; padding: 0; flex: 0 0 auto; }
+.vb-ask-mic-on { background: var(--vb-danger-bg); border-color: var(--vb-danger); color: var(--vb-danger); animation: vb-listen 1.4s ease-in-out infinite; }
+@keyframes vb-listen { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 99, 99, 0.45); } 50% { box-shadow: 0 0 0 7px rgba(255, 99, 99, 0); } }
+@media (prefers-reduced-motion: reduce) { .vb-ask-mic-on { animation: none; } }
+.vb-ask-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.vb-ask-chip { background: var(--vb-panel-2); border: 1px solid var(--vb-border); color: var(--vb-muted); border-radius: 999px; padding: 6px 12px; min-height: 32px; font: inherit; font-size: 13px; cursor: pointer; }
+.vb-ask-chip:hover:not(:disabled) { color: var(--vb-text); border-color: var(--vb-info); }
+.vb-ask-chip:disabled { opacity: 0.55; cursor: not-allowed; }
+.vb-ask-status { min-height: 20px; font-size: 13px; color: var(--vb-muted); }
+.vb-ask-err { margin: 0; padding: 8px 12px; border-radius: var(--vb-radius-sm); background: var(--vb-attention-bg); border: 1px solid rgba(255, 207, 64, 0.3); color: var(--vb-attention); font-size: 13.5px; line-height: 1.5; }
+.vb-ask-answer { margin-top: 0; }
+.vb-ask-q { margin: 0 0 10px; font-size: 14px; color: var(--vb-text); }
+.vb-ask-actions { margin-top: 10px; display: flex; gap: 8px; }
+.vb-ask-foot { display: flex; flex-direction: column; gap: 6px; }
+.vb-ask-foot .vb-field-hint { margin: 0; max-width: 72ch; line-height: 1.5; }
+.vb-ask-tone { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.vb-ask-tone-note { font-size: 13px; color: var(--vb-muted); line-height: 1.5; max-width: 60ch; }
+.vb-ask-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--vb-muted); cursor: pointer; }
+.vb-ask-toggle input { width: 16px; height: 16px; accent-color: var(--vb-accent); }
+@media (max-width: 900px) { .vb-ask-row { flex-wrap: wrap; } .vb-ask-input { flex-basis: 60%; } }
 .vb-people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; font-size: 14.5px; }
 .vb-people blockquote { margin: 8px 0 0; padding-left: 14px; border-left: 3px solid var(--vb-accent); }
 

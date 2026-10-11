@@ -10,6 +10,7 @@ import ThreeWayTable from './ThreeWayTable';
 import BankChangeSteps from './BankChangeSteps';
 import DecisionPanel, { useContestShortcut } from './DecisionPanel';
 import Stages, { Integrity } from './Stages';
+import AskVoice from './AskVoice';
 import { REASON_GUIDE, AUTO_APPROVED_GUIDE } from '../../lib/reasonGuide';
 import { formatMoney, timeAgo, actorWords } from '../../lib/labels';
 
@@ -219,6 +220,10 @@ export default function CasePage() {
                 </tfoot>
               </table>
             </div>
+          </Section>
+
+          <Section id="ask" title="Ask about this invoice" sub="Type or speak a question in your own words. Answers come only from this invoice's recorded decisions, and nothing here can approve, reject or pay.">
+            <AskVoice key={invoice.id} invoice={invoice} />
           </Section>
 
           <Section id="how" title="How it was decided" sub="Every step, in order: what it is, who did it, what it concluded and why. Ask any step to explain itself.">
