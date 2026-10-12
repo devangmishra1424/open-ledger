@@ -434,7 +434,8 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
       if (billRows.length > 0) {
         const b = billRows[0];
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:5173";
-        const url = `${baseUrl}/queue/${vendorBillId}`;
+        // The workbench's own invoice page (it used to point at /queue/, which no route serves).
+        const url = `${baseUrl}/app/invoice/${vendorBillId}`;
         await notifyReviewer(
           "AP Supervisor",
           vendorBillId,

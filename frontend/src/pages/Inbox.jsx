@@ -119,7 +119,7 @@ function Queue() {
                 : <Empty title="No invoices match">Try a different tab or clear the search.</Empty>
           )}
           {visible.map((i) => (
-            <button key={i.id} type="button" role="listitem" data-id={i.id} className="vb-row" onClick={() => navigate(`/invoice/${i.id}`)}>
+            <button key={i.id} type="button" role="listitem" data-id={i.id} className="vb-row" onClick={() => navigate(`/app/invoice/${i.id}`)}>
               <span className={`vb-state-dot vb-state-dot-${i.state}`} title={i.state.replace('_', ' ')} aria-label={i.state.replace('_', ' ')} />
               <span style={{ minWidth: 0 }}>
                 <div className="vb-row-vendor">{i.vendor}</div>

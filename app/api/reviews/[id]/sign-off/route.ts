@@ -11,7 +11,7 @@ import { handle, readJsonBody, reviewerName } from "@/lib/http";
 export const POST = handle("POST /api/reviews/:id/sign-off", async (req, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const body = await readJsonBody(req);
-  const reviewer = reviewerName(body);
+  const reviewer = reviewerName(body, req);
   const updated = await bankChangeCall(() => recordSecondReviewerSignOff(id, reviewer));
   return Response.json({ success: true, review: updated });
 });

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Inbox as InboxIcon, ShieldCheck, Activity, SlidersHorizontal, Network, Plus, ClipboardList } from 'lucide-react';
+import { Inbox as InboxIcon, ShieldCheck, Activity, SlidersHorizontal, Network, Plus, ClipboardList, LogOut } from 'lucide-react';
 import { api } from '../services/api';
 import { useInvoices } from '../state/Invoices';
 import { useReviewer } from '../state/Reviewer';
+import { useAuth } from '../state/Auth';
 import { initials } from './ui';
 import AddInvoiceModal from './AddInvoiceModal';
 
@@ -19,13 +20,15 @@ const TITLES = {
 
 export default function Shell() {
   const { counts, error } = useInvoices();
-  const { name, openNameDialog } = useReviewer();
+  const { name, locked, openNameDialog } = useReviewer();
+  const { user, logout } = useAuth();
   const [adding, setAdding] = useState(false);
   const [system, setSystem] = useState(null);
   const location = useLocation();
-  const base = '/' + (location.pathname.split('/')[1] || '');
+  // Paths are /app, /app/orders, /app/invoice/:id ...; the second segment picks the title.
+  const base = '/' + (location.pathname.split('/')[2] || '');
   // On an invoice page the menu shrinks to an icon rail: the invoice gets the room.
-  const compact = location.pathname.startsWith('/invoice');
+  const compact = location.pathname.startsWith('/app/invoice');
   const [title, sub] = TITLES[base] ?? TITLES['/'];
 
   useEffect(() => {
@@ -43,15 +46,15 @@ export default function Shell() {
       <nav className="vb-side" aria-label="Main">
         <div className="vb-brand"><span className="vb-brand-mark" aria-hidden="true">V</span><span className="vb-brand-name">VeriBook</span></div>
         <div className="vb-nav">
-          <NavLink to="/" end title="Inbox" className={({ isActive }) => `vb-nav-link ${isActive || location.pathname.startsWith('/invoice') ? 'active' : ''}`}>
+          <NavLink to="/app" end title="Inbox" className={({ isActive }) => `vb-nav-link ${isActive || location.pathname.startsWith('/app/invoice') ? 'active' : ''}`}>
             <InboxIcon size={18} /> <span className="vb-nav-label">Inbox</span>
             {counts.needs_attention > 0 && <span className="vb-nav-count" aria-label={`${counts.needs_attention} need attention`}>{counts.needs_attention}</span>}
           </NavLink>
-          <NavLink to="/orders" title="Orders" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ClipboardList size={18} /> <span className="vb-nav-label">Orders</span></NavLink>
-          <NavLink to="/audit" title="Audit" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ShieldCheck size={18} /> <span className="vb-nav-label">Audit</span></NavLink>
-          <NavLink to="/pipeline" title="Pipeline" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Activity size={18} /> <span className="vb-nav-label">Pipeline</span></NavLink>
-          <NavLink to="/network" title="Network" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Network size={18} /> <span className="vb-nav-label">Network</span></NavLink>
-          <NavLink to="/settings" title="Settings" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><SlidersHorizontal size={18} /> <span className="vb-nav-label">Settings</span></NavLink>
+          <NavLink to="/app/orders" title="Orders" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ClipboardList size={18} /> <span className="vb-nav-label">Orders</span></NavLink>
+          <NavLink to="/app/audit" title="Audit" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ShieldCheck size={18} /> <span className="vb-nav-label">Audit</span></NavLink>
+          <NavLink to="/app/pipeline" title="Pipeline" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Activity size={18} /> <span className="vb-nav-label">Pipeline</span></NavLink>
+          <NavLink to="/app/network" title="Network" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Network size={18} /> <span className="vb-nav-label">Network</span></NavLink>
+          <NavLink to="/app/settings" title="Settings" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><SlidersHorizontal size={18} /> <span className="vb-nav-label">Settings</span></NavLink>
         </div>
         <div className="vb-side-spacer" />
         <div className="vb-side-foot">
@@ -59,7 +62,9 @@ export default function Shell() {
             <span className="vb-avatar" aria-hidden="true">{initials(name)}</span>
             <div>
               <div style={{ color: 'var(--vb-text)', fontWeight: 600 }}>{name || 'No name set'}</div>
-              <button type="button" className="vb-link-btn" onClick={openNameDialog}>{name ? 'Change name' : 'Set your name'}</button>
+              {locked
+                ? <button type="button" className="vb-link-btn" onClick={logout}><LogOut size={12} aria-hidden="true" /> Sign out</button>
+                : <button type="button" className="vb-link-btn" onClick={openNameDialog}>{name ? 'Change name' : 'Set your name'}</button>}
             </div>
           </div>
           <div className="vb-chain" title={chain ? `${chain.checked} decisions checked` : 'Could not check'}>

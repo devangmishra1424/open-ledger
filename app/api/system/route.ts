@@ -1,6 +1,7 @@
 import { getChainStatus } from "@/lib/ledger/chain-status";
 import { llmConfigured, modelFor } from "@/lib/agent/llm";
 import { handle } from "@/lib/http";
+import { authConfig } from "@/lib/auth/config";
 
 /**
  * GET /api/system — what this deployment is actually doing, in one place, so the UI can say it
@@ -23,8 +24,9 @@ export const GET = handle("GET /api/system", async () => {
     paymentRail: { mode: "simulated" },
     // Vendor callbacks are made by a person; no automated voice call is placed (lib/voice.ts).
     callbacks: { mode: "manual" },
-    // Reviewer names are self-declared; there is no login yet.
-    authentication: { mode: "none" },
+    // "accounts": every request is signed in and decisions are recorded under the account's name.
+    // "none": local development only; reviewer names are typed by the person (lib/auth/config.ts).
+    authentication: { mode: authConfig().required ? "accounts" : "none" },
     chain: { valid: chain.valid, checked: chain.checked, brokenAt: chain.brokenAt ?? null },
   });
 });

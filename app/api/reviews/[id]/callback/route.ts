@@ -12,7 +12,7 @@ import { handle, HttpError, readJsonBody, requireString, reviewerName } from "@/
 export const POST = handle("POST /api/reviews/:id/callback", async (req, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const body = await readJsonBody(req);
-  const reviewer = reviewerName(body);
+  const reviewer = reviewerName(body, req);
   const phoneNumber = requireString(body, "phoneNumber", { max: 30 });
   if (!isPlausiblePhone(phoneNumber)) throw new HttpError(400, "phoneNumber must be the number you are dialing (digits, +, spaces, brackets, dashes)");
 

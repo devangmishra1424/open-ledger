@@ -13,6 +13,7 @@
     "test": "vitest run",
     "dev:demo": "node scripts/dev-demo.cjs",
     "migrate:apply": "tsx --env-file=.env db/apply-migration.ts",
+    "auth:hash": "tsx scripts/hash-password.ts",
     "bench:llm": "tsx --env-file=.env scripts/llm-bench.ts",
     "typecheck": "tsc --noEmit"
   },
