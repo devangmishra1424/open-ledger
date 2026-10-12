@@ -301,13 +301,13 @@ const AuditTrail = () => {
               <option value="discrepant">Discrepant Only</option>
             </select>
 
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600, marginLeft: '8px' }}>Control Objective:</span>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600, marginLeft: '8px' }} title="VeriBook's own grouping of exception reasons, not codes from a standard control framework">Tag:</span>
             <select 
               className="filter-select"
               value={tagFilter}
               onChange={(e) => setTagFilter(e.target.value)}
             >
-              <option value="All">Tag: All Objectives</option>
+              <option value="All">Tag: All</option>
               <option value="FIN-302">FIN-302 (Financial Accuracy)</option>
               <option value="TAX-401">TAX-401 (Tax Compliance)</option>
               <option value="FRAUD-901">FRAUD-901 (Anti-Fraud Routing)</option>
@@ -323,13 +323,13 @@ const AuditTrail = () => {
               onChange={(e) => setMinAmountFilter(Number(e.target.value))}
             >
               <option value={0}>Min Amount: All</option>
-              <option value={10000}>Min Amount: &gt;$10,000</option>
-              <option value={30000}>Min Amount: &gt;$30,000</option>
+              <option value={10000}>Min Amount: over 10,000</option>
+              <option value={30000}>Min Amount: over 30,000</option>
             </select>
           </div>
 
           <span style={{ fontSize: '12px', color: 'var(--text-dim)', fontWeight: 600 }}>
-            Showing {matchingEvidence.length} matching EvidenceRecords
+            Showing {matchingEvidence.length} matching evidence records. Tags are VeriBook's own grouping of exception reasons, not a standard control framework.
           </span>
         </div>
 
@@ -384,7 +384,7 @@ const AuditTrail = () => {
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
                       <div className="evidence-amount font-mono">
-                        ${ev.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                        {formatAmount(ev.amount, ev.currency)}
                       </div>
 
                       {/* Item 1c: Discrepant records flagged with red (#d00000) and barrier icon */}
@@ -414,7 +414,7 @@ const AuditTrail = () => {
                   <div className="tags-list-row">
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <Tag size={11} />
-                      Control Objectives:
+                      Tags:
                     </span>
                     {ev.control_objective_tags.map(tag => (
                       <span key={tag} className="control-tag-chip font-mono">
@@ -431,7 +431,7 @@ const AuditTrail = () => {
                     </div>
                   </div>
 
-                  {/* Merkle Attestation Hash Foot */}
+                  {/* The invoice's latest decision hash: one link of the linear SHA-256 chain (not a Merkle tree). */}
                   <div className="evidence-hash-foot">
                     <span className="font-mono">Latest record hash: {ev.attestation_hash}</span>
                     <span>Evidence ID: {ev.evidence_id}</span>
@@ -449,5 +449,15 @@ const AuditTrail = () => {
     </div>
   );
 };
+
+/** The invoice's own currency, never an assumed dollar sign; an unknown code is shown as text rather than failing. */
+function formatAmount(amount, currency) {
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD' }).format(amount);
+  } catch {
+    // Intl throws RangeError for a code it does not know: show the plain number with the code instead.
+    return `${currency} ${Number(amount).toFixed(2)}`;
+  }
+}
 
 export default AuditTrail;

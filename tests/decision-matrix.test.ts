@@ -3,7 +3,7 @@ import {
   evaluateNoPo, evaluateBeforeReceipt, evaluatePriceVariance, evaluateQuantityVariance,
   evaluateDuplicate, evaluateNonPo, evaluateCreditMemo, evaluatePartial, evaluateCurrency,
   evaluateTaxVariance, evaluateLayout, evaluateFraudBank, evaluateBlanketExceeded, evaluateUomMismatch,
-  combineExceptions, type ExceptionFinding,
+  evaluateUnmatchedLine, parseRecommendedAction, combineExceptions, type ExceptionFinding,
 } from "@/lib/matching/decision-matrix";
 
 describe("decision-matrix (docs/ap-three-way-match-spec.md §3)", () => {
@@ -102,6 +102,35 @@ describe("decision-matrix (docs/ap-three-way-match-spec.md §3)", () => {
     });
     it("EXC-UOM_MISMATCH: incompatible units blocks", () => {
       expect(evaluateUomMismatch(false)).toBe("block");
+    });
+    it("EXC-UNMATCHED_LINE never auto-approves, even for a few dollars", () => {
+      expect(evaluateUnmatchedLine(0.01)).toBe("escalate_l1");
+      expect(evaluateUnmatchedLine(40)).toBe("escalate_l1");
+      expect(evaluateUnmatchedLine(900)).toBe("escalate_l1");
+    });
+    it("EXC-UNMATCHED_LINE goes higher with the amount: senior reviewer above $1,000, blocked above $10,000", () => {
+      expect(evaluateUnmatchedLine(1000.01)).toBe("escalate_l2");
+      expect(evaluateUnmatchedLine(10000)).toBe("escalate_l2");
+      expect(evaluateUnmatchedLine(10000.01)).toBe("block");
+      expect(evaluateUnmatchedLine(80000)).toBe("block");
+    });
+  });
+
+  describe("parseRecommendedAction (reading a model's recommendation)", () => {
+    it("accepts exact actions", () => {
+      expect(parseRecommendedAction("escalate_l2")).toBe("escalate_l2");
+      expect(parseRecommendedAction("block_fraud_flag")).toBe("block_fraud_flag");
+    });
+    it("tolerates spelling noise with one possible meaning: case, spaces, hyphens, a non-breaking hyphen", () => {
+      expect(parseRecommendedAction(" Escalate-L2 ")).toBe("escalate_l2");
+      expect(parseRecommendedAction("escalate l1")).toBe("escalate_l1");
+      expect(parseRecommendedAction("auto\u2011approve")).toBe("auto_approve");
+    });
+    it("never guesses: words that are not an action stay unrecognised", () => {
+      expect(parseRecommendedAction("approve")).toBeUndefined();
+      expect(parseRecommendedAction("hold for review")).toBeUndefined();
+      expect(parseRecommendedAction("")).toBeUndefined();
+      expect(parseRecommendedAction(undefined)).toBeUndefined();
     });
   });
 

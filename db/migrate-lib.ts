@@ -43,7 +43,8 @@ const ACCOUNTS: Array<[string, string, string, string, string, boolean]> = [
 ];
 
 // --- reason_codes: the 12 EXC-* codes from docs/ap-three-way-match-spec.md, verbatim names,
-// plus EXC-13/EXC-14 (ALGORITHMS.md §7), plus CLEAN_MATCH and R99_AGENT_ERROR (ENGINE.md §5). ---
+// plus EXC-13/EXC-14 (ALGORITHMS.md §7), plus EXC-UNMATCHED_LINE, plus CLEAN_MATCH, POLICY_LIMIT,
+// INVESTIGATOR_HOLD and R99_AGENT_ERROR (ENGINE.md §5). ---
 const REASON_CODES: Array<[string, string, string]> = [
   ["CLEAN_MATCH", "Clean Match", "3-way match within tolerance, no exception fired — required non-null reason code on every Tier 0 auto-approval."],
   ["EXC-NO_PO", "Missing Purchase Order", "Invoice has no valid PO reference, or the referenced PO is not open/approved."],
@@ -60,7 +61,9 @@ const REASON_CODES: Array<[string, string, string]> = [
   ["EXC-FRAUD_BANK", "Vendor Bank Detail Change", "Vendor's bank account changed recently — routed to the gated vendor bank-change review workflow, never auto-approved."],
   ["EXC-BLANKET_EXCEEDED", "Blanket PO Ceiling Exceeded", "Cumulative invoiced amount against a blanket PO exceeds its negotiated ceiling."],
   ["EXC-UOM_MISMATCH", "Unit-of-Measure Mismatch", "Invoice and PO line disagree on unit of measure with no conversion factor on file."],
+  ["EXC-UNMATCHED_LINE", "Line Not on Purchase Order", "One or more invoice lines match no line on the referenced purchase order, for example an added fee or an item that was never ordered."],
   ["POLICY_LIMIT", "Auto-Approval Limit", "A clean match was held for a person because it exceeds the Settings amount limit or the Investigator's confidence is below the Settings threshold."],
+  ["INVESTIGATOR_HOLD", "Held by AI Reviewer", "The rules found a clean match, but the Investigator recommended a stricter outcome. An AI opinion can only tighten a decision, never loosen it, so a person reviews this invoice."],
   ["R99_AGENT_ERROR", "Agent Error", "A pipeline stage failed after its bounded retry — surfaced for human attention, never silently dropped."],
 ];
 

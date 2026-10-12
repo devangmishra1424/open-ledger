@@ -28,6 +28,8 @@ export interface FrontendEvidenceRecord {
   invoice_id: string;
   vendor: string;
   amount: number;
+  /** The invoice's own currency code; the screen must not assume dollars. */
+  currency: string;
   tie_out_status: "matched" | "discrepant";
   discrepancy_reason: string;
   control_objective_tags: string[];
@@ -41,14 +43,43 @@ function statusToFrontend(status: string): FrontendPbcRequest["status"] {
   return "in_progress"; // assembled, submitted, exception
 }
 
-/** REASON_CODE -> control-objective tag, per the frontend's own fixed tag vocabulary. Falls back to FIN-302 (general financial accuracy) when a code doesn't map to a more specific one. */
+/**
+ * REASON_CODE -> evidence tag. These tags are VeriBook's OWN grouping of exception reasons (the screen
+ * says so); they are not codes from a standard control framework such as COSO or SOX. Falls back to
+ * FIN-302 (general financial accuracy) when a code doesn't map to a more specific one.
+ */
+const PO_MATCHING_CODES = new Set(["EXC-UNMATCHED_LINE", "EXC-UOM_MISMATCH", "EXC-BLANKET_EXCEEDED", "EXC-BEFORE_RCV"]);
 function tagsForReasonCode(reasonCode: string | null): string[] {
   if (!reasonCode) return ["FIN-302"];
   if (reasonCode === "EXC-FRAUD_BANK") return ["FRAUD-901", "AUTH-202"];
   if (reasonCode === "EXC-TAX_VAR") return ["TAX-401"];
-  if (reasonCode.startsWith("EXC-") && (reasonCode.includes("PO") || reasonCode.includes("QTY") || reasonCode.includes("PRICE"))) return ["COMP-204"];
   if (reasonCode === "EXC-DUPLICATE") return ["DUPL-101"];
+  if (PO_MATCHING_CODES.has(reasonCode) || (reasonCode.startsWith("EXC-") && (reasonCode.includes("PO") || reasonCode.includes("QTY") || reasonCode.includes("PRICE")))) return ["COMP-204"];
   return ["FIN-302"];
+}
+
+const STAGE_NAMES: Record<string, string> = {
+  extract: "Read", validate: "Gates", match: "Match", investigate: "Investigator", verify: "Verifier",
+  policy: "Policy", audit: "Record", human_review: "Reviewer", audit_assemble: "Evidence",
+};
+
+/**
+ * Who stood behind each recorded step, said truthfully: "rules" for deterministic code, "AI" for a
+ * model, "person" for a human decision. (This used to label every step "X Agent", including the
+ * rule engine.) One label per stage.
+ */
+export function attestationLabels(rows: Array<{ node_id: string; agent_id: string | null; action_taken: string | null }>): string[] {
+  const labels: string[] = [];
+  for (const d of rows) {
+    if (d.action_taken == null) continue;
+    const agent = (d.agent_id ?? "").toLowerCase();
+    const kind = d.node_id === "human_review" ? "person"
+      : agent.startsWith("deterministic") || agent === "system" ? "rules"
+      : "AI";
+    const label = `${STAGE_NAMES[d.node_id] ?? d.node_id} (${kind})`;
+    if (!labels.includes(label)) labels.push(label);
+  }
+  return labels;
 }
 
 export async function listFrontendPbcRequests(): Promise<FrontendPbcRequest[]> {
@@ -96,12 +127,10 @@ export async function listFrontendEvidenceRecords(requestId?: string): Promise<F
       const bill = billRows[0];
       if (!bill) continue;
 
-      const decisionRows = await sql`SELECT node_id, action_taken, reason_code, hash FROM decisions WHERE invoice_id = ${billId} AND superseded_by_id IS NULL ORDER BY seq ASC`;
+      const decisionRows = await sql`SELECT node_id, agent_id, action_taken, reason_code, hash FROM decisions WHERE invoice_id = ${billId} AND superseded_by_id IS NULL ORDER BY seq ASC`;
       const isDiscrepant = bill.status === "exception" || bill.status === "void";
       const dominantFinding = decisionRows.find((d: any) => d.node_id === "match" && d.reason_code && d.reason_code !== "CLEAN_MATCH");
-      const agentAttestations = decisionRows
-        .filter((d: any) => d.action_taken != null)
-        .map((d: any) => d.node_id.charAt(0).toUpperCase() + d.node_id.slice(1) + " Agent");
+      const agentAttestations = attestationLabels(decisionRows as any);
       const latestHash = decisionRows.length > 0 ? decisionRows[decisionRows.length - 1].hash : "";
 
       results.push({
@@ -109,7 +138,8 @@ export async function listFrontendEvidenceRecords(requestId?: string): Promise<F
         request_id: req.id,
         invoice_id: billId,
         vendor: bill.vendor_name,
-        amount: bill.total_amount,
+        amount: Number(bill.total_amount),
+        currency: bill.currency ?? "USD",
         tie_out_status: isDiscrepant ? "discrepant" : "matched",
         discrepancy_reason: isDiscrepant && dominantFinding ? `${dominantFinding.reason_code}: ${dominantFinding.action_taken}` : "",
         control_objective_tags: tagsForReasonCode(dominantFinding?.reason_code ?? null),
