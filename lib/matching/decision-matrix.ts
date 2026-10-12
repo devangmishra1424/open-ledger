@@ -26,10 +26,24 @@ export function asAction(value: string | null | undefined): Action | undefined {
   return ALL_ACTIONS.find((a) => a === value);
 }
 
+/**
+ * Reads a model's recommended action, tolerating only spelling noise that has a single possible
+ * meaning: letter case, surrounding spaces, and hyphen/space separators (models really do write
+ * "Escalate-L2" and "auto‑approve" with a non-breaking hyphen). Anything still not an exact Action
+ * after that is undefined, never guessed at ("approve" is not mapped to anything). Kept separate
+ * from asAction, which stays strict for stored values.
+ */
+export function parseRecommendedAction(value: string | null | undefined): Action | undefined {
+  if (!value) return undefined;
+  const folded = value.trim().toLowerCase().replace(/[\s‐-―−-]+/g, "_");
+  return asAction(folded);
+}
+
 export type ExceptionCode =
   | "EXC-NO_PO" | "EXC-BEFORE_RCV" | "EXC-PRICE_VAR" | "EXC-QTY_VAR" | "EXC-DUPLICATE"
   | "EXC-NON_PO" | "EXC-CREDIT_MEMO" | "EXC-PARTIAL" | "EXC-CURRENCY" | "EXC-TAX_VAR"
-  | "EXC-LAYOUT" | "EXC-FRAUD_BANK" | "EXC-BLANKET_EXCEEDED" | "EXC-UOM_MISMATCH";
+  | "EXC-LAYOUT" | "EXC-FRAUD_BANK" | "EXC-BLANKET_EXCEEDED" | "EXC-UOM_MISMATCH"
+  | "EXC-UNMATCHED_LINE";
 
 /** Ordinal severity for "more restrictive wins" comparisons (spec §3.2, §4.1). */
 const SEVERITY_RANK: Record<Action, number> = {
@@ -74,6 +88,10 @@ export const DOLLAR_THRESHOLD_TABLE: Partial<Record<ExceptionCode, { upTo100: Ac
   "EXC-NON_PO": { upTo100: "auto_approve", upTo1000: "escalate_l1", upTo10000: "escalate_l2", upTo50000: "block", over50000: "block" },
   "EXC-CURRENCY": { upTo100: "auto_approve", upTo1000: "escalate_l1", upTo10000: "escalate_l1", upTo50000: "escalate_l2", over50000: "block" },
   "EXC-BEFORE_RCV": { upTo100: "escalate_l1", upTo1000: "escalate_l1", upTo10000: "escalate_l2", upTo50000: "block", over50000: "block" },
+  // Not in the original spec. A billed line that matches nothing on the PO is, in effect, a
+  // non-PO charge inside a PO invoice, so it uses EXC-NON_PO's bands, with one difference: no
+  // band auto-approves. Even a $40 line nobody ordered goes to a person.
+  "EXC-UNMATCHED_LINE": { upTo100: "escalate_l1", upTo1000: "escalate_l1", upTo10000: "escalate_l2", upTo50000: "block", over50000: "block" },
 };
 
 /**
@@ -177,6 +195,15 @@ export function evaluateUomMismatch(conversionPlausible: boolean): Action {
   return conversionPlausible ? "escalate_l1" : "block";
 }
 
+/**
+ * EXC-UNMATCHED_LINE: one or more invoice lines matched no PO line (an "Expedite fee", a
+ * surcharge, an item nobody ordered). `unmatchedAmount` is the total absolute value of those
+ * lines. Never auto-approves; larger amounts go higher (see DOLLAR_THRESHOLD_TABLE).
+ */
+export function evaluateUnmatchedLine(unmatchedAmount: number): Action {
+  return moreRestrictive("escalate_l1", dollarThresholdAction("EXC-UNMATCHED_LINE", unmatchedAmount) ?? "escalate_l1");
+}
+
 // --- Combining multiple co-occurring exceptions on one invoice (spec §4.1-4.3) ---
 
 export interface ExceptionFinding {
@@ -205,6 +232,7 @@ export const PRECEDENCE_RANK: Record<ExceptionCode, number> = {
   "EXC-PARTIAL": 7,
   "EXC-BLANKET_EXCEEDED": 7,
   "EXC-UOM_MISMATCH": 7,
+  "EXC-UNMATCHED_LINE": 7,
 };
 
 /** The 4 exceptions that stop the pipeline outright (§4.3) — matching/other exceptions are deferred, not ignored. */

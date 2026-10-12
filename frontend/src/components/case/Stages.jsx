@@ -15,7 +15,7 @@ const GOOD = new Set(['pass', 'parsed', 'extracted', 'auto_approve', 'human_appr
 const tone = (raw) => { const a = normalizeAction(raw); return BAD.has(a) ? 'bad' : WARN.has(a) ? 'warn' : GOOD.has(a) ? 'good' : 'neutral'; };
 
 /** An engine finding written as "EXC-PRICE_VAR: escalate_l1" is shown as a labelled row rather than prose. */
-const FINDING = /^(EXC-[A-Z_]+|R99_AGENT_ERROR|CLEAN_MATCH|POLICY_LIMIT):\s*([a-z_0-9]+)$/;
+const FINDING = /^(EXC-[A-Z_]+|R99_AGENT_ERROR|CLEAN_MATCH|POLICY_LIMIT|INVESTIGATOR_HOLD):\s*([a-z_0-9]+)$/;
 
 function Claim({ text, reasonNames }) {
   const m = text.match(FINDING);

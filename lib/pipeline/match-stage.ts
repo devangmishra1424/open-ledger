@@ -1,23 +1,23 @@
 import { getSql } from "@/db/client";
 import { matchLines, descriptionSimilarity, type InvoiceLineInput, type PoLineInput } from "@/lib/matching/line-match";
-import { classifyDateGap, classifyTaxRateVariance } from "@/lib/matching/tolerance-zones";
+import { classifyDateGap, classifyTaxRateVariance, classifyPriceVariance, classifyLineAmountVariance } from "@/lib/matching/tolerance-zones";
 import { computePoLineFulfillment } from "@/lib/matching/partial-handling";
 import { isPlausibleUomConversion } from "@/lib/matching/uom-dimension";
 import { detectBankChangeGate, getOrCreateBankChangeReview } from "@/lib/ledger/bank-change-review";
 import {
   evaluateNoPo, evaluateNonPo, evaluateBeforeReceipt, evaluatePriceVariance, evaluateQuantityVariance,
   evaluateCurrency, evaluateBlanketExceeded, evaluateTaxVariance, evaluateCreditMemo, evaluateUomMismatch,
-  evaluateFraudBank, combineExceptions, type ExceptionFinding, type CombinedDecision,
+  evaluateFraudBank, evaluateUnmatchedLine, combineExceptions, type ExceptionFinding, type CombinedDecision,
 } from "@/lib/matching/decision-matrix";
 
 /**
  * The "match" pipeline stage (ENGINE.md §2.3) — Layer 1, deterministic, no LLM. Assembles
  * every exception finding from PO/GRN/invoice data and combines them via decision-matrix.ts.
  *
- * SCOPE, stated honestly rather than silently gapped: this covers 12 of 14 taxonomy codes —
+ * SCOPE, stated honestly rather than silently gapped: this covers 13 of 15 taxonomy codes —
  * EXC-NON_PO, EXC-NO_PO, EXC-CURRENCY, EXC-BEFORE_RCV, EXC-PRICE_VAR, EXC-QTY_VAR,
- * EXC-BLANKET_EXCEEDED, EXC-CREDIT_MEMO, EXC-TAX_VAR, EXC-UOM_MISMATCH, EXC-FRAUD_BANK, and
- * (always, trivially) EXC-PARTIAL. EXC-DUPLICATE and EXC-LAYOUT are validate-stage findings
+ * EXC-BLANKET_EXCEEDED, EXC-CREDIT_MEMO, EXC-TAX_VAR, EXC-UOM_MISMATCH, EXC-UNMATCHED_LINE,
+ * EXC-FRAUD_BANK, and (always, trivially) EXC-PARTIAL. EXC-DUPLICATE and EXC-LAYOUT are validate-stage findings
  * (pre-match-validation.ts), not this stage's concern. EXC-FRAUD_BANK is detected here (via
  * lib/ledger/bank-change-review.ts's detectBankChangeGate()) but its own gated state machine
  * (callback logging, second-reviewer sign-off) lives entirely in that module, called from
@@ -238,16 +238,43 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     await sql`UPDATE vendor_bill_lines SET po_line_id = ${m.poLineId} WHERE id = ${m.invoiceLineId} AND po_line_id IS NULL`;
   }
 
+  // Every unit-of-measure conversion this vendor has on file (a handful at most), loaded once: a
+  // line billed in another unit is checked in the PO line's unit, and earlier invoices' lines
+  // against a PO line are added up in that one unit.
+  const conversionRows = await sql`
+    SELECT uom_from, uom_to, conversion_factor FROM vendor_corrections
+    WHERE vendor_id = ${bill.vendor_id} AND uom_from IS NOT NULL AND uom_to IS NOT NULL AND conversion_factor IS NOT NULL`;
+  /** How many `fromUom` make one `poUom` (1 when they are the same), or null when no usable conversion is on file. */
+  const unitsPerPoUnit = (fromUom: string | null | undefined, poUom: string | null | undefined): number | null => {
+    if (!fromUom || !poUom || fromUom === poUom) return 1;
+    for (const c of conversionRows) {
+      const factor = Number(c.conversion_factor); // stored as: 1 uom_from = factor uom_to
+      if (!Number.isFinite(factor) || factor <= 0) continue;
+      if (c.uom_from === poUom && c.uom_to === fromUom) return factor;
+      if (c.uom_from === fromUom && c.uom_to === poUom) return 1 / factor;
+    }
+    return null;
+  };
+  // Converted quantities and prices are rounded so that 1/12-style factors do not leave a
+  // 0.0000001 "excess" that would raise a false quantity exception.
+  const round6 = (x: number) => Math.round(x * 1e6) / 1e6;
+
+  /** One invoice line to check against one PO line, with its quantity and unit price in the PO line's unit. */
+  interface LineToCheck { invoiceLineId: string; poLine: PoLineInput; qty: number; unitPrice: number }
+  const convertedLines: LineToCheck[] = [];
+
   // EXC-UOM_MISMATCH (ALGORITHMS.md §14): a real architectural tension, found while testing
   // this, not assumed — line-match.ts's own fuzzy and Hungarian passes both REQUIRE UoM
   // agreement as a precondition to match a line at all (see line-match.ts's own uomCompatible
   // gate), so a genuinely UoM-mismatched line can never appear in lineMatchReport.matched in
   // the first place; it surfaces here as an unmatched line on both sides instead. Detecting
   // it therefore means a second, UoM-INSENSITIVE description-similarity pass over what's left
-  // unmatched after the real matching already ran — reusing the same >=85% threshold, but
-  // purely to identify "this is probably the same line item, measured differently," never to
-  // resolve quantity/price agreement (that stays undecided until a conversion factor exists).
+  // unmatched after the real matching already ran — reusing the same >=85% threshold — to
+  // identify "this is probably the same line item, measured differently."
   const stillUnmatchedPoLines = [...lineMatchReport.unmatchedPoLines];
+  // Invoice lines this pass accounts for (a likely unit-of-measure difference, flagged or
+  // resolved by a conversion on file), so the unmatched-line check below doesn't count them twice.
+  const uomPairedInvoiceLineIds = new Set<string>();
   for (const invLine of lineMatchReport.unmatchedInvoiceLines) {
     const line = invoiceLines.find((l) => l.id === invLine.invoiceLineId)!;
     const candidateIdx = stillUnmatchedPoLines.findIndex(
@@ -256,36 +283,73 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     if (candidateIdx === -1) continue;
     const poLine = stillUnmatchedPoLines[candidateIdx];
     stillUnmatchedPoLines.splice(candidateIdx, 1);
+    uomPairedInvoiceLineIds.add(line.id);
 
-    const conversionRows = await sql`
-      SELECT id FROM vendor_corrections
-      WHERE vendor_id = ${bill.vendor_id}
-        AND ((uom_from = ${line.uom} AND uom_to = ${poLine.uom}) OR (uom_from = ${poLine.uom} AND uom_to = ${line.uom}))`;
-    if (conversionRows.length === 0) {
+    const perPoUnit = unitsPerPoUnit(line.uom, poLine.uom);
+    if (perPoUnit === null) {
       findings.push({ code: "EXC-UOM_MISMATCH", action: evaluateUomMismatch(isPlausibleUomConversion(line.uom, poLine.uom)) });
+      continue;
     }
-    // A factor ON FILE resolves the mismatch without raising an exception (spec: "system
-    // re-runs the match with it applied") — re-deriving quantity/price agreement through the
-    // conversion itself is additional scope beyond clearing the exception, not done here.
+    // A conversion ON FILE resolves the unit difference (spec: "system re-runs the match with it
+    // applied"), and the line is then checked like any matched line, with its quantity and price
+    // expressed in the PO line's unit. Before, a conversion on file only cleared the exception
+    // and skipped every check, so 480 "each" against a PO for 10 cases of 24 (twice what was
+    // received) went through as clean. Linked to the PO line like a matched line, so a later
+    // invoice against the same line counts it.
+    convertedLines.push({ invoiceLineId: line.id, poLine, qty: round6(line.qty / perPoUnit), unitPrice: round6(line.unitPrice * perPoUnit) });
+    await sql`UPDATE vendor_bill_lines SET po_line_id = ${poLine.id} WHERE id = ${line.id} AND po_line_id IS NULL`;
+  }
+  if (convertedLines.length > 0) {
+    detail.lineMatch = {
+      ...(detail.lineMatch as Record<string, unknown>),
+      checkedThroughUnitConversion: convertedLines.map((c) => ({ poLineNumber: c.poLine.lineNumber, poUom: c.poLine.uom, qtyInPoUnits: c.qty, unitPriceInPoUnits: c.unitPrice })),
+    };
   }
 
-  for (const m of lineMatchReport.matched) {
-    const invLine = invoiceLines.find((l) => l.id === m.invoiceLineId)!;
-    const poLine = poLines.find((p) => p.id === m.poLineId)!;
-    const lineAmountImpact = m.lineAmountVariance.varianceAbs;
+  // EXC-UNMATCHED_LINE: an invoice line that matched no PO line at all, not even as a likely
+  // unit-of-measure difference above. Before this check existed, such a line was only counted in
+  // detail.lineMatch, so an invoice with an extra "Expedite fee $900" on a fully received PO came
+  // out as a clean auto-approval. A line worth nothing (qty or price 0) changes nothing payable
+  // and is not flagged.
+  const orphanLines = lineMatchReport.unmatchedInvoiceLines
+    .map((u) => invoiceLines.find((l) => l.id === u.invoiceLineId)!)
+    .filter((l) => !uomPairedInvoiceLineIds.has(l.id))
+    .map((l) => ({ description: l.description, qty: l.qty, unitPrice: l.unitPrice, amount: Math.abs(l.qty * l.unitPrice) }))
+    .filter((l) => l.amount >= 0.005);
+  if (orphanLines.length > 0) {
+    const unmatchedAmount = orphanLines.reduce((s, l) => s + l.amount, 0);
+    findings.push({ code: "EXC-UNMATCHED_LINE", action: evaluateUnmatchedLine(unmatchedAmount) });
+    detail.lineMatch = { ...(detail.lineMatch as Record<string, unknown>), linesNotOnPo: orphanLines, amountNotOnPo: unmatchedAmount };
+  }
 
-    if (m.priceVariance.zone !== "green") {
-      findings.push({ code: "EXC-PRICE_VAR", action: evaluatePriceVariance(m.priceVariance.variancePct, lineAmountImpact) });
+  // Price, tax and quantity checks, the same for a directly matched line and a converted one.
+  const linesToCheck: LineToCheck[] = [
+    ...lineMatchReport.matched.map((m) => {
+      const invLine = invoiceLines.find((l) => l.id === m.invoiceLineId)!;
+      return { invoiceLineId: m.invoiceLineId, poLine: poLines.find((p) => p.id === m.poLineId)!, qty: invLine.qty, unitPrice: invLine.unitPrice };
+    }),
+    ...convertedLines,
+  ];
+
+  for (const l of linesToCheck) {
+    const poLine = l.poLine;
+    const priceVariance = classifyPriceVariance(l.unitPrice, poLine.unitPrice);
+    // The line's amount against the PO price at the billed quantity (spec §1.4.1 step 5).
+    const lineAmountImpact = classifyLineAmountVariance(l.unitPrice * l.qty, poLine.unitPrice * l.qty).varianceAbs;
+
+    if (priceVariance.zone !== "green") {
+      findings.push({ code: "EXC-PRICE_VAR", action: evaluatePriceVariance(priceVariance.variancePct, lineAmountImpact) });
     }
 
     // EXC-TAX_VAR: needs this line's ACTUAL tax (only present when the extraction/intake step
     // populated it — see lib/types.ts's VendorBillLine.taxAmount) and its tax code's EXPECTED
     // rate. Silently skipped when either is absent — nothing to compare, not an exception.
-    const rawLine = billLineRows.find((r: any) => r.id === m.invoiceLineId);
+    // The line amount is the same in any unit, so a converted line is checked the same way.
+    const rawLine = billLineRows.find((r: any) => r.id === l.invoiceLineId);
     if (rawLine?.tax_amount != null && rawLine?.tax_code_id != null) {
       const taxCodeRows = await sql`SELECT rate FROM tax_codes WHERE id = ${rawLine.tax_code_id}`;
       const expectedRate = taxCodeRows[0]?.rate;
-      const lineAmount = invLine.qty * invLine.unitPrice;
+      const lineAmount = l.qty * l.unitPrice;
       if (expectedRate != null && lineAmount > 0) {
         const actualRate = rawLine.tax_amount / lineAmount;
         const taxZone = classifyTaxRateVariance(actualRate, expectedRate);
@@ -307,19 +371,22 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     const acceptedRows = await sql`
       SELECT COALESCE(SUM(grl.qty_received), 0) as accepted
       FROM goods_receipt_lines grl JOIN goods_receipts gr ON gr.id = grl.goods_receipt_id
-      WHERE grl.po_line_id = ${m.poLineId} AND gr.condition = 'accepted'`;
+      WHERE grl.po_line_id = ${poLine.id} AND gr.condition = 'accepted'`;
     const acceptedQty = Number(acceptedRows[0]?.accepted ?? 0);
 
+    // Earlier invoices may have billed this PO line in another unit (linked through a conversion),
+    // so each line is counted in the PO line's unit. One whose unit cannot be converted is counted
+    // as is: it could only have been linked before conversions were checked.
     const priorRows = await sql`
-      SELECT COALESCE(SUM(vbl.qty_invoiced), 0) as prior
+      SELECT vbl.qty_invoiced, vbl.uom
       FROM vendor_bill_lines vbl JOIN vendor_bills vb ON vb.id = vbl.vendor_bill_id
-      WHERE vbl.po_line_id = ${m.poLineId} AND vb.id != ${bill.id}
+      WHERE vbl.po_line_id = ${poLine.id} AND vb.id != ${bill.id}
         AND vb.status NOT IN ('processing', 'exception', 'void')`;
-    const qtyInvoicedPrior = Number(priorRows[0]?.prior ?? 0);
+    const qtyInvoicedPrior = round6(priorRows.reduce((sum: number, r: any) => sum + Number(r.qty_invoiced) / (unitsPerPoUnit(r.uom, poLine.uom) ?? 1), 0));
 
     const fulfillment = computePoLineFulfillment({
-      poLineId: m.poLineId, qtyOrdered: poLine.qtyOrdered, qtyReceived: acceptedQty,
-      qtyInvoicedPrior, qtyInvoicedCurrent: invLine.qty,
+      poLineId: poLine.id, qtyOrdered: poLine.qtyOrdered, qtyReceived: acceptedQty,
+      qtyInvoicedPrior, qtyInvoicedCurrent: l.qty,
     });
 
     if (fulfillment.excessQty > 0) {

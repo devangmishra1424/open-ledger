@@ -151,6 +151,27 @@ export const REASON_GUIDE = {
     usually: 'Confirm the conversion, record it, then approve.',
     engine: 'A line with a different unit is never matched automatically. If a conversion looks plausible a reviewer decides; if not, it is blocked.',
   },
+  'EXC-UNMATCHED_LINE': {
+    means: 'One or more lines on the invoice are not on the purchase order at all, for example an added fee or an item nobody ordered.',
+    why: 'The purchase order is what was agreed. A line outside it is spend nobody approved, even when every other line matches perfectly.',
+    check: [
+      'Read the extra lines listed in the matching table below.',
+      'Was the charge agreed separately (an email, a contract clause)?',
+      'Is it a line the vendor described differently from the purchase order?',
+    ],
+    usually: 'Approve if the charge was agreed, otherwise ask the vendor for a corrected invoice without it.',
+    engine: 'Never approved automatically. Up to $1,000 a reviewer decides; up to $10,000 a senior reviewer; above that it is blocked.',
+  },
+  INVESTIGATOR_HOLD: {
+    means: 'Every rule passed, but the AI reviewer recommended a stricter outcome, so the invoice was held for a person.',
+    why: 'The AI can only make a decision stricter, never looser. When it raises a concern the rules did not, a person looks before any money moves.',
+    check: [
+      'Read the AI reviewer’s reasoning in the trail below.',
+      'Check the specific concern it names against the invoice and the purchase order.',
+    ],
+    usually: 'Approve if the concern does not hold up; reject or contest it if it does.',
+    engine: 'Only ever turns an automatic approval into a review. It never approves or rejects anything on its own.',
+  },
   R99_AGENT_ERROR: {
     means: 'An automated step failed, so the system could not finish checking this invoice.',
     why: 'The system holds it rather than guessing. The invoice itself may be perfectly fine.',

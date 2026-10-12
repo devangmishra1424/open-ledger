@@ -3,7 +3,7 @@ import { getSql } from "@/db/client";
 import { writeDecision } from "@/lib/ledger/decisions";
 import { runPreMatchValidation, type PreMatchInput, type PreMatchResult } from "@/lib/matching/pre-match-validation";
 import { runMatchStage, type MatchStageResult } from "@/lib/pipeline/match-stage";
-import { moreRestrictive, type Action, type CombinedDecision } from "@/lib/matching/decision-matrix";
+import { moreRestrictive, parseRecommendedAction, type Action, type CombinedDecision } from "@/lib/matching/decision-matrix";
 import { investigate, type InvestigationSubmission } from "@/lib/agent/investigator";
 import { verify, type VerificationSubmission } from "@/lib/agent/verifier";
 import { extract, type ExtractionResult } from "@/lib/agent/extractor";
@@ -311,20 +311,49 @@ export async function runVerifyStage(vendorBillId: string, matchDetail: unknown,
 // --- policy ---
 
 /**
- * The policy rule, pure: the deterministic combined decision, tightened (never loosened) by a
- * Verifier that disagrees. Shared by the policy stage and by reconsideration, which needs to
- * know whether a re-review would change the outcome BEFORE it writes anything.
+ * The Investigator's recommendation, applied the only way an AI opinion may be applied here: it can
+ * make the deterministic outcome stricter, never looser. A recommendation that isn't a recognised
+ * action is ignored. Used by the pipeline (whether a second opinion is needed) and by reconsideration.
  */
-export function computePolicyAction(combined: CombinedDecision, verifySubmission?: VerificationSubmission): { action: Action; claims: Claim[] } {
+export function tightenedByInvestigator(engineAction: Action, recommendation?: string | null): Action {
+  const parsed = parseRecommendedAction(recommendation);
+  // An AI may hold an invoice, but it may not void one on its own: auto_reject ends the invoice
+  // (status 'void'), so an AI "reject" becomes a block, which is equally strict and leaves the
+  // final call to a person. The rules' own auto_reject (a duplicate) is unaffected.
+  const proposed: Action | undefined = parsed === "auto_reject" ? "block" : parsed;
+  return proposed ? moreRestrictive(engineAction, proposed) : engineAction;
+}
+
+/**
+ * The policy rule, pure: the deterministic combined decision, tightened (never loosened) by the
+ * Investigator's recommendation and by a Verifier that disagrees. Shared by the policy stage and by
+ * reconsideration, which needs to know whether a re-review would change the outcome BEFORE it
+ * writes anything.
+ *
+ * `heldByInvestigator` is true when the Investigator is the reason a clean match is not an
+ * auto-approval. Before this, its recommendation was recorded and never applied, so "escalate:
+ * a line isn't on the PO" at 0.95 confidence still ended in an automatic payment.
+ */
+export function computePolicyAction(
+  combined: CombinedDecision,
+  verifySubmission?: VerificationSubmission,
+  investigatorRecommendation?: string | null,
+): { action: Action; claims: Claim[]; heldByInvestigator: boolean } {
   let action: Action = combined.overallAction;
   const claims: Claim[] = [];
+  const tightened = tightenedByInvestigator(action, investigatorRecommendation);
+  const heldByInvestigator = tightened !== action;
+  if (heldByInvestigator) {
+    claims.push({ text: `The Investigator recommended ${tightened}, stricter than the rules' ${action}. An AI opinion can only tighten a decision, so ${tightened} stands.`, tag: "grounded" });
+    action = tightened;
+  }
   if (verifySubmission && verifySubmission.agrees === false) {
     // ENGINE.md §2.5: disagreement between Investigator and Verifier forces escalation
     // rather than trusting either alone — "more restrictive wins" against a floor of L2.
     action = moreRestrictive(action, "escalate_l2");
     claims.push({ text: `Verifier disagreed with the Investigator: ${verifySubmission.notes}`, tag: "grounded" });
   }
-  return { action, claims };
+  return { action, claims, heldByInvestigator };
 }
 
 /**
@@ -338,9 +367,12 @@ export async function evaluatePolicy(
   combined: CombinedDecision,
   verifySubmission: VerificationSubmission | undefined,
   investigatorConfidence: number | undefined,
+  investigatorRecommendation?: string | null,
 ): Promise<{ action: Action; reasonCode: string; claims: Claim[] }> {
-  const { action, claims } = computePolicyAction(combined, verifySubmission);
-  const reasonCode = combined.dominantException ?? "CLEAN_MATCH";
+  const { action, claims, heldByInvestigator } = computePolicyAction(combined, verifySubmission, investigatorRecommendation);
+  // A real exception keeps naming the decision. Only a clean match held back by the
+  // Investigator needs its own reason, or it would read "Clean Match" next to a hold.
+  const reasonCode = combined.dominantException ?? (heldByInvestigator ? "INVESTIGATOR_HOLD" : "CLEAN_MATCH");
   if (action !== "auto_approve") return { action, reasonCode, claims };
 
   const billRows = await getSql()`SELECT total_amount FROM vendor_bills WHERE id = ${vendorBillId}`;
@@ -355,12 +387,14 @@ export async function runPolicyStage(params: {
   verifySubmission?: VerificationSubmission;
   /** The Investigator's reported confidence (0-1), for the Settings confidence guardrail. */
   investigatorConfidence?: number;
+  /** The Investigator's recommended action (free text); it can only tighten the outcome. */
+  investigatorRecommendation?: string | null;
   /** Set when the stop is NOT a finding about the invoice but a failure of the system itself (R99_AGENT_ERROR). */
   reasonCodeOverride?: string;
   parentDecisionId?: string;
   recon?: ReconsiderationInput;
 }): Promise<Decision> {
-  const evaluated = await evaluatePolicy(params.vendorBillId, params.combined, params.verifySubmission, params.investigatorConfidence);
+  const evaluated = await evaluatePolicy(params.vendorBillId, params.combined, params.verifySubmission, params.investigatorConfidence, params.investigatorRecommendation);
   const { action: finalAction, claims } = evaluated;
   const policyReason = params.reasonCodeOverride ?? evaluated.reasonCode;
 
@@ -545,12 +579,18 @@ async function runPipelineStages(vendorBillId: string, opts: { extraction?: Extr
 
   let verifySubmission: VerificationSubmission | undefined;
   let lastDecisionId = investigateDecision.id;
-  if (isTier2Eligible(matchResult.combined.overallAction)) {
+  // Tier-2 eligibility uses the outcome after the Investigator's (tighten-only) recommendation, the
+  // same rule reconsideration uses: if the Investigator wants a block, a second opinion is recorded.
+  if (isTier2Eligible(tightenedByInvestigator(matchResult.combined.overallAction, investigation.recommended_action))) {
     const { decision: verifyDecision, submission } = await runVerifyStage(vendorBillId, matchResult.detail, investigation, investigateDecision.id);
     verifySubmission = submission;
     lastDecisionId = verifyDecision.id;
   }
 
-  const policyDecision = await runPolicyStage({ vendorBillId, combined: matchResult.combined, verifySubmission, investigatorConfidence: investigation.confidence, parentDecisionId: lastDecisionId });
+  const policyDecision = await runPolicyStage({
+    vendorBillId, combined: matchResult.combined, verifySubmission,
+    investigatorConfidence: investigation.confidence, investigatorRecommendation: investigation.recommended_action,
+    parentDecisionId: lastDecisionId,
+  });
   await runAuditStage(vendorBillId, policyDecision);
 }

@@ -32,7 +32,7 @@ const LONG_HEX = /\b(?=[0-9a-f]*[a-f])[0-9a-f]{16,}\b/gi;
 const MARKDOWN_CODE = /```[\s\S]*?```/g;
 
 // Reason codes and action names, with an optional "a"/"an" in front so the article can follow the words that replace the code.
-const CODE_SRC = String.raw`EXC-[A-Z0-9]+(?:[-_][A-Z0-9]+)*|R99_AGENT_ERROR|CLEAN_MATCH|POLICY_LIMIT`;
+const CODE_SRC = String.raw`EXC-[A-Z0-9]+(?:[-_][A-Z0-9]+)*|R99_AGENT_ERROR|CLEAN_MATCH|POLICY_LIMIT|INVESTIGATOR_HOLD`;
 const ACTION_SRC = "escalate_l1|escalate_l2|auto_approve|auto_reject|block_fraud_flag";
 const TERM = new RegExp(String.raw`\b(?:([Aa]n?)\s+)?(${CODE_SRC}|${ACTION_SRC})\b`, "g");
 // Not the on-screen labels ("Sent to a senior reviewer"): those are written to stand alone, these have to fit inside the model's sentence.
