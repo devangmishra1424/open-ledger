@@ -363,18 +363,67 @@ describe("runMatchStage", () => {
       expect(r.findings.find((f) => f.code === "EXC-UOM_MISMATCH")?.action).toBe("block");
     });
 
-    it("a confirmed conversion factor on file resolves the mismatch — no exception raised", async () => {
+    it("a confirmed conversion factor on file resolves the mismatch, and a correct invoice in the other unit is clean", async () => {
       await sql`
         INSERT INTO vendor_corrections (id, vendor_id, pattern, note, uom_from, uom_to, conversion_factor)
         VALUES (${crypto.randomUUID()}, ${vendorId}, 'uom_conversion', '1 case = 24 each, confirmed by AP clerk', 'case', 'each', 24)`;
-      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-3", unitPrice: 2, qtyOrdered: 10, uom: "case" });
+      // 10 cases at $48 a case = 240 each at $2 each: the same order, billed in single items.
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-3", unitPrice: 48, qtyOrdered: 10, uom: "case" });
       await acceptGoodsReceipt(poId, lineId, 10);
       const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-3", totalAmount: 480 });
       await addBillLine(billId, { qty: 240, unitPrice: 2, uom: "each" });
       const r = await runMatchStage(billId);
-      expect(r.findings.some((f) => f.code === "EXC-UOM_MISMATCH")).toBe(false);
-      // The line was accounted for as a unit difference, so it is not also reported as off the PO.
-      expect(r.findings.some((f) => f.code === "EXC-UNMATCHED_LINE")).toBe(false);
+      expect(r.findings).toEqual([]);
+      expect(r.combined.overallAction).toBe("auto_approve");
+      expect(r.detail.lineMatch).toMatchObject({ checkedThroughUnitConversion: [{ poUom: "case", qtyInPoUnits: 10, unitPriceInPoUnits: 48 }] });
+    });
+
+    it("regression: billing twice what was received in the other unit is caught (it used to pass once a conversion was on file)", async () => {
+      // 480 each = 20 cases, against 10 cases ordered and received.
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-5", unitPrice: 48, qtyOrdered: 10, uom: "case" });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-5", totalAmount: 960 });
+      await addBillLine(billId, { qty: 480, unitPrice: 2, uom: "each" });
+      const r = await runMatchStage(billId);
+      expect(r.findings.find((f) => f.code === "EXC-QTY_VAR")?.action).toBe("block"); // 10 cases over is far past tolerance
+      expect(r.combined.overallAction).not.toBe("auto_approve");
+    });
+
+    it("a price that is too high once converted is caught: $2.50 each is $60 a case against $48", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-6", unitPrice: 48, qtyOrdered: 10, uom: "case" });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-6", totalAmount: 600 });
+      await addBillLine(billId, { qty: 240, unitPrice: 2.5, uom: "each" });
+      const r = await runMatchStage(billId);
+      expect(r.findings.some((f) => f.code === "EXC-PRICE_VAR")).toBe(true);
+      expect(r.findings.some((f) => f.code === "EXC-QTY_VAR")).toBe(false);
+    });
+
+    it("a conversion stored the other way round (1 each = 1/12 dozen) is applied the same way", async () => {
+      await sql`
+        INSERT INTO vendor_corrections (id, vendor_id, pattern, note, uom_from, uom_to, conversion_factor)
+        VALUES (${crypto.randomUUID()}, ${vendorId}, 'uom_conversion', '12 each = 1 dozen', 'each', 'dozen', ${1 / 12})`;
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-7", unitPrice: 12, qtyOrdered: 10, uom: "dozen" });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-7", totalAmount: 120 });
+      await addBillLine(billId, { qty: 120, unitPrice: 1, uom: "each" });
+      const r = await runMatchStage(billId);
+      expect(r.findings).toEqual([]); // 120 each = 10 dozen at $12, no rounding noise
+    });
+
+    it("a later invoice counts an earlier one billed in the other unit, so the same goods cannot be billed twice", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-UOM-8", unitPrice: 48, qtyOrdered: 10, uom: "case" });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      // First invoice: all 10 cases, billed as 240 each, and posted.
+      const first = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-8A", totalAmount: 480 });
+      await addBillLine(first, { qty: 240, unitPrice: 2, uom: "each" });
+      expect((await runMatchStage(first)).findings).toEqual([]);
+      await sql`UPDATE vendor_bills SET status = 'posted' WHERE id = ${first}`;
+      // Second invoice: the same 10 cases again, billed in cases.
+      const second = await makeBill({ poId, invoiceNumber: PREFIX + "-UOM-8B", totalAmount: 480 });
+      await addBillLine(second, { qty: 10, unitPrice: 48, uom: "case" });
+      const r = await runMatchStage(second);
+      expect(r.findings.some((f) => f.code === "EXC-QTY_VAR")).toBe(true);
     });
 
     it("matching units raise no exception at all", async () => {
