@@ -21,14 +21,48 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The signed-in session token. Kept in localStorage so a reload does not sign you out; the server
+ * sets its expiry (12 hours). Sent as `Authorization: Bearer`, never as a cookie, so another site
+ * cannot make the browser send it. Storage can be blocked (private mode): the token then lives in
+ * memory for this tab only.
+ */
+const TOKEN_KEY = 'veribook.session';
+let memoryToken = null;
+
+export function getToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || memoryToken;
+  } catch {
+    return memoryToken;
+  }
+}
+
+export function setToken(token) {
+  memoryToken = token || null;
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // See above: memoryToken already holds it.
+  }
+}
+
+/** Fired when the server says the session is missing or expired, so the app can send the person to sign in. */
+export const UNAUTHORIZED_EVENT = 'veribook:unauthorized';
+
 async function request(path, { method = 'GET', body, timeout = DEFAULT_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
+  const headers = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   let res;
   try {
     res = await fetch(`${BASE_URL}${path}`, {
       method,
-      headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+      headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
@@ -49,6 +83,9 @@ async function request(path, { method = 'GET', body, timeout = DEFAULT_TIMEOUT_M
       if (res.ok) throw new ApiError(res.status, 'The server returned something that is not JSON.');
     }
   }
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+  }
   if (!res.ok) throw new ApiError(res.status, data?.error || data?.message || `${res.status} ${res.statusText}`);
   return data;
 }
@@ -59,6 +96,10 @@ const qs = (params) => {
 };
 
 export const api = {
+  // --- Sign-in ---
+  getSession: () => request('/auth/session'),
+  login: (username, password) => request('/auth/login', { method: 'POST', body: { username, password } }),
+
   // --- Invoices ---
   getInvoices: (params = {}) => request(`/invoices${qs(params)}`),
   getInvoiceById: (id) => request(`/invoices/${encodeURIComponent(id)}`),

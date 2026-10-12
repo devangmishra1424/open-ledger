@@ -74,7 +74,10 @@ export default function SettingsPage() {
             <dt>Double-checks</dt><dd className="vb-mono">{system.llm.models.verifier} <span className="vb-dim">(a different model family on purpose)</span></dd>
             <dt>Payments</dt><dd><strong>{system.paymentRail.mode === 'simulated' ? 'Simulated' : system.paymentRail.mode}</strong>. Payments are recorded and posted to the ledger; no money moves.</dd>
             <dt>Vendor callbacks</dt><dd>Made by a person. No automated call is placed; the person records the answer and a second person signs off.</dd>
-            <dt>Sign-in</dt><dd>None yet. Reviewer names are self-declared, so “a different person” checks compare typed names. Production would put real accounts here.</dd>
+            <dt>Sign-in</dt>
+            <dd>{system.authentication?.mode === 'accounts'
+              ? <><strong>Accounts.</strong> Every request is signed in, and decisions are recorded under the signed-in account, so “a different person must sign off” compares real accounts. Accounts are set by the operator; there is no self-sign-up, and no roles yet (any account can approve).</>
+              : <><strong>Off</strong> (local development). Reviewer names are self-declared, so “a different person” checks compare typed names. A public server refuses to run like this.</>}</dd>
             <dt>Audit trail</dt>
             <dd>
               <span className="vb-chain"><span className={`vb-dot ${system.chain.valid ? 'vb-dot-ok' : 'vb-dot-bad'}`} />

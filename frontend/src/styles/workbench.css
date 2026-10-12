@@ -394,3 +394,8 @@ body { background: var(--vb-bg); }
 @media (max-width: 900px) {
   .vb-app-compact { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- sign-in gate (loading / server unreachable / sign-in not set up) ---------- */
+.vb-gate { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: var(--vb-bg); color: var(--vb-text); }
+.vb-gate h1 { margin: 0; font-size: 22px; }
+.vb-gate p { margin: 0; max-width: 520px; line-height: 1.6; }

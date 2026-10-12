@@ -13,7 +13,7 @@ import { handle, HttpError, readJsonBody, reviewerName } from "@/lib/http";
 export const POST = handle("POST /api/reviews/:id/outcome", async (req, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const body = await readJsonBody(req);
-  const reviewer = reviewerName(body);
+  const reviewer = reviewerName(body, req);
   const outcome = body.outcome;
   if (outcome !== "confirmed" && outcome !== "failed") throw new HttpError(400, `outcome must be "confirmed" or "failed"`);
 

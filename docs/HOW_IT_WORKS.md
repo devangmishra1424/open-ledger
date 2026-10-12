@@ -81,7 +81,18 @@ Policy = deterministic action, tightened by the Investigator's recommendation an
 ## 9. Vendor bank-detail change control (`lib/ledger/bank-change-review.ts`, `app/api/reviews/`)
 
 The classic payment-fraud move is "our bank account changed". A recent change puts the vendor's invoices on hold. To release it: (1) a person phones the vendor on a number from their own records, not the change request, and logs the call; (2) *that person* records whether the vendor confirmed; (3) a *different* person signs off. A failed callback flags the vendor and the hold never lifts. Approving while the hold is on is refused by the server. Tested end to end through the real route handlers (`tests/bank-change-flow.test.ts`) and walked in the UI.
-**Weakness:** "different person" compares typed names; there is no login. And an earlier voice module recorded "confirmed" automatically on every call; that was removed because it made the control approve itself.
+**Identity.** With sign-in on (section 9b), "a different person" compares signed-in accounts: the server takes the name from the session and ignores any name in the request. With sign-in off (local development only) it compares typed names. An earlier voice module recorded "confirmed" automatically on every call; that was removed because it made the control approve itself.
+
+## 9b. Sign-in (`middleware.ts`, `lib/auth/`, `app/api/auth/`)
+
+- **Accounts** come from `VERIBOOK_USERS`, a JSON list of `{username, name, passwordHash}`. Passwords are never configured in plain text: `npm run auth:hash -- '<password>'` prints a scrypt hash to paste. Names must be unique (case and spaces ignored), because they are what the trail records and what maker/checker compares. There is no self-sign-up and no roles yet: any account can approve.
+- **Sessions** are stateless signed tokens (HMAC-SHA256 with `VERIBOOK_AUTH_SECRET`, 12 hours). The browser keeps the token and sends it as `Authorization: Bearer`, not as a cookie, so another site cannot make a browser send it, and the open CORS policy stays safe. Trade-off: a token cannot be revoked early; changing the secret signs everyone out.
+- **The gate is the middleware**, in front of every `/api` route. A valid token becomes two request headers the routes trust (who is acting); the middleware deletes any copies a caller sends, so they cannot be forged. Without a token, a protected route answers 401. `/api/auth/login` and `/api/auth/session` are the only open paths.
+- **Who is recorded.** `reviewerName()` (`lib/http.ts`) returns the signed-in account's name and ignores the body. If sign-in is on and a request somehow has no session, it refuses (401) rather than trusting the body.
+- **Secure by default.** A production server (`NODE_ENV=production`) with no accounts configured answers every protected request with 503 and the reason, instead of running open; accounts without a long enough secret do the same. `VERIBOOK_AUTH=off` runs open on purpose, for a local demo. With nothing set in local development it stays open, as before.
+- **Guessing is slowed:** 10 failed sign-ins per address per 15 minutes, then 429 (in memory, per server instance). A wrong password and an unknown user get the same answer, and an unknown user still costs one scrypt run, so timing does not reveal which usernames exist.
+- **Tested** in `tests/auth.test.ts` (tokens: tampering, expiry, wrong secret; passwords; config; the middleware's 401/503/pass-through and header stripping; the login route including throttling; reviewer identity), and walked in the browser: wrong password, right password, return to the page you were heading for, decisions shown under the account, sign-out, protected pages after sign-out.
+- **Not built:** roles (approver vs viewer), password change or reset, single sign-on, and audit of who changed Settings.
 
 ## 10. The screens (`frontend/src`)
 
@@ -121,7 +132,7 @@ Everything above existed in some form from the hackathon build **except** the fo
 
 ## 14. What I would do next
 
-1. Real authentication and roles, so "a different person" is not a typed name.
+1. Roles (approver, viewer, administrator) on top of sign-in, single sign-on, and an audit record of Settings changes.
 2. Schedule payments by due date and terms (and early-payment discounts) instead of paying at approval.
 3. A real payment rail behind `triggerPayment`, calling the provider *before* writing anything and failing closed.
 4. Add a currency-aware ledger (FX at posting).

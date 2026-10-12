@@ -67,7 +67,7 @@ export default function CasePage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { invoices, error: listError, refresh } = useInvoices();
-  const { name, openNameDialog } = useReviewer();
+  const { name, locked, openNameDialog } = useReviewer();
   const [detail, setDetail] = useState(null);
   const [detailError, setDetailError] = useState(null);
 
@@ -97,7 +97,7 @@ export default function CasePage() {
 
   if (!invoice) {
     if (detailError?.status === 404 || (invoices && !live && detailError)) {
-      return <Empty title="Invoice not found" action={<button type="button" className="vb-btn" onClick={() => navigate('/')}>Back to the inbox</button>}>It may have been removed, or the link is wrong.</Empty>;
+      return <Empty title="Invoice not found" action={<button type="button" className="vb-btn" onClick={() => navigate('/app')}>Back to the inbox</button>}>It may have been removed, or the link is wrong.</Empty>;
     }
     if (listError && !invoices) return <Banner kind="error" action={<button type="button" className="vb-btn vb-btn-sm" onClick={refresh}>Try again</button>}>Could not load this invoice: {listError.message}</Banner>;
     return <div style={{ padding: 40 }}><Spinner label="Loading the invoice…" /></div>;
@@ -120,11 +120,11 @@ export default function CasePage() {
     <article className="vb-case-page">
       {/* ---------- top bar: where you are, and previous / next ---------- */}
       <div className="vb-case-nav">
-        <button type="button" className="vb-btn vb-btn-sm" onClick={() => navigate('/')}><ArrowLeft size={14} /> All invoices</button>
+        <button type="button" className="vb-btn vb-btn-sm" onClick={() => navigate('/app')}><ArrowLeft size={14} /> All invoices</button>
         <div className="vb-case-pager" aria-label="Move through the queue">
           {siblings.length > 1 && <span className="vb-dim vb-small">{pos + 1} of {siblings.length} in &ldquo;{stateLabel}&rdquo;</span>}
-          <button type="button" className="vb-btn vb-btn-sm" disabled={!prev} onClick={() => prev && navigate(`/invoice/${prev.id}`)} aria-label="Previous invoice"><ChevronLeft size={14} /> Previous</button>
-          <button type="button" className="vb-btn vb-btn-sm" disabled={!next} onClick={() => next && navigate(`/invoice/${next.id}`)} aria-label="Next invoice">Next <ChevronRight size={14} /></button>
+          <button type="button" className="vb-btn vb-btn-sm" disabled={!prev} onClick={() => prev && navigate(`/app/invoice/${prev.id}`)} aria-label="Previous invoice"><ChevronLeft size={14} /> Previous</button>
+          <button type="button" className="vb-btn vb-btn-sm" disabled={!next} onClick={() => next && navigate(`/app/invoice/${next.id}`)} aria-label="Next invoice">Next <ChevronRight size={14} /></button>
         </div>
       </div>
 
@@ -177,7 +177,7 @@ export default function CasePage() {
           <section className="vb-card vb-aside-card">
             <h2>Your decision</h2>
             <p className="vb-dim vb-small" style={{ margin: '0 0 12px' }}>
-              Acting as <b>{name || 'nobody yet'}</b> &middot; <button type="button" className="vb-link-btn" onClick={openNameDialog}>{name ? 'change' : 'set your name'}</button>
+              Acting as <b>{name || 'nobody yet'}</b>{locked ? ' (signed in)' : <> &middot; <button type="button" className="vb-link-btn" onClick={openNameDialog}>{name ? 'change' : 'set your name'}</button></>}
             </p>
             <DecisionPanel invoice={invoice} />
           </section>

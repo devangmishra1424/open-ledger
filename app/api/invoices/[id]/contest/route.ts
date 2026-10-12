@@ -13,7 +13,7 @@ import { handle, readJsonBody, requireString, reviewerName } from "@/lib/http";
 export const POST = handle("POST /api/invoices/:id/contest", async (req, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const body = await readJsonBody(req);
-  const outcome = await contestInvoice({ billId: id, reviewer: reviewerName(body), reason: requireString(body, "reason", { max: 1000 }) });
+  const outcome = await contestInvoice({ billId: id, reviewer: reviewerName(body, req), reason: requireString(body, "reason", { max: 1000 }) });
   const invoice = await getFrontendInvoice(id);
   return Response.json({ success: true, reconsideration: outcome.reconsideration, invoice });
 });

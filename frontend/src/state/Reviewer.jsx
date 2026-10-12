@@ -1,10 +1,15 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useAuth } from './Auth';
 
 /**
- * Who is acting. There is no login: the name is self-declared, stored in this browser only, and
- * sent with every human decision so it is recorded in the hash chain. The bank-change control
- * (a different person must sign off) compares these names, so the Settings page says plainly
- * that this is not authentication.
+ * Who is acting.
+ *
+ * Signed in: the account's name, fixed. The server records decisions under the signed-in account
+ * and ignores any typed name, so "a different person must sign off" compares real accounts.
+ *
+ * Sign-in off (local development only): the name is self-declared, stored in this browser only,
+ * and sent with every human decision so it is recorded in the hash chain. The Settings page says
+ * plainly that this is not authentication.
  */
 const KEY = 'veribook.reviewer';
 const ReviewerContext = createContext(null);
@@ -19,9 +24,12 @@ function readStored() {
 }
 
 export function ReviewerProvider({ children }) {
-  const [name, setNameState] = useState(readStored);
+  const { user } = useAuth();
+  const [typedName, setNameState] = useState(readStored);
   const [askOpen, setAskOpen] = useState(false);
   const [pending, setPending] = useState(null);
+  const locked = Boolean(user);
+  const name = user ? user.name : typedName;
 
   const setName = useCallback((value) => {
     const trimmed = value.trim().slice(0, 80);
@@ -41,6 +49,8 @@ export function ReviewerProvider({ children }) {
     return undefined;
   }, [name]);
 
+  const openNameDialog = useCallback(() => { if (!locked) setAskOpen(true); }, [locked]);
+
   const confirmName = (value) => {
     if (!value.trim()) return;
     setName(value);
@@ -51,7 +61,7 @@ export function ReviewerProvider({ children }) {
   };
 
   return (
-    <ReviewerContext.Provider value={{ name, setName, withReviewer, openNameDialog: () => setAskOpen(true) }}>
+    <ReviewerContext.Provider value={{ name, locked, setName, withReviewer, openNameDialog }}>
       {children}
       {askOpen && <NameDialog initial={name} onConfirm={confirmName} onCancel={() => { setAskOpen(false); setPending(null); }} />}
     </ReviewerContext.Provider>

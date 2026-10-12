@@ -1,3 +1,6 @@
+import { authConfig } from "@/lib/auth/config";
+import { USER_HEADER, USER_NAME_HEADER } from "@/lib/auth/headers";
+
 /**
  * Small request/response helpers shared by the API routes, so every route validates its input
  * at the edge the same way and maps failures to the same JSON error shape: { error: string }.
@@ -43,8 +46,35 @@ export function optionalString(body: Record<string, unknown>, key: string, opts:
   return t || undefined;
 }
 
-/** Who is acting. Required on every state-changing action: there is no "demo-reviewer" default, because maker/checker is meaningless if two people can both be "demo-reviewer". */
-export function reviewerName(body: Record<string, unknown>): string {
+/**
+ * The signed-in account for this request, from the headers the middleware sets after checking the
+ * session token (it deletes any a caller sent). Null when sign-in is off, or for a direct call that
+ * did not go through the middleware (tests).
+ */
+export function sessionUser(req: Request | undefined): { username: string; name: string } | null {
+  const username = req?.headers.get(USER_HEADER);
+  const encodedName = req?.headers.get(USER_NAME_HEADER);
+  if (!username || !encodedName) return null;
+  try {
+    return { username, name: decodeURIComponent(encodedName) };
+  } catch {
+    // Only the middleware writes this header, with encodeURIComponent; a value that does not decode is a bug, not a user.
+    throw new HttpError(400, "malformed session header");
+  }
+}
+
+/**
+ * Who is acting. Required on every state-changing action: there is no "demo-reviewer" default,
+ * because maker/checker is meaningless if two people can both be "demo-reviewer".
+ *
+ * With sign-in on, it is the signed-in account's name and any name in the body is ignored: the
+ * audit trail and the "a different person must sign off" check then compare real accounts, not
+ * typed names. With sign-in off (local development), it is the name the person typed.
+ */
+export function reviewerName(body: Record<string, unknown>, req?: Request): string {
+  const user = sessionUser(req);
+  if (user) return user.name;
+  if (authConfig().required) throw new HttpError(401, "Please sign in.");
   return requireString(body, "reviewerName", { max: 80 });
 }
 

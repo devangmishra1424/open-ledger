@@ -11,7 +11,7 @@ import { handle, optionalString, readJsonBody, reviewerName } from "@/lib/http";
 export const POST = handle("POST /api/invoices/:id/reject", async (req, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
   const body = await readJsonBody(req);
-  const outcome = await rejectInvoice({ billId: id, reviewer: reviewerName(body), note: optionalString(body, "reason") });
+  const outcome = await rejectInvoice({ billId: id, reviewer: reviewerName(body, req), note: optionalString(body, "reason") });
   const invoice = await getFrontendInvoice(id);
   return Response.json({ success: true, alreadyDone: outcome.alreadyDone, invoice });
 });

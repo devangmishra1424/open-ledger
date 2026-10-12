@@ -55,7 +55,7 @@ function useAfterCreate(onClose) {
     patch(invoice);
     refresh();
     onClose();
-    navigate(`/invoice/${invoice.id}`);
+    navigate(`/app/invoice/${invoice.id}`);
   };
 }
 
@@ -126,7 +126,7 @@ function FromDocument({ onClose }) {
         ) : (
           <Banner kind="warn">
             <strong>No purchase order {ex.poReference} is on file,</strong> so this invoice is treated as a non-PO invoice and cannot be three-way matched.
-            {' '}<Link to="/orders" onClick={onClose}>Add the PO and its goods receipt</Link> first, then add the invoice again under a new invoice number.
+            {' '}<Link to="/app/orders" onClick={onClose}>Add the PO and its goods receipt</Link> first, then add the invoice again under a new invoice number.
           </Banner>
         ))}
         <div className="vb-modal-actions">
@@ -140,7 +140,7 @@ function FromDocument({ onClose }) {
     <>
       <p className="vb-muted" style={{ margin: 0, fontSize: 14 }}>
         Paste the text of an invoice or upload a PDF or text file. It is read automatically; anything it is unsure of is flagged for a person instead of being guessed.
-        {' '}For a three-way match the purchase order and goods receipt must already be on file (<Link to="/orders" onClick={onClose}>Orders</Link>).
+        {' '}For a three-way match the purchase order and goods receipt must already be on file (<Link to="/app/orders" onClick={onClose}>Orders</Link>).
       </p>
       <label className="vb-field">
         <span>Invoice text</span>
