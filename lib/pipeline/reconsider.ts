@@ -2,9 +2,9 @@ import { getDecision, getDecisionsForInvoice, countReconsiderations, getDecision
 import { runMatchStage } from "@/lib/pipeline/match-stage";
 import {
   runInvestigateStage, runVerifyStage, runPolicyStage, runAuditStage, isTier2Eligible, evaluatePolicy,
-  type ReconsiderationInput,
+  tightenedByInvestigator, type ReconsiderationInput,
 } from "@/lib/pipeline/orchestrator";
-import { asAction, moreRestrictive, type CombinedDecision } from "@/lib/matching/decision-matrix";
+import type { CombinedDecision } from "@/lib/matching/decision-matrix";
 import type { InvestigationSubmission } from "@/lib/agent/investigator";
 import type { VerificationSubmission } from "@/lib/agent/verifier";
 import type { Decision, ReconsiderResponse } from "@/lib/types";
@@ -81,9 +81,13 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
   const matchResult = await runMatchStage(original.invoiceId);
 
   let newDecision: Decision;
+  // The Investigator decision whose recommendation stands after this reconsideration: the new
+  // one when the Investigator itself is being reconsidered, otherwise the one the Verifier checked.
+  let standingInvestigation: Decision;
   if (original.nodeId === "investigate") {
     const { decision } = await runInvestigateStage(original.invoiceId, matchResult.detail, original.parentDecisionId, recon);
     newDecision = decision;
+    standingInvestigation = decision;
   } else {
     if (!original.parentDecisionId) throw new Error(`reconsider: verify decision '${original.id}' has no parentDecisionId to recover its investigate context from`);
     const investigateDecision = await getDecision(original.parentDecisionId);
@@ -91,6 +95,7 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
     const investigation = investigationFromDecision(investigateDecision, matchResult.combined.dominantException);
     const { decision } = await runVerifyStage(original.invoiceId, matchResult.detail, investigation, original.parentDecisionId, recon);
     newDecision = decision;
+    standingInvestigation = investigateDecision;
   }
 
   if (newDecision.actionTaken === "error") {
@@ -100,20 +105,23 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
     return { newDecision, cascaded: false, supersededDecisionIds: [] };
   }
 
-  // What the model recommends is free text, and it must not be able to move money. Two rules:
+  // What the model recommends is free text, and it must not be able to move money. Two rules,
+  // applied by the same function the normal pipeline uses (tightenedByInvestigator):
   //  1. Only a recognised Action counts (anything else is ignored, not cast).
   //  2. It can only TIGHTEN what the deterministic rules decided (moreRestrictive), never loosen
   //     it — so "auto_approve" is reachable only for a clean deterministic match. Before this,
   //     a contested invoice whose re-review said "auto_approve" was cascaded straight into
   //     posting and paying it.
-  const floor = matchResult.combined.overallAction;
-  const proposed = original.nodeId === "investigate" ? asAction(newDecision.actionTaken) : undefined;
+  // The standing Investigator recommendation applies even when it is the Verifier being
+  // reconsidered: otherwise re-asking the Verifier could quietly drop an Investigator's hold.
   const combinedForPolicy: CombinedDecision = {
-    overallAction: proposed ? moreRestrictive(floor, proposed) : floor,
+    overallAction: matchResult.combined.overallAction,
     dominantException: matchResult.combined.dominantException,
     cascaded: false,
     deferredExceptions: matchResult.combined.deferredExceptions,
   };
+  const investigatorRecommendation = standingInvestigation.actionTaken ?? null;
+  const effectiveAction = tightenedByInvestigator(combinedForPolicy.overallAction, investigatorRecommendation);
   // The reconsidered node WAS verify: its new submission is what policy needs.
   const reconsideredVerify: VerificationSubmission | undefined = original.nodeId === "verify"
     ? { agrees: newDecision.actionTaken !== "disagreement", exception_types: [], confidence: newDecision.confidence ?? 0, notes: newDecision.claims?.[0]?.text ?? "" }
@@ -124,7 +132,7 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
   const currentPolicy = liveDecisions.filter((d) => d.nodeId === "policy").at(-1);
   // The confidence the Settings guardrail looks at: the reconsidered Investigator's, or else the live one.
   const investigatorConfidence = original.nodeId === "investigate" ? newDecision.confidence : liveDecisions.filter((d) => d.nodeId === "investigate").at(-1)?.confidence;
-  const predicted = await evaluatePolicy(original.invoiceId, combinedForPolicy, reconsideredVerify, investigatorConfidence);
+  const predicted = await evaluatePolicy(original.invoiceId, combinedForPolicy, reconsideredVerify, investigatorConfidence, investigatorRecommendation);
   const cascaded = predicted.action !== currentPolicy?.actionTaken;
   const supersededDecisionIds: string[] = [];
 
@@ -143,7 +151,7 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
     let verifySubmission = reconsideredVerify;
     let lastId = newDecision.id;
 
-    if (original.nodeId === "investigate" && isTier2Eligible(combinedForPolicy.overallAction)) {
+    if (original.nodeId === "investigate" && isTier2Eligible(effectiveAction)) {
       // The reconsidered investigate's new conclusion pushed this into tier-2 territory (or
       // it already was) — verify needs a fresh pass against the NEW investigation, not the
       // stale one from before this reconsideration.
@@ -153,7 +161,7 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
       lastId = verifyDecision.id;
     }
 
-    const policyDecision = await runPolicyStage({ vendorBillId: original.invoiceId, combined: combinedForPolicy, verifySubmission, investigatorConfidence, parentDecisionId: lastId, recon });
+    const policyDecision = await runPolicyStage({ vendorBillId: original.invoiceId, combined: combinedForPolicy, verifySubmission, investigatorConfidence, investigatorRecommendation, parentDecisionId: lastId, recon });
     await runAuditStage(original.invoiceId, policyDecision, recon);
   }
 

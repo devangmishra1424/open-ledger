@@ -7,17 +7,17 @@ import { detectBankChangeGate, getOrCreateBankChangeReview } from "@/lib/ledger/
 import {
   evaluateNoPo, evaluateNonPo, evaluateBeforeReceipt, evaluatePriceVariance, evaluateQuantityVariance,
   evaluateCurrency, evaluateBlanketExceeded, evaluateTaxVariance, evaluateCreditMemo, evaluateUomMismatch,
-  evaluateFraudBank, combineExceptions, type ExceptionFinding, type CombinedDecision,
+  evaluateFraudBank, evaluateUnmatchedLine, combineExceptions, type ExceptionFinding, type CombinedDecision,
 } from "@/lib/matching/decision-matrix";
 
 /**
  * The "match" pipeline stage (ENGINE.md §2.3) — Layer 1, deterministic, no LLM. Assembles
  * every exception finding from PO/GRN/invoice data and combines them via decision-matrix.ts.
  *
- * SCOPE, stated honestly rather than silently gapped: this covers 12 of 14 taxonomy codes —
+ * SCOPE, stated honestly rather than silently gapped: this covers 13 of 15 taxonomy codes —
  * EXC-NON_PO, EXC-NO_PO, EXC-CURRENCY, EXC-BEFORE_RCV, EXC-PRICE_VAR, EXC-QTY_VAR,
- * EXC-BLANKET_EXCEEDED, EXC-CREDIT_MEMO, EXC-TAX_VAR, EXC-UOM_MISMATCH, EXC-FRAUD_BANK, and
- * (always, trivially) EXC-PARTIAL. EXC-DUPLICATE and EXC-LAYOUT are validate-stage findings
+ * EXC-BLANKET_EXCEEDED, EXC-CREDIT_MEMO, EXC-TAX_VAR, EXC-UOM_MISMATCH, EXC-UNMATCHED_LINE,
+ * EXC-FRAUD_BANK, and (always, trivially) EXC-PARTIAL. EXC-DUPLICATE and EXC-LAYOUT are validate-stage findings
  * (pre-match-validation.ts), not this stage's concern. EXC-FRAUD_BANK is detected here (via
  * lib/ledger/bank-change-review.ts's detectBankChangeGate()) but its own gated state machine
  * (callback logging, second-reviewer sign-off) lives entirely in that module, called from
@@ -248,6 +248,9 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
   // purely to identify "this is probably the same line item, measured differently," never to
   // resolve quantity/price agreement (that stays undecided until a conversion factor exists).
   const stillUnmatchedPoLines = [...lineMatchReport.unmatchedPoLines];
+  // Invoice lines this pass accounts for (a likely unit-of-measure difference, flagged or
+  // resolved by a conversion on file), so the unmatched-line check below doesn't count them twice.
+  const uomPairedInvoiceLineIds = new Set<string>();
   for (const invLine of lineMatchReport.unmatchedInvoiceLines) {
     const line = invoiceLines.find((l) => l.id === invLine.invoiceLineId)!;
     const candidateIdx = stillUnmatchedPoLines.findIndex(
@@ -256,6 +259,7 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     if (candidateIdx === -1) continue;
     const poLine = stillUnmatchedPoLines[candidateIdx];
     stillUnmatchedPoLines.splice(candidateIdx, 1);
+    uomPairedInvoiceLineIds.add(line.id);
 
     const conversionRows = await sql`
       SELECT id FROM vendor_corrections
@@ -267,6 +271,22 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     // A factor ON FILE resolves the mismatch without raising an exception (spec: "system
     // re-runs the match with it applied") — re-deriving quantity/price agreement through the
     // conversion itself is additional scope beyond clearing the exception, not done here.
+  }
+
+  // EXC-UNMATCHED_LINE: an invoice line that matched no PO line at all, not even as a likely
+  // unit-of-measure difference above. Before this check existed, such a line was only counted in
+  // detail.lineMatch, so an invoice with an extra "Expedite fee $900" on a fully received PO came
+  // out as a clean auto-approval. A line worth nothing (qty or price 0) changes nothing payable
+  // and is not flagged.
+  const orphanLines = lineMatchReport.unmatchedInvoiceLines
+    .map((u) => invoiceLines.find((l) => l.id === u.invoiceLineId)!)
+    .filter((l) => !uomPairedInvoiceLineIds.has(l.id))
+    .map((l) => ({ description: l.description, qty: l.qty, unitPrice: l.unitPrice, amount: Math.abs(l.qty * l.unitPrice) }))
+    .filter((l) => l.amount >= 0.005);
+  if (orphanLines.length > 0) {
+    const unmatchedAmount = orphanLines.reduce((s, l) => s + l.amount, 0);
+    findings.push({ code: "EXC-UNMATCHED_LINE", action: evaluateUnmatchedLine(unmatchedAmount) });
+    detail.lineMatch = { ...(detail.lineMatch as Record<string, unknown>), linesNotOnPo: orphanLines, amountNotOnPo: unmatchedAmount };
   }
 
   for (const m of lineMatchReport.matched) {

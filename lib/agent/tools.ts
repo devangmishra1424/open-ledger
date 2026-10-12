@@ -99,7 +99,10 @@ export const SUBMIT_INVESTIGATION = tool(
     exception_types: { type: "array", items: { type: "string" } },
     confidence: { type: "number" },
     rationale: { type: "string", description: "Must cite specific tool results, e.g. 'per check_duplicate, 0.97 similarity to INV-2288'" },
-    recommended_action: { type: "string" },
+    recommended_action: {
+      type: "string",
+      description: "One of: auto_approve, escalate_l1, escalate_l2, block, block_fraud_flag. It can only make the rules' outcome stricter, never looser; anything stricter than auto_approve sends the invoice to a person.",
+    },
   },
   ["exception_types", "confidence", "rationale", "recommended_action"],
 );

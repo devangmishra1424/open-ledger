@@ -373,6 +373,8 @@ describe("runMatchStage", () => {
       await addBillLine(billId, { qty: 240, unitPrice: 2, uom: "each" });
       const r = await runMatchStage(billId);
       expect(r.findings.some((f) => f.code === "EXC-UOM_MISMATCH")).toBe(false);
+      // The line was accounted for as a unit difference, so it is not also reported as off the PO.
+      expect(r.findings.some((f) => f.code === "EXC-UNMATCHED_LINE")).toBe(false);
     });
 
     it("matching units raise no exception at all", async () => {
@@ -382,6 +384,63 @@ describe("runMatchStage", () => {
       await addBillLine(billId, { qty: 10, unitPrice: 2, uom: "each" });
       const r = await runMatchStage(billId);
       expect(r.findings.some((f) => f.code === "EXC-UOM_MISMATCH")).toBe(false);
+    });
+  });
+
+  describe("EXC-UNMATCHED_LINE (an invoice line that is on no PO line)", () => {
+    it("an extra fee on an otherwise perfect invoice is no longer a clean auto-approval", async () => {
+      // Regression: before this check, the PO line matched, the unmatched fee was only counted
+      // in detail.lineMatch, and the whole invoice came out auto_approve.
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-EXTRA-1", unitPrice: 10, qtyOrdered: 100 });
+      await acceptGoodsReceipt(poId, lineId, 100);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-EXTRA-1", totalAmount: 1900 });
+      await addBillLine(billId, { qty: 100, unitPrice: 10 });
+      await addBillLine(billId, { description: "Expedite fee", qty: 1, unitPrice: 900 });
+
+      const r = await runMatchStage(billId);
+      expect(r.findings).toEqual([{ code: "EXC-UNMATCHED_LINE", action: "escalate_l1" }]);
+      expect(r.combined.overallAction).toBe("escalate_l1");
+      expect(r.combined.dominantException).toBe("EXC-UNMATCHED_LINE");
+      expect(r.detail.lineMatch).toMatchObject({
+        matchedCount: 1, unmatchedInvoiceLineCount: 1, amountNotOnPo: 900,
+        linesNotOnPo: [{ description: "Expedite fee", qty: 1, unitPrice: 900, amount: 900 }],
+      });
+    });
+
+    it("the amount of every line off the PO is added up, so several small extras still escalate by their total", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-EXTRA-2", unitPrice: 10, qtyOrdered: 10 });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-EXTRA-2", totalAmount: 1300 });
+      await addBillLine(billId, { qty: 10, unitPrice: 10 });
+      await addBillLine(billId, { description: "Rush handling surcharge", qty: 1, unitPrice: 700 });
+      await addBillLine(billId, { description: "Weekend installation crew", qty: 1, unitPrice: 500 });
+
+      const r = await runMatchStage(billId);
+      expect(r.findings.find((f) => f.code === "EXC-UNMATCHED_LINE")?.action).toBe("escalate_l2"); // $1,200 together
+    });
+
+    it("a large charge nobody ordered is blocked", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-EXTRA-3", unitPrice: 10, qtyOrdered: 10 });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-EXTRA-3", totalAmount: 25100 });
+      await addBillLine(billId, { qty: 10, unitPrice: 10 });
+      await addBillLine(billId, { description: "Annual platform licence", qty: 1, unitPrice: 25000 });
+
+      const r = await runMatchStage(billId);
+      expect(r.combined.overallAction).toBe("block");
+      expect(r.combined.dominantException).toBe("EXC-UNMATCHED_LINE");
+    });
+
+    it("a zero-value line off the PO (a note or a free item) changes nothing payable and is not flagged", async () => {
+      const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-EXTRA-4", unitPrice: 10, qtyOrdered: 10 });
+      await acceptGoodsReceipt(poId, lineId, 10);
+      const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-EXTRA-4", totalAmount: 100 });
+      await addBillLine(billId, { qty: 10, unitPrice: 10 });
+      await addBillLine(billId, { description: "Complimentary carry case", qty: 1, unitPrice: 0 });
+
+      const r = await runMatchStage(billId);
+      expect(r.findings).toEqual([]);
+      expect(r.combined.overallAction).toBe("auto_approve");
     });
   });
 

@@ -19,6 +19,18 @@ vi.mock("@/lib/pipeline/orchestrator", async (importOriginal) => {
       });
       return { decision, submission: { exception_types: [], confidence: 0.99, rationale: "Looks fine to me", recommended_action: "auto_approve" } };
     }),
+    // The LLM-backed verify stage, replaced the same way: a Verifier that, asked again, agrees.
+    runVerifyStage: vi.fn(async (billId: string, _detail: unknown, investigation: any, parentDecisionId?: string, recon?: any) => {
+      const { writeDecision } = await import("@/lib/ledger/decisions");
+      const now = new Date().toISOString();
+      const decision = await writeDecision({
+        invoiceId: billId, nodeId: "verify", agentId: "stub-verifier", model: "stub-verifier", parentDecisionId, startedAt: now, endedAt: now,
+        confidence: 0.9, actionTaken: investigation.recommended_action, claims: [{ text: "Agreed", tag: "grounded" }],
+        reconsiderationOfId: recon?.reconsiderationOfId, triggeredByActor: recon?.triggeredByActor, triggeredByQuestion: recon?.triggeredByQuestion,
+        idempotencyKey: `stub-verify:${billId}:${recon?.attemptTag ?? "first"}`,
+      });
+      return { decision, submission: { agrees: true, exception_types: [], confidence: 0.9, notes: "" } };
+    }),
   };
 });
 
@@ -46,7 +58,44 @@ async function noPoBillWithInvestigation() {
   return { billId, investigate, policy };
 }
 
+/**
+ * A clean three-way match (the rules alone would auto-approve) that the Investigator held for a
+ * person: investigate says escalate_l2, the Verifier agreed, policy escalated (INVESTIGATOR_HOLD).
+ */
+async function cleanBillHeldByInvestigator() {
+  const vendorId = randomUUID(), poId = randomUUID(), poLineId = randomUUID(), receiptId = randomUUID(), billId = randomUUID();
+  await sql`INSERT INTO vendors (id, name, trust_tier) VALUES (${vendorId}, ${"RS Clean " + vendorId.slice(0, 6)}, 'trusted')`;
+  await sql`INSERT INTO purchase_orders (id, po_number, vendor_id, order_date, status) VALUES (${poId}, ${"RS-PO-" + poId.slice(0, 6)}, ${vendorId}, '2026-09-01', 'open')`;
+  await sql`INSERT INTO purchase_order_lines (id, po_id, line_number, description, uom, qty_ordered, unit_price) VALUES (${poLineId}, ${poId}, 1, 'Widget', 'each', 10, 50)`;
+  await sql`INSERT INTO goods_receipts (id, po_id, receipt_date, condition) VALUES (${receiptId}, ${poId}, '2026-09-05', 'accepted')`;
+  await sql`INSERT INTO goods_receipt_lines (id, goods_receipt_id, po_line_id, qty_received) VALUES (${randomUUID()}, ${receiptId}, ${poLineId}, 10)`;
+  await sql`INSERT INTO vendor_bills (id, vendor_id, po_id, invoice_number, invoice_date, subtotal, total_amount, status)
+            VALUES (${billId}, ${vendorId}, ${poId}, ${"RS-C-" + billId.slice(0, 6)}, '2026-09-10', 500, 500, 'exception')`;
+  await sql`INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, uom, gl_account_id) VALUES (${randomUUID()}, ${billId}, 'Widget', 10, 50, 'each', '6000')`;
+  expect((await runMatchStage(billId)).combined.overallAction).toBe("auto_approve");
+
+  const now = new Date().toISOString();
+  const investigate = await writeDecision({ invoiceId: billId, nodeId: "investigate", agentId: "stub-model", model: "stub-model", startedAt: now, endedAt: now, confidence: 0.95, actionTaken: "escalate_l2", idempotencyKey: `inv:${billId}` });
+  const verify = await writeDecision({ invoiceId: billId, nodeId: "verify", agentId: "stub-verifier", model: "stub-verifier", parentDecisionId: investigate.id, startedAt: now, endedAt: now, confidence: 0.9, actionTaken: "escalate_l2", idempotencyKey: `ver:${billId}` });
+  await writeDecision({ invoiceId: billId, nodeId: "policy", agentId: "deterministic-policy-engine", parentDecisionId: verify.id, startedAt: now, endedAt: now, actionTaken: "escalate_l2", reasonCode: "INVESTIGATOR_HOLD", idempotencyKey: `pol:${billId}` });
+  return { billId, verify };
+}
+
 describe("reconsideration cannot be talked into moving money", () => {
+  it("re-asking the Verifier does not drop the Investigator's hold on a clean match (nothing posted, nothing paid)", async () => {
+    // Regression: the verify path used only the deterministic floor (auto_approve), so a Verifier
+    // reconsideration on an Investigator-held invoice predicted auto_approve and cascaded into payment.
+    const { billId, verify } = await cleanBillHeldByInvestigator();
+
+    const result = await reconsider({ originalDecisionId: verify.id, question: "Please double-check this", actor: "Sam" });
+    if ("action" in result) throw new Error("unexpected escalate_senior");
+
+    expect(result.cascaded).toBe(false);
+    expect((await sql`SELECT status FROM vendor_bills WHERE id = ${billId}`)[0].status).toBe("exception");
+    expect(await sql`SELECT 1 FROM journal_entries WHERE source_type = 'vendor_bill' AND source_id = ${billId}`).toHaveLength(0);
+    expect(await sql`SELECT 1 FROM payment_applications WHERE vendor_bill_id = ${billId}`).toHaveLength(0);
+  });
+
   it("a re-review that says 'auto_approve' on an invoice the rules flagged changes nothing: no cascade, nothing posted, nothing paid", async () => {
     const { billId, investigate } = await noPoBillWithInvestigation();
 

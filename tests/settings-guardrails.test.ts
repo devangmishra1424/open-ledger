@@ -67,6 +67,42 @@ describe("computePolicyAction (pure)", () => {
   });
 });
 
+describe("the Investigator's recommendation can only tighten the outcome", () => {
+  const priceVariance: CombinedDecision = { overallAction: "escalate_l1", dominantException: "EXC-PRICE_VAR", cascaded: false, deferredExceptions: [] };
+  const blockedQty: CombinedDecision = { overallAction: "block", dominantException: "EXC-QTY_VAR", cascaded: false, deferredExceptions: [] };
+
+  it("regression: a clean match the Investigator wants escalated is no longer auto-approved", () => {
+    // Before, the recommendation was stored and never applied: this came out auto_approve and was paid.
+    const r = computePolicyAction(clean, undefined, "escalate_l1");
+    expect(r.action).toBe("escalate_l1");
+    expect(r.heldByInvestigator).toBe(true);
+    expect(r.claims[0].text).toMatch(/Investigator recommended escalate_l1, stricter than the rules' auto_approve/);
+  });
+  it("cannot loosen: an 'auto_approve' recommendation leaves an escalation or a block exactly as the rules decided", () => {
+    expect(computePolicyAction(priceVariance, undefined, "auto_approve")).toMatchObject({ action: "escalate_l1", heldByInvestigator: false });
+    expect(computePolicyAction(blockedQty, undefined, "escalate_l1")).toMatchObject({ action: "block", heldByInvestigator: false });
+  });
+  it("may raise an existing exception further (an escalation to a block)", () => {
+    expect(computePolicyAction(priceVariance, undefined, "block").action).toBe("block");
+  });
+  it("an AI 'reject' is held for a person (block), never turned into a void on its own", () => {
+    expect(computePolicyAction(clean, undefined, "auto_reject").action).toBe("block");
+  });
+  it("reads spelling variants a model really writes, and ignores text that is not an action", () => {
+    expect(computePolicyAction(clean, undefined, "Escalate-L2").action).toBe("escalate_l2");
+    expect(computePolicyAction(clean, undefined, "hold for review")).toMatchObject({ action: "auto_approve", heldByInvestigator: false });
+    expect(computePolicyAction(clean, undefined, undefined)).toMatchObject({ action: "auto_approve", heldByInvestigator: false });
+  });
+  it("a disagreeing Verifier still applies on top of the Investigator's hold", () => {
+    expect(computePolicyAction(clean, { agrees: false, exception_types: [], confidence: 0.5, notes: "x" }, "escalate_l1").action).toBe("escalate_l2");
+  });
+  it("evaluatePolicy names the hold: INVESTIGATOR_HOLD on a clean match, the real exception otherwise", async () => {
+    expect(await evaluatePolicy(await billOf(900), clean, undefined, 0.97, "escalate_l1")).toMatchObject({ action: "escalate_l1", reasonCode: "INVESTIGATOR_HOLD" });
+    expect(await evaluatePolicy(await billOf(900), priceVariance, undefined, 0.97, "block")).toMatchObject({ action: "block", reasonCode: "EXC-PRICE_VAR" });
+    expect(await evaluatePolicy(await billOf(900), clean, undefined, 0.97, "auto_approve")).toMatchObject({ action: "auto_approve", reasonCode: "CLEAN_MATCH" });
+  });
+});
+
 describe("asAction", () => {
   it("accepts only real actions and never casts free text", () => {
     expect(asAction("escalate_l2")).toBe("escalate_l2");

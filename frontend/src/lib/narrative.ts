@@ -25,7 +25,7 @@ export interface Narrative {
 }
 
 const PATTERNS: Array<[Exclude<TokenKind, "text">, string]> = [
-  ["code", String.raw`\b(?:EXC-[A-Z_]+|R99_AGENT_ERROR|CLEAN_MATCH|POLICY_LIMIT)\b`],
+  ["code", String.raw`\b(?:EXC-[A-Z_]+|R99_AGENT_ERROR|CLEAN_MATCH|POLICY_LIMIT|INVESTIGATOR_HOLD)\b`],
   ["action", String.raw`\b(?:escalate_l1|escalate_l2|auto_approve|auto_reject|block_fraud_flag)\b`],
   ["date", String.raw`\b\d{4}-\d{2}-\d{2}\b`],
   ["percent", String.raw`[+-]?\d+(?:\.\d+)?%`],
