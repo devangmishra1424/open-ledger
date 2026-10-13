@@ -1,30 +1,23 @@
-import { getDecisionsForInvoice, toChainableRecord } from "@/lib/ledger/decisions";
-import { computeHash } from "@/lib/ledger/hash-chain";
+import { handle } from "@/lib/http";
+import { TRAIL_BREAK_WORDS, verifyInvoiceTrail } from "@/lib/ledger/trail";
 
 /**
- * POST /api/invoices/:id/seal — the frontend's "cryptographic seal" metaphor for "this
- * invoice's decision trail is genuinely tamper-evident." Real check, not theater: for each of
- * this invoice's own decisions, recomputes computeHash(storedPrevHash, hashableRow(d)) and
- * confirms it equals the stored hash — a real per-record integrity check. Deliberately NOT
- * the same as verifyChain() (that walks the GLOBAL chain with its own running prevHash; this
- * invoice's decisions are interleaved with every other invoice's in the real global sequence,
- * so checking them in isolation with a locally-tracked prev would be checking the wrong thing).
- * No new "sealed" column exists — nothing is persisted here, this is a verification action,
- * not a state change.
+ * POST /api/invoices/:id/seal — "is this invoice's decision trail intact?" A verification action, not
+ * a state change: nothing is persisted. Each of the invoice's records is checked for its own content
+ * AND for its links to the records on either side of it in the global chain (lib/ledger/trail.ts), so
+ * a record that was edited and then re-hashed is caught here too, not only by GET /api/audit/verify.
+ *
+ * 200 { sealed: true, hash, decisionsVerified } | 409 { sealed: false, brokenAt, reason, error } | 404.
  */
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export const POST = handle("POST /api/invoices/:id/seal", async (_req, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
-  const decisions = await getDecisionsForInvoice(id);
-  if (decisions.length === 0) return Response.json({ error: `no invoice found with id '${id}'` }, { status: 404 });
-
-  for (const d of decisions) {
-    const record = toChainableRecord(d);
-    const expected = computeHash(d.prevHash ?? null, record);
-    if (expected !== d.hash) {
-      return Response.json({ success: false, sealed: false, brokenAt: d.id }, { status: 409 });
-    }
+  const result = await verifyInvoiceTrail(id);
+  if (!result) return Response.json({ error: `no invoice found with id '${id}'` }, { status: 404 });
+  if (!result.valid) {
+    return Response.json(
+      { success: false, sealed: false, brokenAt: result.brokenAt, reason: result.reason, error: `A record was altered: ${TRAIL_BREAK_WORDS[result.reason!]}.` },
+      { status: 409 },
+    );
   }
-
-  const latest = decisions[decisions.length - 1];
-  return Response.json({ success: true, sealed: true, id, hash: latest.hash, decisionsVerified: decisions.length });
-}
+  return Response.json({ success: true, sealed: true, id, hash: result.latestHash, decisionsVerified: result.checked });
+});

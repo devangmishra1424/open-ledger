@@ -232,6 +232,27 @@ export async function getDecisionsForInvoice(invoiceId: string): Promise<Decisio
   return rows.map(fromRow);
 }
 
+/**
+ * One invoice's decisions, each with its two neighbours in the GLOBAL chain: the hash of the record
+ * immediately before it, and the prev_hash of the record immediately after it (undefined when it is
+ * the newest record of all). An invoice's records are interleaved with every other invoice's, so
+ * checking a record against these neighbours is what ties it into the one chain; checking it only
+ * against its own stored prev_hash is not (see lib/ledger/trail.ts). Two indexed lookups per record.
+ */
+export async function getInvoiceTrailWithNeighbours(invoiceId: string): Promise<Array<{ decision: Decision; predecessorHash: string | null; successorPrevHash: string | null | undefined }>> {
+  const rows = await getSql()`
+    SELECT d.*,
+      (SELECT p.hash FROM decisions p WHERE p.seq < d.seq ORDER BY p.seq DESC LIMIT 1) AS neighbour_before_hash,
+      (SELECT n.prev_hash FROM decisions n WHERE n.seq > d.seq ORDER BY n.seq ASC LIMIT 1) AS neighbour_after_prev_hash,
+      EXISTS (SELECT 1 FROM decisions n WHERE n.seq > d.seq) AS has_neighbour_after
+    FROM decisions d WHERE d.invoice_id = ${invoiceId} ORDER BY d.seq ASC`;
+  return rows.map((r: any) => ({
+    decision: fromRow(r),
+    predecessorHash: r.neighbour_before_hash ?? null,
+    successorPrevHash: r.has_neighbour_after ? (r.neighbour_after_prev_hash ?? null) : undefined,
+  }));
+}
+
 export async function getAllDecisionsInOrder(): Promise<Decision[]> {
   const rows = await getSql()`SELECT * FROM decisions ORDER BY seq ASC`;
   return rows.map(fromRow);

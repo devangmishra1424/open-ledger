@@ -9,6 +9,7 @@ export const STAGE_HELP = {
   policy: 'Applies the approval rules',
   audit: 'Posts to the ledger and pays',
   human_review: 'A person decided',
+  audit_assemble: 'Handed to an auditor as evidence',
 };
 
 const ACTION_WORDS = {
@@ -27,6 +28,7 @@ const ACTION_WORDS = {
   human_approved: 'Approved',
   human_rejected: 'Rejected',
   human_contested: 'Challenged',
+  evidence_provided: 'Provided to an auditor',
 };
 
 /** Models write actions as "auto-approve" or with a non-breaking hyphen; the engine writes auto_approve. One spelling for lookups. */

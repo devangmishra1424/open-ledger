@@ -143,7 +143,7 @@ export function Integrity({ invoice }) {
   return (
     <div>
       <p className="vb-muted vb-small" style={{ marginTop: 0 }}>
-        Each step above is chained to the one before it with SHA-256, so changing any past record breaks every record after it. This checks the chain for this invoice from its first record.
+        Each step above is chained to the one before it with SHA-256, so changing any past record breaks every record after it. This checks each of this invoice's records, and its links to the records just before and after it in the chain.
       </p>
       <div className="vb-inline">
         <button type="button" className="vb-btn vb-btn-sm" onClick={verify} disabled={busy}>

@@ -2,36 +2,68 @@ import { explain, type ExplainResult } from "@/lib/explain";
 import { getSql } from "@/db/client";
 
 /**
- * Wraps the explain mechanic scoped to a PBC (Provided-By-Client) request.
- * Finds all invoices linked to the PBC request, and runs the "ask why" explanation
- * over each one to answer the auditor's question.
+ * Answers an auditor's question about one PBC request: the "ask why" mechanic (lib/explain.ts), run
+ * over each linked invoice's recorded decisions, one answer per invoice.
+ *
+ * Bounded, because each invoice is its own AI call (30 s timeout, retried on 429/5xx): at most
+ * MAX_INVOICES per question, at most CONCURRENCY calls in flight. Before, a request with 40 invoices
+ * meant 40 calls one after another, minutes of waiting and the provider's free-tier quota gone.
+ *
+ * One invoice's failure (the provider refusing, a timeout) is reported on that invoice's entry and
+ * logged, and the others still get their answers; nothing is dropped silently.
  */
-/** One answer per linked invoice, saying which invoice it is about (several are shown together). */
-export interface PbcNarrativeResult extends ExplainResult {
-  invoiceId: string;
-  invoiceNumber: string | null;
+export const MAX_INVOICES = 10;
+const CONCURRENCY = 3;
+
+export type PbcNarrativeResult =
+  | (ExplainResult & { invoiceId: string; invoiceNumber: string | null })
+  | { invoiceId: string; invoiceNumber: string | null; skipped: string }
+  | { invoiceId: string; invoiceNumber: string | null; error: string };
+
+export interface PbcNarrative {
+  results: PbcNarrativeResult[];
+  /** How many linked invoices were asked about (at most MAX_INVOICES), and how many the request has. */
+  answeredFor: number;
+  totalLinked: number;
 }
 
-export async function narratePbcResponse(requestId: string, question: string): Promise<PbcNarrativeResult[]> {
-  const sql = getSql();
-  const requests = await sql`SELECT * FROM pbc_requests WHERE id = ${requestId}`;
-  if (requests.length === 0) throw new Error(`narratePbcResponse: no pbc_requests row found with id '${requestId}'`);
-
-  const req = requests[0];
-  const linkedIds: string[] = (req.linked_invoice_ids ?? "").split(",").filter(Boolean);
-
-  const results: PbcNarrativeResult[] = [];
-  
-  for (const invoiceId of linkedIds) {
-    // Anchor to the latest decision for the invoice
-    const decisionsRows = await sql`SELECT id FROM decisions WHERE invoice_id = ${invoiceId} ORDER BY seq DESC LIMIT 1`;
-    if (decisionsRows.length > 0) {
-      const anchorDecisionId = decisionsRows[0].id;
-      const res = await explain(invoiceId, anchorDecisionId, question);
-      const [bill] = await sql`SELECT invoice_number FROM vendor_bills WHERE id = ${invoiceId}`;
-      results.push({ ...res, invoiceId, invoiceNumber: bill?.invoice_number ?? null });
+/** Runs `work` over `items` with at most `limit` in flight; results keep the items' order. */
+async function mapBounded<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const lanes = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await work(items[i]);
     }
-  }
+  });
+  await Promise.all(lanes);
+  return out;
+}
 
-  return results;
+export async function narratePbcResponse(requestId: string, question: string): Promise<PbcNarrative> {
+  const sql = getSql();
+  const [req] = await sql`SELECT linked_invoice_ids FROM pbc_requests WHERE id = ${requestId}`;
+  if (!req) throw new Error(`narratePbcResponse: no pbc_requests row found with id '${requestId}'`);
+
+  const linkedIds: string[] = (req.linked_invoice_ids ?? "").split(",").filter(Boolean);
+  const asked = linkedIds.slice(0, MAX_INVOICES);
+  const numbers = new Map<string, string>(
+    asked.length ? (await sql`SELECT id, invoice_number FROM vendor_bills WHERE id = ANY(${asked})`).map((r: any) => [r.id, r.invoice_number]) : [],
+  );
+
+  const results = await mapBounded(asked, CONCURRENCY, async (invoiceId): Promise<PbcNarrativeResult> => {
+    const invoiceNumber = numbers.get(invoiceId) ?? null;
+    const [anchor] = await sql`SELECT id FROM decisions WHERE invoice_id = ${invoiceId} ORDER BY seq DESC LIMIT 1`;
+    if (!anchor) return { invoiceId, invoiceNumber, skipped: "No decisions are recorded for this invoice yet." };
+    try {
+      return { ...(await explain(invoiceId, anchor.id, question)), invoiceId, invoiceNumber };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error(`narratePbcResponse: request ${requestId}, invoice ${invoiceId}: the explanation failed: ${message}`);
+      return { invoiceId, invoiceNumber, error: message };
+    }
+  });
+
+  return { results, answeredFor: asked.length, totalLinked: linkedIds.length };
 }

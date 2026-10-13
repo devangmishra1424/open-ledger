@@ -3,6 +3,7 @@ import { checkHumanAction } from "@/lib/bill-workflow";
 import { detectBankChangeGates, type BankChangeGateCheck } from "@/lib/ledger/bank-change-review";
 import { buildThreeWay, type ThreeWay } from "@/lib/three-way";
 import type { BillStatus } from "@/lib/types";
+import { readableAgentFailure } from "@/lib/agent/llm";
 
 /**
  * The read model: turns the real tables (vendor_bills, decisions, ...) into the one shape every
@@ -27,6 +28,7 @@ const NODE_LABELS: Record<string, string> = {
   policy: "Policy Engine",
   audit: "Posting & Payment",
   human_review: "Human Review",
+  audit_assemble: "Evidence for an auditor",
 };
 
 export function nodeLabel(nodeId: string): string {
@@ -219,7 +221,8 @@ export function toFrontendInvoice(params: {
   const { bill, vendorName, taxId, paymentTermsCode, poNumber, decisions, lines, reasons, gate, payment } = params;
   const status = bill.status as BillStatus;
 
-  const machine = decisions.filter((d) => d.nodeId !== "human_review");
+  // The pipeline's own steps. A person's review and handing evidence to an auditor are on the trail too, but are not stages.
+  const machine = decisions.filter((d) => d.nodeId !== "human_review" && d.nodeId !== "audit_assemble");
   const policy = lastOf(machine, (d) => d.nodeId === "policy");
   const audit = lastOf(machine, (d) => d.nodeId === "audit");
   const hasReconsiderable = machine.some((d) => d.nodeId === "investigate" || d.nodeId === "verify");
@@ -268,7 +271,8 @@ export function toFrontendInvoice(params: {
         // The invoice may be perfectly fine; the automated review did not finish. Say that, with the real cause.
         headline = "The automated review did not finish";
         const failure = lastOf(machine, (d) => d.actionTaken === "error");
-        detail = (clip(failure?.claims?.[0]?.replace(/^(Investigator|Verifier) failed: /, ""), 260) ?? "A step failed.") + " A person has to decide, or you can retry the AI review.";
+        const failureText = failure?.claims?.[0]?.replace(/^(Investigator|Verifier) failed: /, "");
+        detail = (clip(failureText ? readableAgentFailure(failureText, failure?.model) : undefined, 260) ?? "A step failed.") + " A person has to decide, or you can retry the AI review.";
       } else {
         headline = reason ? reason.name : "Needs a decision";
         // A policy claim is the specific fact (e.g. which limit was breached); the reason's description is the general rule.
@@ -340,7 +344,9 @@ export function toFrontendInvoice(params: {
       actor: d.agentId, model: d.model ?? null,
       actionTaken: d.actionTaken ?? null, reasonCode: d.reasonCode ?? null,
       confidence: d.confidence != null ? Math.round(d.confidence * 1000) / 10 : null,
-      hash: d.hash, at: d.createdAt, claims: d.claims ?? [],
+      hash: d.hash, at: d.createdAt,
+      // A failed step's claim may be a provider's raw error text: worded for the screen, the record itself unchanged.
+      claims: d.actionTaken === "error" ? (d.claims ?? []).map((c) => readableAgentFailure(c, d.model)) : (d.claims ?? []),
     })),
     rawStatus: status,
     state,

@@ -260,7 +260,7 @@ async function seedPbcRequests(): Promise<void> {
   await sql`
     INSERT INTO pbc_requests (id, item_type, description, due_date, owner_name, status, linked_invoice_ids, created_at) VALUES
       (${randomUUID()}, 'invoice_bundle', 'Q3 Cloud Infrastructure & Capital Asset Vendor Invoices Sample',
-        ${daysAgo(-14)}, 'PwC Lead Auditor (E. Vance)', 'submitted', ${cloudBundle.join(",")}, ${daysAgo(5)}),
+        ${daysAgo(-14)}, 'External Auditor (E. Vance)', 'submitted', ${cloudBundle.join(",")}, ${daysAgo(5)}),
       (${randomUUID()}, 'tie_out_check', 'Vendor Wire Route Alterations & Anti-Fraud Whitelist Audit',
         ${daysAgo(-7)}, 'SOX Compliance Team', 'open', ${fraudBundle.join(",")}, ${daysAgo(2)}),
       (${randomUUID()}, 'ap_aging', 'High-Value Disbursements & Blanket PO Overage Review',
