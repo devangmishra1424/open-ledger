@@ -95,9 +95,10 @@ export function AddPoModal({ onClose, onSaved }) {
   const toast = useToasts();
   const fileRef = useRef(null);
   const [doc, setDoc] = useState('');
-  const [fileName, setFileName] = useState('');
   const [reading, setReading] = useState(false);
   const [readNote, setReadNote] = useState(null);
+  const [documentId, setDocumentId] = useState(null);
+  const [readFrom, setReadFrom] = useState(null);
 
   const [vendor, setVendor] = useState('');
   const [poNumber, setPoNumber] = useState('');
@@ -110,51 +111,50 @@ export function AddPoModal({ onClose, onSaved }) {
   const [saved, setSaved] = useState(null);
 
   const setItem = (i, patch) => setItems((list) => list.map((it, j) => (j === i ? { ...it, ...patch } : it)));
-  const isPdf = doc.startsWith('data:application/pdf');
   const total = items.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.rate) || 0), 0);
 
-  const onFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setError(null);
-    setFileName(file.name);
-    try {
-      if (file.name.toLowerCase().endsWith('.pdf')) {
-        setDoc(await new Promise((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result);
-          r.onerror = () => reject(new Error('Could not read the file.'));
-          r.readAsDataURL(file);
-        }));
-      } else {
-        setDoc(await file.text());
-      }
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const readDocument = async () => {
+  /** Any PO document (PDF, scan, photo, Word, Excel) or pasted text, read by the document reader into the form. */
+  const fill = async (promise) => {
     setReading(true);
     setError(null);
     setReadNote(null);
     try {
-      const d = await api.parsePurchaseOrder(doc);
-      if (d.vendorName) setVendor(d.vendorName);
+      const r = await promise;
+      const d = r.extraction;
+      setDocumentId(r.alreadyUploaded?.purchaseOrderId ? null : r.documentId);
+      setReadFrom(r.reading);
+      if (d.vendorName) setVendor(r.books?.vendor && !r.books.vendor.exact ? d.vendorName : (r.books?.vendor?.name ?? d.vendorName));
       if (d.poNumber) setPoNumber(d.poNumber);
       if (d.orderDate) setOrderDate(d.orderDate);
       if (d.currency) setCurrency(d.currency);
       if (d.lines.length > 0) setItems(d.lines.map((l) => ({ description: l.description, qty: String(l.quantity), rate: String(l.unitPrice) })));
-      setReadNote(d.missing.length === 0
-        ? { kind: 'info', text: 'Read from the document. Check every field below before saving.' }
-        : { kind: 'warn', text: `Could not read ${d.missing.join(', ')}. Fill ${d.missing.length === 1 ? 'it' : 'them'} in below.` });
+      const notes = [];
+      if (r.alreadyUploaded?.purchaseOrderId) notes.push('This exact file was already saved as a purchase order.');
+      if (r.books?.existingPoId) notes.push(`A purchase order numbered ${d.poNumber} is already on file; saving would be refused.`);
+      if (r.books?.vendor && !r.books.vendor.exact) notes.push(`The document reads “${d.vendorName}”; a vendor “${r.books.vendor.name}” with the same letters is on file. Check which is right.`);
+      notes.push(...d.missing.map((m) => `Could not read ${m}.`.replace('Could not read this was', 'This was')));
+      setReadNote(notes.length === 0
+        ? { kind: 'info', text: `Read from ${r.reading.filename}. Check every field below before saving.` }
+        : { kind: 'warn', text: notes.join(' ') });
     } catch (err) {
       setError(err.message);
     } finally {
       setReading(false);
     }
   };
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.name.toLowerCase().endsWith('.txt')) {
+      setDoc(await file.text());
+      return;
+    }
+    fill(api.readDocument(file, 'purchase_order'));
+  };
+
+  const readDocument = () => fill(api.readPastedDocument(doc, 'purchase_order'));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -165,6 +165,7 @@ export function AddPoModal({ onClose, onSaved }) {
         vendor: vendor.trim(), poNumber: poNumber.trim(), orderDate, currency,
         items: items.map((it) => ({ description: it.description.trim(), qty: Number(it.qty), rate: Number(it.rate) })),
         receipt: receiptPayload(receipt, items),
+        sourceDocumentId: documentId ?? undefined,
       };
       const created = await api.createPurchaseOrder(body);
       toast.success(`Purchase order ${created.poNumber} saved.`);
@@ -200,19 +201,19 @@ export function AddPoModal({ onClose, onSaved }) {
                 <span>PO text</span>
                 <textarea
                   style={{ minHeight: 120, fontFamily: 'var(--vb-mono)', fontSize: 13 }}
-                  value={isPdf ? `(PDF: ${fileName})` : doc}
-                  readOnly={isPdf}
+                  value={doc}
                   onChange={(e) => setDoc(e.target.value)}
                   placeholder="Paste the purchase order here…"
                 />
               </label>
               <div className="vb-inline" style={{ marginTop: 8 }}>
-                <input ref={fileRef} type="file" accept=".pdf,.txt,text/plain,application/pdf" onChange={onFile} hidden />
-                <button type="button" className="vb-btn vb-btn-sm" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload PDF or text</button>
+                <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.docx,.xlsx,.pptx,.html,.htm,.csv,.md,.txt" onChange={onFile} hidden />
+                <button type="button" className="vb-btn vb-btn-sm" onClick={() => fileRef.current?.click()} disabled={reading}><Upload size={14} /> Upload a PO (PDF, scan, photo, Word, Excel)</button>
                 <button type="button" className="vb-btn vb-btn-sm" onClick={readDocument} disabled={reading || !doc.trim()}>{reading ? <Spinner label="Reading…" /> : 'Read it into the form'}</button>
-                <button type="button" className="vb-link-btn" onClick={() => { setFileName(''); setDoc(samplePo()); }}>Use a sample PO</button>
+                <button type="button" className="vb-link-btn" onClick={() => setDoc(samplePo())}>Use a sample PO</button>
               </div>
-              <div className="vb-field-hint" style={{ marginTop: 6 }}>Reads labelled text and table layouts only; nothing is saved until you press Save. Anything it cannot read, you type.</div>
+              <div className="vb-field-hint" style={{ marginTop: 6 }}>Read by the same document reader as invoices (OCR for scans and photos). The vendor is taken from the Vendor / Supplier / To block, not your own letterhead. Nothing is saved until you press Save; anything it cannot read, you type.</div>
+              {readFrom && <div className="vb-field-hint" style={{ marginTop: 4 }}>Read {readFrom.filename}: {readFrom.ocrUsed ? `OCR ${Math.round((readFrom.ocrConfidence ?? 0) * 100)}% confident` : 'no OCR needed'}{readFrom.timingMs?.total ? `, ${(readFrom.timingMs.total / 1000).toFixed(1)} s` : ''}.</div>}
             </details>
             {readNote && <Banner kind={readNote.kind}>{readNote.text}</Banner>}
 

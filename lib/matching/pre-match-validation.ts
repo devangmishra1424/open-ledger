@@ -61,8 +61,14 @@ export interface PreMatchResult {
   blockingFinding?: PreMatchFinding;
 }
 
-/** Spec §1.2 doesn't enumerate the actual list — this is the Layer 1 config for it. */
-export const SUPPORTED_CURRENCIES = ["USD", "EUR", "GBP", "CAD"] as const;
+/**
+ * Spec §1.2 doesn't enumerate the actual list — this is the Layer 1 config for it. INR, SGD and AUD were added
+ * when invoices began arriving as documents (Indian GST invoices are INR; Peakflo-style SEA customers bill in SGD):
+ * before, every rupee invoice stopped at EXC-CURRENCY. Note what "supported" means here: the books keep each bill
+ * in its own currency at exchange rate 1.0 (there is no FX conversion), and the escalation thresholds in
+ * decision-matrix.ts are plain amounts, so for INR they are stricter than for USD, never looser.
+ */
+export const SUPPORTED_CURRENCIES = ["USD", "EUR", "GBP", "CAD", "INR", "SGD", "AUD"] as const;
 
 export function isCurrencySupported(currency: string): boolean {
   return (SUPPORTED_CURRENCIES as readonly string[]).includes(currency);

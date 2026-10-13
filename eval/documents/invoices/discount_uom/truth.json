@@ -1,0 +1,32 @@
+{
+  "vendor_name": "Malabar Spice Traders",
+  "vendor_tax_id": "32ABMPT7740C1ZD",
+  "invoice_number": "MST/1029",
+  "invoice_date": "2026-10-11",
+  "po_reference": "PO-2026-0962",
+  "currency": "INR",
+  "line_items": [
+    {
+      "description": "Black Pepper Whole (Grade A, 550 GL)",
+      "quantity": 25.0,
+      "unit_price": 608.0
+    },
+    {
+      "description": "Green Cardamom 8 mm Bold",
+      "quantity": 4.5,
+      "unit_price": 2450.0
+    },
+    {
+      "description": "Turmeric Powder 1 kg Pouch",
+      "quantity": 40.0,
+      "unit_price": 115.05
+    }
+  ],
+  "subtotal": 30827.0,
+  "tax": 1541.35,
+  "charges": 0.0,
+  "discount": 0.0,
+  "round_off": -0.35,
+  "total": 32368.0,
+  "notes": "unit_price is the net rate after the line discount (taxable value / quantity)"
+}

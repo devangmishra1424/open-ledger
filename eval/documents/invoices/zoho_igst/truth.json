@@ -1,0 +1,32 @@
+{
+  "vendor_name": "Kaveri Cloud Solutions LLP",
+  "vendor_tax_id": "29AAQFK5520H1ZK",
+  "invoice_number": "KCS-INV-00982",
+  "invoice_date": "2026-10-05",
+  "po_reference": "PO-2026-0904",
+  "currency": "INR",
+  "line_items": [
+    {
+      "description": "Annual Software Licence - Inventory Module (20 users)",
+      "quantity": 20.0,
+      "unit_price": 1850.0
+    },
+    {
+      "description": "Onboarding & Training (remote sessions)",
+      "quantity": 6.0,
+      "unit_price": 2500.0
+    },
+    {
+      "description": "Priority Support - Quarterly",
+      "quantity": 1.0,
+      "unit_price": 9000.0
+    }
+  ],
+  "subtotal": 61000.0,
+  "tax": 10980.0,
+  "charges": 0.0,
+  "discount": 0.0,
+  "round_off": 0.0,
+  "total": 71980.0,
+  "notes": null
+}

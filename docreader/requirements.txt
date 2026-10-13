@@ -1,0 +1,15 @@
+# VeriBook document reader: Docling (layout, tables, OCR) behind a small HTTP service.
+# Pinned to the set BusinessFlow verified on real scans (see that repo's requirements.txt): an unpinned
+# docling-ibm-models or rapidocr has silently broken OCR before ("No OCR engine found", garbled figures).
+docling==2.121.0
+docling-core==2.92.0
+docling-ibm-models==3.14.0
+docling-parse==7.15.0
+docling-slim==2.121.0
+rapidocr==3.9.2
+# RapidOCR's inference engine. Not a dependency rapidocr declares, so without it docling fails at start-up with
+# "onnxruntime is not installed". Same version as BusinessFlow's verified set.
+onnxruntime==1.29.0
+fastapi
+uvicorn[standard]
+python-multipart

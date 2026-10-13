@@ -11,3 +11,12 @@ dist/
 *.log
 *.tsbuildinfo
 next-env.d.ts
+
+# Document reader (Python): its virtualenv and caches
+docreader/.venv/
+__pycache__/
+.pytest_cache/
+
+# Real invoices used for testing: kept on this machine only, never committed
+eval/documents/private/
+

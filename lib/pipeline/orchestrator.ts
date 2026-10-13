@@ -68,6 +68,20 @@ async function publish(decision: Decision): Promise<void> {
 
 /** What the extract decision records for an extraction: the real producer, its method, and what it was unsure of. */
 function extractionDecisionFields(result: ExtractionResult) {
+  if (result.review) {
+    // A person checked the reading against the document and saved it: the entry is theirs. The machine reading is
+    // kept as evidence (how it was read, how sure it was, what the person changed), and the confidence recorded is
+    // the person's confirmation, which is what the layout check (EXC-LAYOUT) is asking for.
+    const r = result.review;
+    const reader = result.method === "llm" ? `the layout rules and the AI model ${result.model}` : "the layout rules";
+    const claims: Claim[] = [
+      { text: `Read from ${r.document.filename} (${r.document.sourceKind.replace("_", " ")}${r.document.ocrConfidence != null ? `, OCR confidence ${Math.round(r.document.ocrConfidence * 100)}%` : ""}) by ${reader}, ${Math.round(r.machineConfidence * 100)}% sure.`, tag: "grounded" },
+      { text: `Checked against the document and saved by ${r.by}.`, tag: "grounded" },
+      ...r.corrections.map((c) => ({ text: `Corrected by ${r.by}: ${c.field} read as "${c.read}", saved as "${c.saved}".`, tag: "grounded" as const })),
+      ...result.submission.uncertain_fields.map((f) => ({ text: `Was flagged for checking: ${f}`, tag: "grounded" as const })),
+    ];
+    return { agentId: `human:${r.by}`, model: undefined, confidence: 1, actionTaken: "extracted", toolCalls: result.toolCalls, claims };
+  }
   const claims: Claim[] = result.submission.uncertain_fields.map((f) => ({ text: `Uncertain: ${f}`, tag: "grounded" as const }));
   if (result.fallbackReason) claims.push({ text: `Extraction fallback: ${result.fallbackReason}`, tag: "grounded" });
   return {

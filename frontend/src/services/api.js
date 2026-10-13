@@ -12,6 +12,8 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 const DEFAULT_TIMEOUT_MS = 30_000;
 // The AI steps (re-review, document reading) can legitimately take a while on a rate-limited provider.
 const LONG_TIMEOUT_MS = 120_000;
+// Reading a scanned or photographed document (OCR) and, when needed, the AI reader: the server allows 300 s.
+const DOCUMENT_TIMEOUT_MS = 300_000;
 
 export class ApiError extends Error {
   constructor(status, message) {
@@ -91,6 +93,37 @@ async function request(path, { method = 'GET', body, timeout = DEFAULT_TIMEOUT_M
 }
 
 /**
+ * A file upload (multipart/form-data): same sign-in header, timeout and error handling as request().
+ * The browser sets the multipart boundary itself, so no Content-Type is set here.
+ */
+async function upload(path, form, { timeout = DOCUMENT_TIMEOUT_MS } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  const headers = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, { method: 'POST', headers, body: form, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new ApiError(0, 'Reading the document took too long. Try a smaller file or fewer pages.');
+    throw new ApiError(0, 'Could not reach the server. Is the backend running?');
+  } finally {
+    clearTimeout(timer);
+  }
+  const text = await res.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    if (res.ok) throw new ApiError(res.status, 'The server returned something that is not JSON.');
+  }
+  if (res.status === 401) window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+  if (!res.ok) throw new ApiError(res.status, data?.error || `${res.status} ${res.statusText}`);
+  return data;
+}
+
+/**
  * A file download: the bytes, not JSON, but with the same sign-in header and error handling as
  * request(). Returns { blob, filename } (the name from the server's Content-Disposition).
  */
@@ -136,6 +169,19 @@ export const api = {
   getInvoiceById: (id) => request(`/invoices/${encodeURIComponent(id)}`),
   createInvoice: (invoice) => request('/invoices', { method: 'POST', body: invoice }),
   ingestInvoice: (rawText, vendorName) => request('/invoices/ingest', { method: 'POST', body: { rawText, vendorName }, timeout: LONG_TIMEOUT_MS }),
+
+  // --- Documents: read any invoice / PO file (PDF, scan, photo, Word, Excel), check it, then save it ---
+  readDocument: (file, purpose = 'invoice') => {
+    const form = new FormData();
+    form.append('purpose', purpose);
+    form.append('file', file, file.name);
+    return upload('/documents/read', form);
+  },
+  readPastedDocument: (text, purpose = 'invoice') => request('/documents/read', { method: 'POST', body: { text, purpose }, timeout: DOCUMENT_TIMEOUT_MS }),
+  getDocument: (id) => request(`/documents/${encodeURIComponent(id)}`),
+  /** The original file as a blob (with the sign-in header, so it also works when sign-in is on). */
+  getDocumentFile: (id) => download(`/documents/${encodeURIComponent(id)}/file`),
+  saveInvoiceFromDocument: (documentId, reviewerName, invoice) => request('/invoices/from-document', { method: 'POST', body: { documentId, reviewerName, invoice }, timeout: LONG_TIMEOUT_MS }),
 
   // --- Purchase orders and goods receipts (the other two documents of a three-way match) ---
   getPurchaseOrders: () => request('/purchase-orders?limit=200'),

@@ -11,4 +11,15 @@ export function verifierPrompt(invoiceId: string): string {
   return `You are the independent Verifier for a Tier-2-eligible decision on invoice \`${invoiceId}\`. You're given the same \`MatchResult\` and the Investigator's evidence and conclusion — but you must reach your own independent judgment, not defer to their stated confidence. Explicitly flag disagreement if your assessment of the exception type, fraud likelihood, or recommended action differs from theirs. Respond only via \`submit_verification\`.`;
 }
 
+export const DOCUMENT_READER_PROMPT = `You read one invoice. Below is its text as the page shows it: one printed row per line, cells separated by " | ". It may have been read by OCR, so a character can be wrong. Report exactly what the document says, through \`submit_invoice_reading\`.
+
+- vendor_name: the business that ISSUED the invoice (letterhead, "From", "for <Company>" signature), never the buyer / bill-to / ship-to / consignee.
+- Identifiers (invoice number, PO / buyer's order / your-order reference, tax id such as a GSTIN or VAT number): copy them exactly as printed.
+- Dates as YYYY-MM-DD. Indian, UK and European documents write the day first (05/10/2026 is 5 October); US documents write the month first.
+- Amounts as plain numbers: "1,04,135.00" is 104135, "Rs. 3,500/-" is 3500. currency as a 3-letter code (INR for ₹ / Rs. / GSTIN documents).
+- line_items: one per item row of the item table, nothing else (not tax rows, totals, an HSN/tax summary table, or charges). quantity and unit_price as printed; amount = the row's pre-tax amount. If a row has a discount, unit_price is that pre-tax amount divided by the quantity. A row with only an amount is quantity 1 at that amount.
+- tax_lines: every tax charged with its amount (CGST, SGST, IGST, UTGST, VAT, sales tax, cess). other_charges: shipping, freight, packing, insurance and similar. discount: an invoice-level discount as a positive number. round_off: signed (+0.34, -0.35).
+- subtotal: the pre-tax total of the items as printed; total: the final amount payable.
+- A value that is not printed is null. Never work a value out from others (except a discounted unit_price as above). List in uncertain_fields any field you could not read clearly.`;
+
 export const EXTRACTOR_PROMPT = `Extract these fields from the invoice text below: vendor name, invoice number, invoice date, PO reference (if present), line items (description, quantity, unit price), subtotal, tax, total, currency. If a field is missing or illegible, return null rather than guessing. Report overall confidence (0-1), and flag any specific field you're uncertain about. Respond only via \`submit_extraction\`.`;

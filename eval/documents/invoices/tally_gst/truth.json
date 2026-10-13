@@ -1,0 +1,37 @@
+{
+  "vendor_name": "Shree Ganesh Industrial Supplies",
+  "vendor_tax_id": "27AAKFS4821M1Z3",
+  "invoice_number": "SGIS/2026-27/0412",
+  "invoice_date": "2026-09-12",
+  "po_reference": "PO-2026-0871",
+  "currency": "INR",
+  "line_items": [
+    {
+      "description": "Hex Bolt M10 x 50 (Zinc Plated)",
+      "quantity": 500.0,
+      "unit_price": 6.4
+    },
+    {
+      "description": "Spring Washer M10",
+      "quantity": 500.0,
+      "unit_price": 0.85
+    },
+    {
+      "description": "Industrial Grease 1 kg (Lithium Complex)",
+      "quantity": 12.0,
+      "unit_price": 285.0
+    },
+    {
+      "description": "Safety Gloves, Cut Resistant (Level 5)",
+      "quantity": 24.0,
+      "unit_price": 145.5
+    }
+  ],
+  "subtotal": 10537.0,
+  "tax": 1896.66,
+  "charges": 0.0,
+  "discount": 0.0,
+  "round_off": 0.34,
+  "total": 12434.0,
+  "notes": null
+}

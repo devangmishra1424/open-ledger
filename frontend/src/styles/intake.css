@@ -1,0 +1,83 @@
+/* Adding an invoice from a document: the picker, the reading progress, and the review (original | form). */
+
+.vb-intake-pick { display: flex; flex-direction: column; gap: 14px; }
+.vb-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center;
+  min-height: 170px; padding: 24px; border: 2px dashed var(--vb-border); border-radius: 14px; background: var(--vb-bg);
+  color: var(--vb-text); cursor: pointer; transition: border-color 0.15s, background 0.15s;
+}
+.vb-drop:hover, .vb-drop:focus-visible, .vb-drop.is-over { border-color: var(--vb-accent); background: var(--vb-ok-bg); outline: none; }
+.vb-drop span { font-size: 13px; }
+.vb-samples { display: flex; flex-direction: column; gap: 8px; }
+.vb-sample-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
+.vb-sample {
+  display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 10px 12px; min-height: 52px;
+  border: 1px solid var(--vb-border); border-radius: var(--vb-radius-sm); background: var(--vb-panel-2); color: var(--vb-text);
+  font: inherit; font-size: 13px; cursor: pointer;
+}
+.vb-sample:hover:not(:disabled) { border-color: var(--vb-accent); }
+.vb-sample:disabled { opacity: 0.6; cursor: wait; }
+.vb-sample svg { flex-shrink: 0; margin-top: 2px; color: var(--vb-accent); }
+.vb-sample span { display: flex; flex-direction: column; gap: 2px; }
+.vb-sample small { color: var(--vb-muted); font-size: 12px; }
+
+.vb-intake-reading { display: flex; flex-direction: column; gap: 14px; padding: 18px 4px; }
+.vb-reading-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--vb-dim); font-size: 14px; }
+.vb-reading-steps li.is-on { color: var(--vb-text); }
+
+.vb-review { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 18px; align-items: start; }
+.vb-review-doc { position: sticky; top: 0; display: flex; flex-direction: column; gap: 10px; }
+.vb-review-form { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.vb-doc-frame { width: 100%; height: min(72vh, 820px); border: 1px solid var(--vb-border); border-radius: 10px; background: #fff; }
+.vb-doc-loading { display: grid; place-items: center; background: var(--vb-bg); }
+.vb-doc-image { overflow: auto; background: #1d1f26; }
+.vb-doc-image img { display: block; width: 100%; height: auto; }
+.vb-doc-text {
+  margin: 0; max-height: min(72vh, 820px); overflow: auto; padding: 14px; border: 1px solid var(--vb-border); border-radius: 10px;
+  background: var(--vb-bg); color: var(--vb-text); font-family: var(--vb-mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+}
+.vb-reading-facts { margin: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
+.vb-reading-facts div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
+.vb-reading-facts dt { color: var(--vb-dim); }
+.vb-reading-facts dd { margin: 0; color: var(--vb-muted); overflow-wrap: anywhere; }
+
+.vb-field-label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vb-src { font-size: 10.5px; font-weight: 600; letter-spacing: 0.2px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--vb-border); color: var(--vb-muted); white-space: nowrap; }
+.vb-src-ai { color: #d3e1ff; border-color: rgba(143, 180, 255, 0.45); background: var(--vb-info-bg); }
+.vb-src-rules-ai { color: var(--vb-accent); border-color: rgba(167, 201, 87, 0.4); background: var(--vb-ok-bg); }
+.vb-flag { display: inline-flex; gap: 5px; align-items: flex-start; font-size: 12px; color: #ffe9a8; }
+.vb-flag svg { flex-shrink: 0; margin-top: 2px; }
+.vb-review input.is-flagged, .vb-lines.is-flagged, .vb-totals.is-flagged { border-color: rgba(255, 207, 64, 0.6) !important; box-shadow: 0 0 0 2px var(--vb-attention-bg); }
+.vb-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+
+.vb-lines { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--vb-border-soft, var(--vb-border)); border-radius: var(--vb-radius-sm); }
+.vb-lines-head, .vb-lines-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px 96px 92px 36px; gap: 6px; align-items: center; }
+.vb-lines-head { font-size: 11.5px; color: var(--vb-dim); padding: 0 2px; }
+.vb-lines-row input, .vb-amount-row input { background: var(--vb-bg); border: 1px solid var(--vb-border); color: var(--vb-text); border-radius: var(--vb-radius-sm); padding: 8px 9px; font: inherit; font-size: 13.5px; min-height: 38px; width: 100%; }
+.vb-line-amount { text-align: right; font-size: 13px; color: var(--vb-muted); }
+.vb-amount-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px 36px; gap: 6px; }
+
+.vb-totals { display: flex; flex-direction: column; gap: 10px; padding: 10px; border: 1px solid var(--vb-border); border-radius: var(--vb-radius-sm); }
+.vb-sum { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 10px 12px; border-radius: var(--vb-radius-sm); font-family: var(--vb-mono); font-size: 13px; }
+.vb-sum.is-ok { background: var(--vb-ok-bg); color: var(--vb-accent); }
+.vb-sum.is-off { background: var(--vb-danger-bg); color: #ffd0d0; }
+.vb-sum-verdict { display: inline-flex; gap: 5px; align-items: center; font-family: inherit; }
+
+.vb-modal.vb-modal-wide { width: min(1240px, 100%); }
+
+@media (max-width: 900px) {
+  .vb-review { grid-template-columns: minmax(0, 1fr); }
+  .vb-review-doc { position: static; }
+  .vb-doc-frame, .vb-doc-text { height: 52vh; }
+}
+@media (max-width: 560px) {
+  .vb-grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .vb-lines-head { display: none; }
+  .vb-lines-row { grid-template-columns: minmax(0, 1fr) 64px 84px 36px; }
+  .vb-line-amount { display: none; }
+}
+
+/* The invoice page's "Source document" section */
+.vb-source-doc { display: flex; flex-direction: column; gap: 10px; }
+.vb-source-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.vb-source-head .vb-reading-facts { flex: 1 1 320px; }

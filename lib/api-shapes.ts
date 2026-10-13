@@ -120,6 +120,11 @@ export interface FrontendInvoice {
   hash: string;
   items: Array<{ description: string; qty: number; rate: number; amount: number }>;
   decisions: DecisionView[];
+  /** The uploaded file this invoice was entered from (GET /api/documents/:id), when it came from a document. */
+  sourceDocumentId: string | null;
+  taxTotal: number;
+  /** Round off minus invoice-level discount: total = items + tax + adjustment. */
+  adjustmentTotal: number;
 
   rawStatus: BillStatus;
   state: CaseState;
@@ -339,6 +344,9 @@ export function toFrontendInvoice(params: {
     riskFlags,
     hash: latest?.hash ?? "",
     items: lines.map((l) => ({ description: l.description, qty: l.qtyInvoiced, rate: l.unitPrice, amount: Math.round(l.qtyInvoiced * l.unitPrice * 100) / 100 })),
+    sourceDocumentId: bill.source_document_id ?? null,
+    taxTotal: Number(bill.tax_total ?? 0),
+    adjustmentTotal: Number(bill.adjustment_total ?? 0),
     decisions: decisions.map((d) => ({
       id: d.id, nodeId: d.nodeId, label: nodeLabel(d.nodeId),
       actor: d.agentId, model: d.model ?? null,

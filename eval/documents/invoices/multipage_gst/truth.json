@@ -1,0 +1,157 @@
+{
+  "vendor_name": "Deccan Electricals & Controls",
+  "vendor_tax_id": "33AAGCD6612K1Z2",
+  "invoice_number": "DEC/26/1187",
+  "invoice_date": "2026-10-08",
+  "po_reference": "PO-2026-0950",
+  "currency": "INR",
+  "line_items": [
+    {
+      "description": "FR PVC Insulated Copper Cable 1.5 sq mm",
+      "quantity": 300.0,
+      "unit_price": 18.6
+    },
+    {
+      "description": "FR PVC Insulated Copper Cable 2.5 sq mm",
+      "quantity": 250.0,
+      "unit_price": 29.4
+    },
+    {
+      "description": "FR PVC Insulated Copper Cable 4 sq mm",
+      "quantity": 150.0,
+      "unit_price": 46.75
+    },
+    {
+      "description": "Armoured Cable 4C x 16 sq mm Al",
+      "quantity": 80.0,
+      "unit_price": 212.0
+    },
+    {
+      "description": "MCB 6A Single Pole C-Curve",
+      "quantity": 24.0,
+      "unit_price": 168.0
+    },
+    {
+      "description": "MCB 16A Single Pole C-Curve",
+      "quantity": 24.0,
+      "unit_price": 172.0
+    },
+    {
+      "description": "MCB 32A Triple Pole C-Curve",
+      "quantity": 6.0,
+      "unit_price": 1145.0
+    },
+    {
+      "description": "RCCB 40A 4 Pole 30mA",
+      "quantity": 4.0,
+      "unit_price": 3480.0
+    },
+    {
+      "description": "Power Contactor 9A 230V AC Coil",
+      "quantity": 10.0,
+      "unit_price": 1260.0
+    },
+    {
+      "description": "Power Contactor 25A 230V AC Coil",
+      "quantity": 6.0,
+      "unit_price": 2195.0
+    },
+    {
+      "description": "Thermal Overload Relay 7-10A",
+      "quantity": 10.0,
+      "unit_price": 1540.0
+    },
+    {
+      "description": "Push Button Green (NO)",
+      "quantity": 30.0,
+      "unit_price": 96.0
+    },
+    {
+      "description": "Push Button Red (NC)",
+      "quantity": 30.0,
+      "unit_price": 96.0
+    },
+    {
+      "description": "Pilot Lamp LED 22mm Red",
+      "quantity": 40.0,
+      "unit_price": 74.0
+    },
+    {
+      "description": "Pilot Lamp LED 22mm Green",
+      "quantity": 40.0,
+      "unit_price": 74.0
+    },
+    {
+      "description": "DIN Rail 35mm Slotted (1 m)",
+      "quantity": 20.0,
+      "unit_price": 118.0
+    },
+    {
+      "description": "Cable Tie 200mm Black (pack of 100)",
+      "quantity": 15.0,
+      "unit_price": 86.0
+    },
+    {
+      "description": "Lugs Copper Ring Type 2.5 sq mm (pack of 100)",
+      "quantity": 5.0,
+      "unit_price": 310.0
+    },
+    {
+      "description": "Lugs Copper Ring Type 6 sq mm (pack of 100)",
+      "quantity": 5.0,
+      "unit_price": 545.0
+    },
+    {
+      "description": "PVC Conduit Pipe 25mm (3 m)",
+      "quantity": 60.0,
+      "unit_price": 92.0
+    },
+    {
+      "description": "Junction Box 4 Way 25mm",
+      "quantity": 45.0,
+      "unit_price": 38.0
+    },
+    {
+      "description": "Distribution Board 8 Way TPN",
+      "quantity": 3.0,
+      "unit_price": 4350.0
+    },
+    {
+      "description": "Rotary Isolator 32A 4 Pole",
+      "quantity": 4.0,
+      "unit_price": 1980.0
+    },
+    {
+      "description": "Terminal Block 4 sq mm Grey",
+      "quantity": 120.0,
+      "unit_price": 28.5
+    },
+    {
+      "description": "Terminal Block End Plate",
+      "quantity": 30.0,
+      "unit_price": 9.0
+    },
+    {
+      "description": "Ferrule Marker Set 0-9 (1.5 sq mm)",
+      "quantity": 6.0,
+      "unit_price": 245.0
+    },
+    {
+      "description": "Insulation Tape 18mm x 8m Black",
+      "quantity": 50.0,
+      "unit_price": 22.0
+    },
+    {
+      "description": "Panel Cooling Fan 120mm 230V",
+      "quantity": 8.0,
+      "unit_price": 865.0
+    }
+  ],
+  "subtotal": 168007.5,
+  "tax": 30241.36,
+  "charges": 0.0,
+  "discount": 0.0,
+  "round_off": 0.14,
+  "total": 198249.0,
+  "notes": null
+}

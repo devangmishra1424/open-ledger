@@ -1,0 +1,839 @@
+{
+  "ranAt": "2026-10-13T18:12:21.864Z",
+  "llm": false,
+  "rows": [
+    {
+      "doc": "discount_uom",
+      "form": "digital.pdf",
+      "seconds": 2.591,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "discount_uom",
+      "form": "photo.jpg",
+      "seconds": 6.091,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "discount_uom",
+      "form": "scan_clean.pdf",
+      "seconds": 5.94,
+      "ocr": "1.00",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "discount_uom",
+      "form": "scan_messy.pdf",
+      "seconds": 6.002,
+      "ocr": "0.99",
+      "method": "template-incomplete",
+      "confidence": 0.83,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "flagged",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "line_items: got 3 lines, want 3 lines",
+        "uncertain: line_items sum to 40893842.00 but the subtotal says 30827.00",
+        "uncertain: line_items: line \"Green Cardamom.8 mm Bold\": 9083120 x 4.5 less 2450% is not the amount 40874040",
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "multipage_gst",
+      "form": "digital.pdf",
+      "seconds": 7.014,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "multipage_gst",
+      "form": "scan_clean.pdf",
+      "seconds": 13.844,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "multipage_gst",
+      "form": "scan_messy.pdf",
+      "seconds": 13.844,
+      "ocr": "1.00",
+      "method": "template-incomplete",
+      "confidence": 0.71,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "flagged",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "line_items: got 28 lines, want 28 lines",
+        "uncertain: line_items: \"FR PVC Insulated Copper Cable \" 8544 x 250 is not its amount 29.4; \"Power Contactor 9A 230V AC Coi\" 8544 x 10 is not its amount 12600; \"DIN Rail 35mm Slotted (1 m)\" 20 x 11800 is not its amount 2360",
+        "uncertain: line_items sum to 160686.90 but the subtotal says 168007.50",
+        "uncertain: line_items: line \"FR PVC Insulated Copper Cable 2.5 sq mm\": 8544 x 250 = 2136000 but the amount says 29.4",
+        "uncertain: line_items: line \"Power Contactor 9A 230V AC Coil.\": 8544 x 10 = 85440 but the amount says 12600",
+        "uncertain: line_items: line \"DIN Rail 35mm Slotted (1 m)\": 20 x 11800 = 236000 but the amount says 2360",
+        "uncertain: vendor_name: read by OCR and printed only once, so check its spelling"
+      ]
+    },
+    {
+      "doc": "plain_bill",
+      "form": "digital.pdf",
+      "seconds": 1.19,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "plain_bill",
+      "form": "document.docx",
+      "seconds": 0.124,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "plain_bill",
+      "form": "photo.jpg",
+      "seconds": 3.398,
+      "ocr": "0.98",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: read by OCR and printed only once, so check its spelling"
+      ]
+    },
+    {
+      "doc": "plain_bill",
+      "form": "scan_clean.pdf",
+      "seconds": 3.6,
+      "ocr": "0.98",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: read by OCR and printed only once, so check its spelling"
+      ]
+    },
+    {
+      "doc": "plain_bill",
+      "form": "scan_messy.pdf",
+      "seconds": 3.675,
+      "ocr": "0.98",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: read by OCR and printed only once, so check its spelling"
+      ]
+    },
+    {
+      "doc": "plain_bill",
+      "form": "screenshot.png",
+      "seconds": 3.372,
+      "ocr": "0.98",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: read by OCR and printed only once, so check its spelling"
+      ]
+    },
+    {
+      "doc": "service_bill",
+      "form": "digital.pdf",
+      "seconds": 2.177,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "service_bill",
+      "form": "document.docx",
+      "seconds": 0.104,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "service_bill",
+      "form": "photo.jpg",
+      "seconds": 4.839,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: read by OCR and printed only once, so check its spelling"
+      ]
+    },
+    {
+      "doc": "service_bill",
+      "form": "scan_clean.pdf",
+      "seconds": 4.875,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: read by OCR and printed only once, so check its spelling"
+      ]
+    },
+    {
+      "doc": "service_bill",
+      "form": "scan_messy.pdf",
+      "seconds": 4.927,
+      "ocr": "0.99",
+      "method": "template-incomplete",
+      "confidence": 0.83,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "flagged",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "line_items: got 2 lines, want 2 lines",
+        "uncertain: line_items sum to 1083221.00 but the subtotal says 88250.00"
+      ]
+    },
+    {
+      "doc": "tally_gst",
+      "form": "digital.pdf",
+      "seconds": 5.883,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "tally_gst",
+      "form": "photo.jpg",
+      "seconds": 7.347,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "tally_gst",
+      "form": "scan_clean.pdf",
+      "seconds": 9.738,
+      "ocr": "1.00",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "tally_gst",
+      "form": "scan_messy.pdf",
+      "seconds": 7.166,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "tally_gst",
+      "form": "screenshot.png",
+      "seconds": 9.538,
+      "ocr": "1.00",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "uk_vat",
+      "form": "digital.pdf",
+      "seconds": 2.067,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "uk_vat",
+      "form": "document.docx",
+      "seconds": 0.121,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "uk_vat",
+      "form": "photo.jpg",
+      "seconds": 4.815,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "uk_vat",
+      "form": "scan_clean.pdf",
+      "seconds": 5.037,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "uk_vat",
+      "form": "scan_messy.pdf",
+      "seconds": 6.096,
+      "ocr": "1.00",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "us_invoice",
+      "form": "digital.pdf",
+      "seconds": 1.988,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "us_invoice",
+      "form": "photo.jpg",
+      "seconds": 4.718,
+      "ocr": "0.98",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "us_invoice",
+      "form": "scan_clean.pdf",
+      "seconds": 5.065,
+      "ocr": "1.00",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "us_invoice",
+      "form": "scan_messy.pdf",
+      "seconds": 5.12,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "us_invoice",
+      "form": "screenshot.png",
+      "seconds": 4.439,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "us_invoice",
+      "form": "workbook.xlsx",
+      "seconds": 0.026,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "flagged",
+        "po_reference": "correct",
+        "currency": "flagged",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "invoice_date: got \"2026-02-10\", want \"2026-10-02\"",
+        "currency: got null, want \"USD\"",
+        "uncertain: currency: not stated on the document",
+        "uncertain: invoice_date: written all in numbers and could be day/month either way"
+      ]
+    },
+    {
+      "doc": "zoho_igst",
+      "form": "digital.pdf",
+      "seconds": 2.184,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    },
+    {
+      "doc": "zoho_igst",
+      "form": "photo.jpg",
+      "seconds": 4.98,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "zoho_igst",
+      "form": "scan_clean.pdf",
+      "seconds": 5.366,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "zoho_igst",
+      "form": "scan_messy.pdf",
+      "seconds": 5.94,
+      "ocr": "0.99",
+      "method": "template",
+      "confidence": 0.84,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": [
+        "uncertain: vendor_name: taken from the letterhead, and nothing else on the document confirms it"
+      ]
+    },
+    {
+      "doc": "zoho_igst",
+      "form": "workbook.xlsx",
+      "seconds": 0.012,
+      "ocr": "-",
+      "method": "template",
+      "confidence": 0.95,
+      "outcomes": {
+        "vendor_name": "correct",
+        "invoice_number": "correct",
+        "invoice_date": "correct",
+        "po_reference": "correct",
+        "currency": "correct",
+        "line_items": "correct",
+        "subtotal": "correct",
+        "tax": "correct",
+        "total": "correct"
+      },
+      "notes": []
+    }
+  ]
+}

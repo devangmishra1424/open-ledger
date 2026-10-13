@@ -30,7 +30,11 @@ export interface NewBillInput {
   tax?: number | null;
   /** Total stated on the invoice. */
   total?: number | null;
+  /** Round off minus any invoice-level discount, signed (e.g. +0.34, -0.35, -500). total = lines + tax + adjustment. */
+  adjustment?: number | null;
   rawSource?: string | null;
+  /** The uploaded file this invoice was read from (source_documents.id). */
+  sourceDocumentId?: string | null;
   /**
    * true (API callers): a stated total that disagrees with lines + tax is rejected (422).
    * false (read off a document): kept as stated — the extractor already lowered its confidence
@@ -70,12 +74,14 @@ export function normalizeBillInput(input: NewBillInput, today = new Date().toISO
 
   const subtotal = round2(lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0));
   const tax = input.tax == null ? 0 : finiteNumber(input.tax, "tax", { min: 0 });
-  const expectedTotal = round2(subtotal + tax);
+  const adjustment = input.adjustment == null ? 0 : finiteNumber(input.adjustment, "adjustment");
+  const expectedTotal = round2(subtotal + tax + adjustment);
   let total = expectedTotal;
   if (input.total != null) {
     const stated = finiteNumber(input.total, "total", { min: 0 });
     if (input.strictTotals && Math.abs(stated - expectedTotal) > CENT) {
-      throw new HttpError(422, `the stated total ${stated.toFixed(2)} does not equal the line items (${subtotal.toFixed(2)}) plus tax (${tax.toFixed(2)}) = ${expectedTotal.toFixed(2)}`);
+      const adj = adjustment !== 0 ? ` plus round off / discount (${adjustment.toFixed(2)})` : "";
+      throw new HttpError(422, `the stated total ${stated.toFixed(2)} does not equal the line items (${subtotal.toFixed(2)}) plus tax (${tax.toFixed(2)})${adj} = ${expectedTotal.toFixed(2)}`);
     }
     total = stated;
   }
@@ -87,7 +93,7 @@ export function normalizeBillInput(input: NewBillInput, today = new Date().toISO
   const currency = (input.currency ?? "USD").toUpperCase();
   if (!CURRENCY.test(currency)) throw new HttpError(400, "currency must be a 3-letter code such as USD");
 
-  return { lines, subtotal, tax: round2(tax), total: round2(total), invoiceDate, dueDate: input.dueDate ?? null, currency };
+  return { lines, subtotal, tax: round2(tax), adjustment: round2(adjustment), total: round2(total), invoiceDate, dueDate: input.dueDate ?? null, currency };
 }
 
 /** One payee however it is typed: case and runs of spaces do not matter. Legal suffixes and punctuation are NOT folded: "Acme Ltd" and "Acme Inc" can be different legal entities, and merging payees is a fraud risk. */
@@ -144,8 +150,8 @@ export async function createBill(input: NewBillInput): Promise<CreatedBill> {
     const defaultGl: string | null = glRows[0]?.id ?? null;
 
     await tx`
-      INSERT INTO vendor_bills (id, vendor_id, po_id, invoice_number, invoice_date, due_date, currency, subtotal, tax_total, total_amount, raw_source)
-      VALUES (${billId}, ${vendorId}, ${poId}, ${invoiceNumber}, ${n.invoiceDate}, ${n.dueDate}, ${n.currency}, ${n.subtotal}, ${n.tax}, ${n.total}, ${input.rawSource ?? null})`;
+      INSERT INTO vendor_bills (id, vendor_id, po_id, invoice_number, invoice_date, due_date, currency, subtotal, tax_total, adjustment_total, total_amount, raw_source, source_document_id)
+      VALUES (${billId}, ${vendorId}, ${poId}, ${invoiceNumber}, ${n.invoiceDate}, ${n.dueDate}, ${n.currency}, ${n.subtotal}, ${n.tax}, ${n.adjustment}, ${n.total}, ${input.rawSource ?? null}, ${input.sourceDocumentId ?? null})`;
     for (const l of n.lines) {
       await tx`
         INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, gl_account_id)

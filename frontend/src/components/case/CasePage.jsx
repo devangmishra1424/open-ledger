@@ -11,6 +11,7 @@ import BankChangeSteps from './BankChangeSteps';
 import DecisionPanel, { useContestShortcut } from './DecisionPanel';
 import Stages, { Integrity } from './Stages';
 import AskVoice from './AskVoice';
+import SourceDocument from './SourceDocument';
 import { REASON_GUIDE, AUTO_APPROVED_GUIDE } from '../../lib/reasonGuide';
 import { formatMoney, timeAgo, actorWords } from '../../lib/labels';
 
@@ -213,7 +214,12 @@ export default function CasePage() {
                   {invoice.items.map((it, i) => (
                     <tr key={i}><td>{it.description}</td><td className="num">{it.qty}</td><td className="num">{money2(it.rate)}</td><td className="num">{money2(it.amount)}</td></tr>
                   ))}
-                  {otherAmount > 0.005 && <tr><td className="vb-muted">Tax and other charges</td><td /><td /><td className="num">{money2(otherAmount)}</td></tr>}
+                  {invoice.taxTotal != null ? (
+                    <>
+                      {invoice.taxTotal > 0.005 && <tr><td className="vb-muted">Tax</td><td /><td /><td className="num">{money2(invoice.taxTotal)}</td></tr>}
+                      {Math.abs(invoice.adjustmentTotal ?? 0) > 0.005 && <tr><td className="vb-muted">Round off / discount</td><td /><td /><td className="num">{money2(invoice.adjustmentTotal)}</td></tr>}
+                    </>
+                  ) : otherAmount > 0.005 && <tr><td className="vb-muted">Tax and other charges</td><td /><td /><td className="num">{money2(otherAmount)}</td></tr>}
                 </tbody>
                 <tfoot>
                   <tr><td colSpan={3} style={{ fontWeight: 700, paddingTop: 10 }}>Total due</td><td className="num" style={{ fontWeight: 700, paddingTop: 10 }}>{formatMoney(invoice.amount, invoice.currency)}</td></tr>
@@ -221,6 +227,12 @@ export default function CasePage() {
               </table>
             </div>
           </Section>
+
+          {invoice.sourceDocumentId && (
+            <Section id="source" title="Source document" sub="The file this invoice was entered from, how it was read, and the original itself.">
+              <SourceDocument documentId={invoice.sourceDocumentId} />
+            </Section>
+          )}
 
           <Section id="ask" title="Ask about this invoice" sub="Type or speak a question in your own words. Answers come only from this invoice's recorded decisions, and nothing here can approve, reject or pay.">
             <AskVoice key={invoice.id} invoice={invoice} />

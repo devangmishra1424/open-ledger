@@ -1,0 +1,6 @@
+-r requirements.txt
+pytest
+httpx
+pillow
+python-docx
+openpyxl
