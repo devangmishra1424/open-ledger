@@ -201,7 +201,7 @@ export async function createPurchaseOrder(input: NewPoInput): Promise<CreatedPo>
   }
 }
 
-export async function recordReceipt(poId: string, input: NewReceipt): Promise<{ receiptId: string }> {
+export async function recordReceipt(poId: string, input: NewReceipt): Promise<{ receiptId: string; poNumber: string; receiptDate: string; condition: ReceiptCondition }> {
   const sql = getSql();
   return sql.begin(async (tx) => {
     // Receipts for one PO are serialized, so two identical submissions cannot both pass the duplicate check below.
@@ -229,7 +229,7 @@ export async function recordReceipt(poId: string, input: NewReceipt): Promise<{ 
         throw new HttpError(409, "this exact receipt (same date, receiver, condition and quantities) is already recorded for this purchase order");
       }
     }
-    return { receiptId: await insertReceipt(tx, poId, lineIdByNumber, n) };
+    return { receiptId: await insertReceipt(tx, poId, lineIdByNumber, n), poNumber: po.po_number as string, receiptDate: n.receiptDate, condition: n.condition };
   });
 }
 

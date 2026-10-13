@@ -131,9 +131,14 @@ export async function createBill(input: NewBillInput): Promise<CreatedBill> {
     const { vendorId, vendorCreated } = await findOrCreateVendor(tx, input);
 
     let poId: string | null = input.poId ?? null;
-    if (!poId && input.poNumber) {
-      const poRows = await tx`SELECT id FROM purchase_orders WHERE po_number = ${input.poNumber} AND vendor_id = ${vendorId}`;
-      poId = poRows[0]?.id ?? null; // not found -> genuinely non-PO, not fabricated
+    // The PO number the invoice cites. Kept even when no such PO is on file yet (po_id stays NULL, a non-PO invoice
+    // for now), so the invoice can be linked when the PO is added (lib/pipeline/recheck.ts).
+    let poReference: string | null = input.poNumber?.trim() || null;
+    if (!poId && poReference) {
+      const poRows = await tx`SELECT id FROM purchase_orders WHERE po_number = ${poReference} AND vendor_id = ${vendorId}`;
+      poId = poRows[0]?.id ?? null;
+    } else if (poId && !poReference) {
+      poReference = (await tx`SELECT po_number FROM purchase_orders WHERE id = ${poId}`)[0]?.po_number ?? null;
     }
 
     const billId = randomUUID();
@@ -150,8 +155,8 @@ export async function createBill(input: NewBillInput): Promise<CreatedBill> {
     const defaultGl: string | null = glRows[0]?.id ?? null;
 
     await tx`
-      INSERT INTO vendor_bills (id, vendor_id, po_id, invoice_number, invoice_date, due_date, currency, subtotal, tax_total, adjustment_total, total_amount, raw_source, source_document_id)
-      VALUES (${billId}, ${vendorId}, ${poId}, ${invoiceNumber}, ${n.invoiceDate}, ${n.dueDate}, ${n.currency}, ${n.subtotal}, ${n.tax}, ${n.adjustment}, ${n.total}, ${input.rawSource ?? null}, ${input.sourceDocumentId ?? null})`;
+      INSERT INTO vendor_bills (id, vendor_id, po_id, po_reference, invoice_number, invoice_date, due_date, currency, subtotal, tax_total, adjustment_total, total_amount, raw_source, source_document_id)
+      VALUES (${billId}, ${vendorId}, ${poId}, ${poReference}, ${invoiceNumber}, ${n.invoiceDate}, ${n.dueDate}, ${n.currency}, ${n.subtotal}, ${n.tax}, ${n.adjustment}, ${n.total}, ${input.rawSource ?? null}, ${input.sourceDocumentId ?? null})`;
     for (const l of n.lines) {
       await tx`
         INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, gl_account_id)

@@ -33,6 +33,12 @@ export interface ReconsiderationInput {
   triggeredByActor: string;
   triggeredByQuestion: string;
   additionalContext?: string;
+  /**
+   * false for a re-check (lib/pipeline/recheck.ts): the stages re-run against new facts (a PO added, goods received),
+   * and the reason is recorded on the trail, but it is NOT put to the Investigator/Verifier as a person's question.
+   * Defaults to true: a reconsideration is a person asking the agents to look again.
+   */
+  askAgents?: boolean;
 }
 
 /**
@@ -159,7 +165,16 @@ export async function runExtractStage(vendorBillId: string, preExtracted?: Extra
 
 // --- validate ---
 
-export async function runValidateStage(vendorBillId: string, parentDecisionId?: string): Promise<{ decision: Decision; result: PreMatchResult }> {
+/** The trail fields a re-run stage records: who caused the re-run and why (shown with the stage's own claims). */
+function rerunFields(recon?: ReconsiderationInput) {
+  return {
+    reconsiderationOfId: recon?.directlyReconsidered ? recon.reconsiderationOfId : undefined,
+    triggeredByActor: recon?.triggeredByActor,
+    triggeredByQuestion: recon?.triggeredByQuestion,
+  };
+}
+
+export async function runValidateStage(vendorBillId: string, parentDecisionId?: string, recon?: ReconsiderationInput, leadClaims: Claim[] = []): Promise<{ decision: Decision; result: PreMatchResult }> {
   const sql = getSql();
   const startedAt = new Date().toISOString();
 
@@ -203,8 +218,9 @@ export async function runValidateStage(vendorBillId: string, parentDecisionId?: 
     parentDecisionId, startedAt, endedAt: new Date().toISOString(),
     actionTaken: result.passed ? "pass" : result.blockingFinding!.action,
     reasonCode: result.blockingFinding?.exceptionCode,
-    claims,
-    idempotencyKey: idemKey(vendorBillId, "validate"),
+    claims: [...leadClaims, ...claims],
+    idempotencyKey: idemKey(vendorBillId, "validate", recon ? `:${recon.attemptTag}` : ""),
+    ...rerunFields(recon),
   });
   await publish(d);
   return { decision: d, result };
@@ -212,7 +228,7 @@ export async function runValidateStage(vendorBillId: string, parentDecisionId?: 
 
 // --- match ---
 
-export async function runMatchStageDecision(vendorBillId: string, parentDecisionId?: string): Promise<{ decision: Decision; matchResult: MatchStageResult }> {
+export async function runMatchStageDecision(vendorBillId: string, parentDecisionId?: string, recon?: ReconsiderationInput): Promise<{ decision: Decision; matchResult: MatchStageResult }> {
   const startedAt = new Date().toISOString();
   const matchResult = await runMatchStage(vendorBillId);
   const claims: Claim[] = matchResult.findings.map((f) => ({ text: `${f.code}: ${f.action}`, tag: "grounded" }));
@@ -224,7 +240,8 @@ export async function runMatchStageDecision(vendorBillId: string, parentDecision
     reasonCode: matchResult.combined.dominantException ?? "CLEAN_MATCH",
     claims: claims.length > 0 ? claims : undefined,
     inputsConsumed: [{ source: "match-stage-detail", retrievedAt: new Date().toISOString(), contentHash: hashJson(matchResult.detail) }],
-    idempotencyKey: idemKey(vendorBillId, "match"),
+    idempotencyKey: idemKey(vendorBillId, "match", recon ? `:${recon.attemptTag}` : ""),
+    ...rerunFields(recon),
   });
   await publish(d);
   return { decision: d, matchResult };
@@ -234,7 +251,7 @@ export async function runMatchStageDecision(vendorBillId: string, parentDecision
 
 export async function runInvestigateStage(vendorBillId: string, matchDetail: unknown, parentDecisionId?: string, recon?: ReconsiderationInput): Promise<{ decision: Decision; submission?: InvestigationSubmission }> {
   const startedAt = new Date().toISOString();
-  const humanContext: HumanReconsiderationContext | undefined = recon
+  const humanContext: HumanReconsiderationContext | undefined = recon && recon.askAgents !== false
     ? { question: recon.triggeredByQuestion, additionalContext: recon.additionalContext }
     : undefined;
   const idempotencyKey = idemKey(vendorBillId, "investigate", recon ? `:${recon.attemptTag}` : "");
@@ -280,7 +297,7 @@ export async function runInvestigateStage(vendorBillId: string, matchDetail: unk
 
 export async function runVerifyStage(vendorBillId: string, matchDetail: unknown, investigation: InvestigationSubmission, parentDecisionId?: string, recon?: ReconsiderationInput): Promise<{ decision: Decision; submission?: VerificationSubmission }> {
   const startedAt = new Date().toISOString();
-  const humanContext: HumanReconsiderationContext | undefined = recon
+  const humanContext: HumanReconsiderationContext | undefined = recon && recon.askAgents !== false
     ? { question: recon.triggeredByQuestion, additionalContext: recon.additionalContext }
     : undefined;
   const idempotencyKey = idemKey(vendorBillId, "verify", recon ? `:${recon.attemptTag}` : "");
@@ -531,7 +548,29 @@ export async function runPipeline(vendorBillId: string, opts: { extraction?: Ext
   }
 }
 
-async function recordPipelineCrash(vendorBillId: string, cause: unknown): Promise<void> {
+/**
+ * A re-run of the stages after extraction (lib/pipeline/recheck.ts): every stage gets the re-run's tag (fresh
+ * idempotency keys, who triggered it and why), `leadClaims` open the new validate decision (the reason, in words),
+ * and `onFirstDecision` runs once that validate decision exists, so the caller can mark the run it replaces as
+ * superseded by it.
+ */
+export interface RerunOptions {
+  recon: ReconsiderationInput;
+  leadClaims: Claim[];
+  onFirstDecision: (first: Decision) => Promise<void>;
+}
+
+/** Validate onward, for an invoice whose extract decision already exists; with the same crash guarantee as runPipeline. */
+export async function rerunFromValidate(vendorBillId: string, extractDecisionId: string, rerun: RerunOptions): Promise<void> {
+  try {
+    await runFromValidate(vendorBillId, extractDecisionId, rerun);
+  } catch (e) {
+    await recordPipelineCrash(vendorBillId, e, `:${rerun.recon.attemptTag}:crash`);
+    throw e;
+  }
+}
+
+async function recordPipelineCrash(vendorBillId: string, cause: unknown, keySuffix = ":crash"): Promise<void> {
   const message = (cause instanceof Error ? cause.message : String(cause)).slice(0, 300);
   try {
     const sql = getSql();
@@ -541,7 +580,7 @@ async function recordPipelineCrash(vendorBillId: string, cause: unknown): Promis
       invoiceId: vendorBillId, nodeId: "audit", agentId: "system", startedAt: now, endedAt: now,
       actionTaken: "error", reasonCode: "R99_AGENT_ERROR",
       claims: [{ text: `Pipeline stopped unexpectedly: ${message}`, tag: "grounded" }],
-      idempotencyKey: idemKey(vendorBillId, "audit", ":crash"),
+      idempotencyKey: idemKey(vendorBillId, "audit", keySuffix),
     });
     await publish(d);
   } catch (inner) {
@@ -559,22 +598,29 @@ async function runPipelineStages(vendorBillId: string, opts: { extraction?: Extr
     return;
   }
 
-  const { decision: validateDecision, result: validateResult } = await runValidateStage(vendorBillId, extractDecision.id);
+  await runFromValidate(vendorBillId, extractDecision.id);
+}
+
+/** validate -> match -> investigate -> verify -> policy -> audit. The first run of an invoice, or a re-run (`rerun`). */
+async function runFromValidate(vendorBillId: string, extractDecisionId: string, rerun?: RerunOptions): Promise<void> {
+  const recon = rerun?.recon;
+  const { decision: validateDecision, result: validateResult } = await runValidateStage(vendorBillId, extractDecisionId, recon, rerun?.leadClaims);
+  await rerun?.onFirstDecision(validateDecision);
   if (!validateResult.passed) {
     // Every pre-match gate failure is a deterministic, non-judgment-dependent stop — none of
     // the six checks need an Investigator's opinion, so all of them cascade straight to policy,
     // not just the 4 codes decision-matrix.ts's own CASCADE_STOP_CODES formally names.
     const blocking = validateResult.blockingFinding!;
     const combined = asCascadedDecision(blocking.action as Action, blocking.exceptionCode ?? null);
-    const policyDecision = await runPolicyStage({ vendorBillId, combined, parentDecisionId: validateDecision.id });
-    await runAuditStage(vendorBillId, policyDecision);
+    const policyDecision = await runPolicyStage({ vendorBillId, combined, parentDecisionId: validateDecision.id, recon });
+    await runAuditStage(vendorBillId, policyDecision, recon);
     return;
   }
 
-  const { decision: matchDecision, matchResult } = await runMatchStageDecision(vendorBillId, validateDecision.id);
+  const { decision: matchDecision, matchResult } = await runMatchStageDecision(vendorBillId, validateDecision.id, recon);
   if (matchResult.combined.cascaded) {
-    const policyDecision = await runPolicyStage({ vendorBillId, combined: matchResult.combined, parentDecisionId: matchDecision.id });
-    await runAuditStage(vendorBillId, policyDecision);
+    const policyDecision = await runPolicyStage({ vendorBillId, combined: matchResult.combined, parentDecisionId: matchDecision.id, recon });
+    await runAuditStage(vendorBillId, policyDecision, recon);
     return;
   }
 
@@ -582,12 +628,12 @@ async function runPipelineStages(vendorBillId: string, opts: { extraction?: Extr
   // auto-approve one (ENGINE.md §2.4: "a fast pass-through with no tool calls at all" — the
   // Investigator's own system prompt already tells it not to force evidence-gathering where
   // none is needed; this is what makes that a real, on-the-record pass, not a skipped stage).
-  const { decision: investigateDecision, submission: investigation } = await runInvestigateStage(vendorBillId, matchResult.detail, matchDecision.id);
+  const { decision: investigateDecision, submission: investigation } = await runInvestigateStage(vendorBillId, matchResult.detail, matchDecision.id, recon);
   if (!investigation) {
     // The Investigator failed outright (ENGINE.md §5) — nothing to verify or police against;
     // block for human attention rather than guessing at a downstream action.
-    const policyDecision = await runPolicyStage({ vendorBillId, combined: asCascadedDecision("block", null), reasonCodeOverride: "R99_AGENT_ERROR", parentDecisionId: investigateDecision.id });
-    await runAuditStage(vendorBillId, policyDecision);
+    const policyDecision = await runPolicyStage({ vendorBillId, combined: asCascadedDecision("block", null), reasonCodeOverride: "R99_AGENT_ERROR", parentDecisionId: investigateDecision.id, recon });
+    await runAuditStage(vendorBillId, policyDecision, recon);
     return;
   }
 
@@ -596,7 +642,7 @@ async function runPipelineStages(vendorBillId: string, opts: { extraction?: Extr
   // Tier-2 eligibility uses the outcome after the Investigator's (tighten-only) recommendation, the
   // same rule reconsideration uses: if the Investigator wants a block, a second opinion is recorded.
   if (isTier2Eligible(tightenedByInvestigator(matchResult.combined.overallAction, investigation.recommended_action))) {
-    const { decision: verifyDecision, submission } = await runVerifyStage(vendorBillId, matchResult.detail, investigation, investigateDecision.id);
+    const { decision: verifyDecision, submission } = await runVerifyStage(vendorBillId, matchResult.detail, investigation, investigateDecision.id, recon);
     verifySubmission = submission;
     lastDecisionId = verifyDecision.id;
   }
@@ -604,7 +650,7 @@ async function runPipelineStages(vendorBillId: string, opts: { extraction?: Extr
   const policyDecision = await runPolicyStage({
     vendorBillId, combined: matchResult.combined, verifySubmission,
     investigatorConfidence: investigation.confidence, investigatorRecommendation: investigation.recommended_action,
-    parentDecisionId: lastDecisionId,
+    parentDecisionId: lastDecisionId, recon,
   });
-  await runAuditStage(vendorBillId, policyDecision);
+  await runAuditStage(vendorBillId, policyDecision, recon);
 }

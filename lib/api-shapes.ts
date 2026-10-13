@@ -122,6 +122,8 @@ export interface FrontendInvoice {
   decisions: DecisionView[];
   /** The uploaded file this invoice was entered from (GET /api/documents/:id), when it came from a document. */
   sourceDocumentId: string | null;
+  /** The PO number the invoice cites, linked or not (a non-PO invoice keeps it so it can be linked later). */
+  poReference: string | null;
   taxTotal: number;
   /** Round off minus invoice-level discount: total = items + tax + adjustment. */
   adjustmentTotal: number;
@@ -345,6 +347,7 @@ export function toFrontendInvoice(params: {
     hash: latest?.hash ?? "",
     items: lines.map((l) => ({ description: l.description, qty: l.qtyInvoiced, rate: l.unitPrice, amount: Math.round(l.qtyInvoiced * l.unitPrice * 100) / 100 })),
     sourceDocumentId: bill.source_document_id ?? null,
+    poReference: bill.po_reference ?? null,
     taxTotal: Number(bill.tax_total ?? 0),
     adjustmentTotal: Number(bill.adjustment_total ?? 0),
     decisions: decisions.map((d) => ({

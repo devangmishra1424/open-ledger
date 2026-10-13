@@ -16,5 +16,9 @@ CREATE INDEX IF NOT EXISTS idx_source_documents_sha256 ON source_documents(sha25
 ALTER TABLE vendor_bills ADD COLUMN IF NOT EXISTS source_document_id TEXT REFERENCES source_documents(id);
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS source_document_id TEXT REFERENCES source_documents(id);
 ALTER TABLE vendor_bills ADD COLUMN IF NOT EXISTS adjustment_total NUMERIC(18,4) NOT NULL DEFAULT 0;
+-- The PO number the invoice itself cites, kept even when no such PO was on file when it was saved, so the invoice can
+-- be linked once the PO is added (lib/pipeline/recheck.ts). Backfilled from the linked PO for existing invoices.
+ALTER TABLE vendor_bills ADD COLUMN IF NOT EXISTS po_reference TEXT;
+UPDATE vendor_bills b SET po_reference = p.po_number FROM purchase_orders p WHERE b.po_id = p.id AND b.po_reference IS NULL;
 INSERT INTO chart_of_accounts (id, account_number, name, account_type, normal_balance, is_control_account)
   VALUES ('7300', '7300', 'Rounding and Discounts', 'expense', 'debit', false) ON CONFLICT DO NOTHING;

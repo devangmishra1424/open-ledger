@@ -20,6 +20,13 @@ Line Items:
    Unit Price: $62.50
 `;
 
+/** " 2 invoices that cited it were linked and checked again." for a toast; "" when there were none. */
+function recheckedWords(list, waited, happened) {
+  if (!list?.length) return '';
+  const n = list.length;
+  return ` ${n === 1 ? `Invoice ${list[0].invoiceNumber}` : `${n} invoices`} that ${waited} ${n === 1 ? 'was' : 'were'} ${happened}.`;
+}
+
 function useEscape(onClose) {
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && onClose();
@@ -168,7 +175,7 @@ export function AddPoModal({ onClose, onSaved }) {
         sourceDocumentId: documentId ?? undefined,
       };
       const created = await api.createPurchaseOrder(body);
-      toast.success(`Purchase order ${created.poNumber} saved.`);
+      toast.success(`Purchase order ${created.poNumber} saved.${recheckedWords(created.recheckedInvoices, 'cited it', 'linked and checked again')}`);
       setSaved(created);
       onSaved?.();
     } catch (err) {
@@ -186,7 +193,14 @@ export function AddPoModal({ onClose, onSaved }) {
           <>
             <Banner kind="info">
               <strong>{saved.poNumber} is on file{saved.receiptId ? ', with its goods receipt' : ''}.</strong>
-              <div style={{ marginTop: 6 }}>Now add the invoice that refers to {saved.poNumber}. Its vendor name should match this one (case and spacing do not matter).</div>
+              {saved.recheckedInvoices?.length > 0 ? (
+                <div style={{ marginTop: 6 }}>
+                  {saved.recheckedInvoices.length === 1 ? 'An invoice' : `${saved.recheckedInvoices.length} invoices`} from this vendor already cited {saved.poNumber}:
+                  {' '}{saved.recheckedInvoices.map((i) => i.invoiceNumber).join(', ')}. {saved.recheckedInvoices.length === 1 ? 'It is' : 'They are'} now linked to it and being checked again.
+                </div>
+              ) : (
+                <div style={{ marginTop: 6 }}>Now add the invoice that refers to {saved.poNumber}. Its vendor name should match this one (case and spacing do not matter).</div>
+              )}
             </Banner>
             <div className="vb-modal-actions">
               <button type="button" className="vb-btn" onClick={onClose}>Done</button>
@@ -266,8 +280,8 @@ export function ReceiptModal({ po, onClose, onSaved }) {
     setBusy(true);
     setError(null);
     try {
-      await api.recordReceipt(po.id, receiptPayload(receipt, lines));
-      toast.success(`Goods receipt recorded for ${po.poNumber}.`);
+      const recorded = await api.recordReceipt(po.id, receiptPayload(receipt, lines));
+      toast.success(`Goods receipt recorded for ${po.poNumber}.${recheckedWords(recorded.recheckedInvoices, 'was waiting for these goods', 'checked again')}`);
       onSaved?.();
       onClose();
     } catch (err) {

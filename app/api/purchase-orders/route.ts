@@ -1,5 +1,6 @@
 import { createPurchaseOrder, listPurchaseOrders, receiptFromBody } from "@/lib/purchase-orders";
 import { getDocument } from "@/lib/documents/store";
+import { recheckWaitingForNewPo } from "@/lib/pipeline/recheck";
 import { handle, HttpError, readJsonBody } from "@/lib/http";
 
 /**
@@ -24,6 +25,9 @@ export const GET = handle("GET /api/purchase-orders", async (req) => {
  *     sourceDocumentId? }  (the PO document it was read from: POST /api/documents/read with purpose purchase_order)
  * With `receipt`, the goods receipt is recorded in the same transaction. 400 malformed, 409 if a PO
  * with this number already exists. An unknown vendor name creates the vendor with trust tier 'new'.
+ *
+ * Invoices that were saved before this PO existed, cite its number and come from the same vendor are linked to it
+ * and checked again: `recheckedInvoices` lists them (lib/pipeline/recheck.ts).
  */
 export const POST = handle("POST /api/purchase-orders", async (req) => {
   const body = await readJsonBody(req);
@@ -48,5 +52,6 @@ export const POST = handle("POST /api/purchase-orders", async (req) => {
     receipt: body.receipt === undefined || body.receipt === null ? null : receiptFromBody(body.receipt),
     sourceDocumentId,
   });
-  return Response.json(created, { status: 201 });
+  const recheckedInvoices = await recheckWaitingForNewPo({ poNumber: created.poNumber, vendorId: created.vendorId });
+  return Response.json({ ...created, recheckedInvoices }, { status: 201 });
 });

@@ -181,6 +181,8 @@ export const api = {
   getDocument: (id) => request(`/documents/${encodeURIComponent(id)}`),
   /** The original file as a blob (with the sign-in header, so it also works when sign-in is on). */
   getDocumentFile: (id) => download(`/documents/${encodeURIComponent(id)}/file`),
+  /** Check a waiting invoice again against its PO and receipts; poNumber links a non-PO invoice to that PO. */
+  recheckInvoice: (id, reviewerName, poNumber) => request(`/invoices/${encodeURIComponent(id)}/recheck`, { method: 'POST', body: { reviewerName, poNumber } }),
   saveInvoiceFromDocument: (documentId, reviewerName, invoice) => request('/invoices/from-document', { method: 'POST', body: { documentId, reviewerName, invoice }, timeout: LONG_TIMEOUT_MS }),
 
   // --- Purchase orders and goods receipts (the other two documents of a three-way match) ---

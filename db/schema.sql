@@ -107,6 +107,9 @@ CREATE TABLE vendor_bills (
   -- total_amount = subtotal + tax_total + adjustment_total. The adjustment is the invoice's round off minus any
   -- invoice-level discount (signed); it posts to account 7300 so the bill still balances in the ledger.
   adjustment_total NUMERIC(18,4) NOT NULL DEFAULT 0,
+  -- The PO number printed on the invoice, kept even when no such PO was on file at the time (po_id stays NULL), so
+  -- the invoice can be linked when the PO is added later (lib/pipeline/recheck.ts).
+  po_reference TEXT,
   raw_source TEXT, ap_account_id TEXT REFERENCES chart_of_accounts(id), journal_entry_id TEXT REFERENCES journal_entries(id),
   status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing','matched','exception','approved','posted','paid','void')),
   -- EXC-CREDIT_MEMO extension (spec §2 EXC-07): invoice_type distinguishes a credit memo from

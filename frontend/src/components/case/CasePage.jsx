@@ -12,6 +12,7 @@ import DecisionPanel, { useContestShortcut } from './DecisionPanel';
 import Stages, { Integrity } from './Stages';
 import AskVoice from './AskVoice';
 import SourceDocument from './SourceDocument';
+import Recheck from './Recheck';
 import { REASON_GUIDE, AUTO_APPROVED_GUIDE } from '../../lib/reasonGuide';
 import { formatMoney, timeAgo, actorWords } from '../../lib/labels';
 
@@ -182,6 +183,8 @@ export default function CasePage() {
             </p>
             <DecisionPanel invoice={invoice} />
           </section>
+
+          <Recheck key={invoice.id} invoice={invoice} />
 
           <section className="vb-card vb-aside-card">
             <h2>At a glance</h2>
