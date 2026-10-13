@@ -22,6 +22,10 @@ export interface FrontendPbcRequest {
   /** "none" when no invoice is linked: there is nothing to tie out, so it must not read as matched. */
   tie_out_status: "matched" | "discrepant" | "none";
   linked_count: number;
+  /** Who recorded the request, and who closed it (handed the evidence over) and when; null where not recorded. */
+  created_by: string | null;
+  closed_by: string | null;
+  closed_at: string | null;
 }
 
 export interface FrontendEvidenceRecord {
@@ -77,7 +81,8 @@ export function attestationLabels(rows: Array<{ node_id: string; agent_id: strin
   for (const d of rows) {
     if (d.action_taken == null) continue;
     const agent = (d.agent_id ?? "").toLowerCase();
-    const kind = d.node_id === "human_review" ? "person"
+    // A person's act is recorded with a "human:" agent id: a review decision, or handing evidence to an auditor.
+    const kind = d.node_id === "human_review" || agent.startsWith("human:") ? "person"
       : agent.startsWith("deterministic") || agent === "system" ? "rules"
       : "AI";
     const label = `${STAGE_NAMES[d.node_id] ?? d.node_id} (${kind})`;
@@ -106,15 +111,12 @@ export async function listFrontendPbcRequests(): Promise<FrontendPbcRequest[]> {
       status: statusToFrontend(row.status),
       tie_out_status: tieOutStatus,
       linked_count: linkedIds.length,
+      created_by: row.created_by ?? null,
+      closed_by: row.closed_by ?? null,
+      closed_at: row.closed_at ?? null,
     });
   }
   return results;
-}
-
-export async function closePbcRequest(requestId: string): Promise<boolean> {
-  const sql = getSql();
-  const rows = await sql`UPDATE pbc_requests SET status = 'accepted' WHERE id = ${requestId} RETURNING id`;
-  return rows.length > 0;
 }
 
 /** One derived EvidenceRecord per linked invoice, across every PBC request (or just one, if requestId is given). */

@@ -148,7 +148,9 @@ CREATE TABLE pbc_requests (
   description TEXT NOT NULL, covered_period_id TEXT REFERENCES accounting_periods(id),
   due_date TEXT, owner_name TEXT,
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','assembled','submitted','accepted','exception')),
-  linked_invoice_ids TEXT, created_at TEXT NOT NULL DEFAULT now()::text
+  linked_invoice_ids TEXT, created_at TEXT NOT NULL DEFAULT now()::text,
+  -- who recorded the request, and who closed it (handed the evidence over) and when (migration 005)
+  created_by TEXT, closed_by TEXT, closed_at TEXT
 );
 -- PBC evidence file attachments (real auditor-facing files — a signed confirmation letter, a
 -- W-9, a bank statement — attached as supporting evidence for one PBC request). Content stored

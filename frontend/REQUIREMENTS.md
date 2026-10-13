@@ -142,7 +142,7 @@ This document defines the complete backend API specification, data schemas, endp
 {
   "request_id": "PBC-2026-001",
   "description": "Q3 Cloud Infrastructure & Capital Asset Vendor Invoices Sample",
-  "requested_by": "PwC Lead Auditor (E. Vance)",
+  "requested_by": "External Auditor (E. Vance)",
   "date_requested": "2026-09-01",
   "status": "in_progress",
   "tie_out_status": "matched"
@@ -405,7 +405,7 @@ Please use the following seed data to populate the server on startup:
     {
       "request_id": "PBC-2026-001",
       "description": "Q3 Cloud Infrastructure & Capital Asset Vendor Invoices Sample",
-      "requested_by": "PwC Lead Auditor (E. Vance)",
+      "requested_by": "External Auditor (E. Vance)",
       "date_requested": "2026-09-01",
       "status": "in_progress",
       "tie_out_status": "matched"

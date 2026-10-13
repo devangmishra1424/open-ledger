@@ -98,6 +98,21 @@ export function describeRateLimit(model: string, providerMessage: string): strin
 }
 
 /**
+ * A recorded failure, worded for the screen. Older records hold the provider's raw 429 text ("Rate
+ * limit reached for model `x` in organization `org_…` …"), written before describeRateLimit existed;
+ * recorded decisions are immutable, so they are reworded when shown, never rewritten. Anything else
+ * keeps its wording, with the provider account id masked: it is an internal identifier, not
+ * something a reviewer needs.
+ */
+export function readableAgentFailure(text: string, model?: string | null): string {
+  if (/rate limit reached|\b429\b.*limit/i.test(text)) {
+    const named = text.match(/for model `([^`]+)`/i)?.[1];
+    return describeRateLimit(named ?? model ?? "the AI model", text);
+  }
+  return text.replace(/\borg_[A-Za-z0-9]+\b/g, "[provider account]");
+}
+
+/**
  * The model itself produced an invalid tool call (e.g. gpt-oss occasionally emits a call to a
  * made-up tool such as "commentary", or answers in prose when a tool call is required) and the
  * provider rejected the response with HTTP 400.

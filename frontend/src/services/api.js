@@ -90,6 +90,37 @@ async function request(path, { method = 'GET', body, timeout = DEFAULT_TIMEOUT_M
   return data;
 }
 
+/**
+ * A file download: the bytes, not JSON, but with the same sign-in header and error handling as
+ * request(). Returns { blob, filename } (the name from the server's Content-Disposition).
+ */
+async function download(path, { timeout = LONG_TIMEOUT_MS } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  const headers = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, { headers, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new ApiError(0, 'The server took too long to answer.');
+    throw new ApiError(0, 'Could not reach the server. Is the backend running?');
+  } finally {
+    clearTimeout(timer);
+  }
+  if (res.status === 401) window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    try { message = (await res.json()).error || message; } catch { /* a non-JSON error body: keep the status line */ }
+    throw new ApiError(res.status, message);
+  }
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const plain = /filename="([^"]+)"/i.exec(disposition)?.[1];
+  return { blob: await res.blob(), filename: star ? decodeURIComponent(star) : plain || 'download' };
+}
+
 const qs = (params) => {
   const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString();
   return q ? `?${q}` : '';
@@ -138,12 +169,13 @@ export const api = {
 
   // --- PBC requests & evidence (audit support) ---
   getPbcRequests: () => request('/pbc/requests'),
-  createPbcRequest: ({ description, requestedBy, itemType, dueDate, linkedInvoiceIds }) => request('/pbc/requests', { method: 'POST', body: { description, requestedBy, itemType, dueDate, linkedInvoiceIds } }),
-  closePbcRequest: (requestId) => request(`/pbc/requests/${encodeURIComponent(requestId)}/close`, { method: 'POST' }),
+  createPbcRequest: ({ description, requestedBy, itemType, dueDate, linkedInvoiceIds, reviewerName }) => request('/pbc/requests', { method: 'POST', body: { description, requestedBy, itemType, dueDate, linkedInvoiceIds, reviewerName } }),
+  closePbcRequest: (requestId, reviewerName) => request(`/pbc/requests/${encodeURIComponent(requestId)}/close`, { method: 'POST', body: { reviewerName } }),
   getEvidenceRecords: (params = {}) => request(`/pbc/evidence${qs(params)}`),
   narratePbcRequest: (requestId, question) => request(`/pbc/${encodeURIComponent(requestId)}/narrate`, { method: 'POST', body: { question }, timeout: LONG_TIMEOUT_MS }),
   getEvidenceFiles: (requestId) => request(`/pbc/requests/${encodeURIComponent(requestId)}/files`),
-  uploadEvidenceFile: (requestId, filename, contentBase64, contentType) => request(`/pbc/requests/${encodeURIComponent(requestId)}/files`, { method: 'POST', body: { filename, contentBase64, contentType } }),
+  uploadEvidenceFile: (requestId, filename, contentBase64, contentType, reviewerName) => request(`/pbc/requests/${encodeURIComponent(requestId)}/files`, { method: 'POST', body: { filename, contentBase64, contentType, reviewerName }, timeout: LONG_TIMEOUT_MS }),
+  downloadEvidenceFile: (requestId, fileId) => download(`/pbc/requests/${encodeURIComponent(requestId)}/files/${encodeURIComponent(fileId)}`),
 };
 
 export default api;

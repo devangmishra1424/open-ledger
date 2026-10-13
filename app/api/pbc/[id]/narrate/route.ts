@@ -1,22 +1,17 @@
 import { narratePbcResponse } from "@/lib/audit/narrator";
+import { handle, readJsonBody, requireString } from "@/lib/http";
+import { getSql } from "@/db/client";
 
 /**
- * POST /api/pbc/:id/narrate
- * Queries the PBC narrator to explain why the decisions linked to this PBC request were made.
- * Expected body: { question: string }
+ * POST /api/pbc/:id/narrate — an auditor's question about one request, answered per linked invoice
+ * from that invoice's recorded decisions only (lib/audit/narrator.ts). Body: { question }.
+ * 200 { results, answeredFor, totalLinked } | 400 | 404.
  */
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export const POST = handle("POST /api/pbc/:id/narrate", async (req, { params }: { params: Promise<{ id: string }> }) => {
   const { id } = await params;
-  const body = await req.json().catch(() => ({}));
-
-  if (!body.question) {
-    return Response.json({ error: "question is required" }, { status: 400 });
-  }
-
-  try {
-    const results = await narratePbcResponse(id, body.question);
-    return Response.json({ results });
-  } catch (e) {
-    return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
-  }
-}
+  const body = await readJsonBody(req);
+  const question = requireString(body, "question", { max: 500 });
+  const [exists] = await getSql()`SELECT id FROM pbc_requests WHERE id = ${id}`;
+  if (!exists) return Response.json({ error: `no pbc_requests row found with id '${id}'` }, { status: 404 });
+  return Response.json(await narratePbcResponse(id, question));
+});

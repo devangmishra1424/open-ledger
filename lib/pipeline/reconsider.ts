@@ -143,7 +143,8 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
     const downstream = await getDecisionsAfter(original);
     for (const d of downstream) {
       // A person's decision is never superseded by a machine's: the chain keeps it as the record of what they did.
-      if (d.nodeId === "human_review") continue;
+      // Nor is a record that the invoice was handed to an auditor: that happened, whatever the AI now concludes.
+      if (d.nodeId === "human_review" || d.nodeId === "audit_assemble") continue;
       await markSuperseded(d.id, newDecision.id);
       supersededDecisionIds.push(d.id);
     }

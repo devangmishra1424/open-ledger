@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, ShieldAlert, Plus, Paperclip, FileText, MessageSquareText, RefreshCw, X } from 'lucide-react';
+import { ShieldCheck, ShieldAlert, Plus, Paperclip, FileText, MessageSquareText, RefreshCw, X, Download } from 'lucide-react';
 import { api } from '../services/api';
 import { useToasts } from '../state/Toasts';
+import { useReviewer } from '../state/Reviewer';
 import { Banner, Empty, Spinner } from '../components/ui';
 import { actionWords, formatMoney, groundingNote, shortHash, timeAgo } from '../lib/labels';
 import { REASON_GUIDE } from '../lib/reasonGuide';
@@ -36,10 +37,14 @@ const TAGS = [
   ['AUTH-202', 'Authorization'],
 ];
 
-/** "Cleared" alone would hide that a person had to step in; the attestations say who did. */
+/**
+ * "Cleared" alone would hide that a person had to step in; the attestations say who did. Only a
+ * reviewer's decision counts: "Evidence (person)" is someone handing the invoice to an auditor, which
+ * says nothing about how it was cleared.
+ */
 function evidenceOutcome(ev) {
   if (ev.tie_out_status === 'discrepant') return { label: 'Not cleared', cls: 'vb-chip-rejected', tone: 'bad' };
-  if ((ev.agent_attestations ?? []).some((a) => a.includes('(person)'))) return { label: 'Cleared by a person', cls: 'vb-chip-processing', tone: 'info' };
+  if ((ev.agent_attestations ?? []).some((a) => a.startsWith('Reviewer '))) return { label: 'Cleared by a person', cls: 'vb-chip-processing', tone: 'info' };
   return { label: 'Matched', cls: 'vb-chip-approved', tone: 'ok' };
 }
 
@@ -50,12 +55,22 @@ function discrepancyWords(reason) {
   return { label: `${m[1]} · ${actionWords(m[2])}`, means: REASON_GUIDE[m[1]]?.means ?? null };
 }
 
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // the server's cap (app/api/pbc/requests/[id]/files), checked here before uploading
+
+function fileSize(bytes) {
+  if (bytes == null) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
 function shortRef(id) {
   return `PBC-${String(id ?? '').slice(0, 6).toUpperCase()}`;
 }
 
 export default function AuditTrail() {
   const toast = useToasts();
+  const { withReviewer } = useReviewer();
   const [requests, setRequests] = useState(null);
   const [evidence, setEvidence] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -75,7 +90,7 @@ export default function AuditTrail() {
   const [confirmingClose, setConfirmingClose] = useState(false);
 
   const [question, setQuestion] = useState('');
-  const [answers, setAnswers] = useState(null);
+  const [answers, setAnswers] = useState(null); // { results, answeredFor, totalLinked }
   const [asking, setAsking] = useState(false);
 
   const [showNew, setShowNew] = useState(false);
@@ -139,58 +154,87 @@ export default function AuditTrail() {
     return next;
   });
 
-  const handleCreate = async (e) => {
+  const handleCreate = (e) => {
     e.preventDefault();
-    try {
-      const result = await api.createPbcRequest({
-        description: newDescription.trim(),
-        requestedBy: newRequestedBy.trim() || 'Internal Audit',
-        itemType: 'invoice_bundle',
-        linkedInvoiceIds: [...picked],
-      });
-      await loadRequests();
-      if (result?.id) setSelectedId(result.id);
-      setShowNew(false);
-      setNewDescription('');
-      setNewRequestedBy('');
-      setPicked(new Set());
-      toast.success('Request created.');
-    } catch (err) {
-      toast.error(`Could not create the request: ${err.message}`);
-    }
+    withReviewer(async (reviewer) => {
+      try {
+        const result = await api.createPbcRequest({
+          description: newDescription.trim(),
+          requestedBy: newRequestedBy.trim() || 'Internal Audit',
+          itemType: 'invoice_bundle',
+          linkedInvoiceIds: [...picked],
+          reviewerName: reviewer,
+        });
+        await loadRequests();
+        if (result?.id) setSelectedId(result.id);
+        setShowNew(false);
+        setNewDescription('');
+        setNewRequestedBy('');
+        setPicked(new Set());
+        toast.success('Request created.');
+      } catch (err) {
+        toast.error(`Could not create the request: ${err.message}`);
+      }
+    });
   };
 
-  const handleClose = async () => {
+  const handleClose = () => {
     if (!selected) return;
-    try {
-      await api.closePbcRequest(selected.request_id);
-      setRequests((prev) => prev.map((r) => (r.request_id === selected.request_id ? { ...r, status: 'closed' } : r)));
-      setConfirmingClose(false);
-      toast.success('Request closed.');
-    } catch (e) {
-      toast.error(`Could not close the request: ${e.message}`);
-    }
+    withReviewer(async (reviewer) => {
+      try {
+        const res = await api.closePbcRequest(selected.request_id, reviewer);
+        setConfirmingClose(false);
+        await loadRequests();
+        toast.success(res.alreadyClosed
+          ? `Already closed by ${res.closedBy}.`
+          : `Request closed. ${res.evidenceRecorded} invoice trail${res.evidenceRecorded === 1 ? '' : 's'} now record${res.evidenceRecorded === 1 ? 's' : ''} that it was handed over.`);
+      } catch (e) {
+        toast.error(`Could not close the request: ${e.message}`);
+      }
+    });
   };
 
-  const handleFile = async (e) => {
+  const handleFile = (e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !selectedId) return;
-    setUploading(true);
+    if (file.size > MAX_FILE_BYTES) {
+      toast.error(`"${file.name}" is ${fileSize(file.size)}; files up to ${fileSize(MAX_FILE_BYTES)} can be attached.`);
+      return;
+    }
+    withReviewer(async (reviewer) => {
+      setUploading(true);
+      try {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        await api.uploadEvidenceFile(selectedId, file.name, String(dataUrl).split(',')[1] ?? '', file.type, reviewer);
+        setFiles(await api.getEvidenceFiles(selectedId));
+        toast.success(`Attached ${file.name}.`);
+      } catch (err) {
+        toast.error(`Could not attach "${file.name}": ${err.message}`);
+      } finally {
+        setUploading(false);
+      }
+    });
+  };
+
+  const handleDownload = async (f) => {
     try {
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      await api.uploadEvidenceFile(selectedId, file.name, String(dataUrl).split(',')[1] ?? '', file.type);
-      setFiles(await api.getEvidenceFiles(selectedId));
-      toast.success(`Attached ${file.name}.`);
+      const { blob, filename } = await api.downloadEvidenceFile(selectedId, f.id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     } catch (err) {
-      toast.error(`Could not attach "${file.name}": ${err.message}`);
-    } finally {
-      setUploading(false);
+      toast.error(`Could not download "${f.filename}": ${err.message}`);
     }
   };
 
@@ -200,8 +244,7 @@ export default function AuditTrail() {
     setAsking(true);
     setAnswers(null);
     try {
-      const res = await api.narratePbcRequest(selectedId, question.trim());
-      setAnswers(res.results ?? []);
+      setAnswers(await api.narratePbcRequest(selectedId, question.trim()));
     } catch (err) {
       toast.error(`The question could not be answered: ${err.message}`);
     } finally {
@@ -310,16 +353,23 @@ export default function AuditTrail() {
                 <div>
                   <p className="vb-audit-ref vb-mono" title={selected.request_id}>{shortRef(selected.request_id)}</p>
                   <h2>{selected.description}</h2>
-                  <p className="vb-muted vb-small">Requested by <b>{selected.requested_by}</b> on {selected.date_requested}</p>
+                  <p className="vb-muted vb-small">
+                    Requested by <b>{selected.requested_by}</b> on {selected.date_requested}
+                    {selected.created_by && <> · recorded by {selected.created_by}</>}
+                    {selected.closed_by && <> · closed by <b>{selected.closed_by}</b>{selected.closed_at ? ` ${timeAgo(selected.closed_at)}` : ''}</>}
+                  </p>
                 </div>
                 <span className={`vb-chip ${(STATUS[selected.status] ?? STATUS.open).cls}`}>{(STATUS[selected.status] ?? STATUS.open).label}</span>
               </header>
 
               <div className="vb-audit-actions">
                 <input type="file" ref={fileInputRef} hidden onChange={handleFile} />
-                <button type="button" className="vb-btn vb-btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                  <Paperclip size={14} /> {uploading ? 'Uploading…' : 'Attach a file'}
-                </button>
+                {selected.status !== 'closed' && (
+                  <button type="button" className="vb-btn vb-btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                    <Paperclip size={14} /> {uploading ? 'Uploading…' : 'Attach a file'}
+                  </button>
+                )}
+                {selected.status === 'closed' && <span className="vb-dim vb-small">Closed: the evidence has been handed over, so nothing more can be attached.</span>}
                 {selected.status !== 'closed' && !confirmingClose && (
                   <button type="button" className="vb-btn vb-btn-sm" onClick={() => setConfirmingClose(true)}>Close request</button>
                 )}
@@ -333,13 +383,18 @@ export default function AuditTrail() {
               </div>
 
               {files.length > 0 && (
-                <div className="vb-audit-files" aria-label="Attached files">
+                <ul className="vb-audit-files" aria-label="Attached files">
                   {files.map((f) => (
-                    <span key={f.id} className="vb-chip vb-chip-neutral" title={`Attached ${f.uploadedAt} by ${f.uploadedBy}`}>
-                      <FileText size={12} aria-hidden="true" /> {f.filename}
-                    </span>
+                    <li key={f.id} className="vb-audit-file">
+                      <FileText size={15} aria-hidden="true" />
+                      <span className="vb-audit-file-name">{f.filename}</span>
+                      <span className="vb-dim vb-small">{fileSize(f.sizeBytes)} · {f.uploadedBy ?? 'unknown'} · {timeAgo(f.uploadedAt)}</span>
+                      <button type="button" className="vb-btn vb-btn-sm" onClick={() => handleDownload(f)} aria-label={`Download ${f.filename}`}>
+                        <Download size={14} /> Download
+                      </button>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
 
               <div className="vb-audit-block">
@@ -359,15 +414,23 @@ export default function AuditTrail() {
                 </form>
                 <p className="vb-field-hint">
                   Answered only from the recorded decisions of the invoices below, one answer per invoice, each citing the records it used.
-                  {selected.linked_count > 10 && ' Each invoice is a separate AI call, so a large request takes a while.'}
+                  {selected.linked_count > 10 && ' Each invoice is a separate AI call, so one question covers the first 10.'}
                 </p>
                 {asking && <Spinner label={`Reading the trails of ${selected.linked_count} invoice${selected.linked_count === 1 ? '' : 's'}…`} />}
-                {answers && answers.length === 0 && <p className="vb-dim vb-small">Nothing to answer from: none of the linked invoices has a recorded decision yet.</p>}
-                {answers && answers.map((a, i) => (
-                  <div key={a.invoiceId ?? i} className="vb-explain vb-audit-answer">
+                {answers && answers.totalLinked > answers.answeredFor && (
+                  <p className="vb-small vb-audit-caution">Answered for the first {answers.answeredFor} of {answers.totalLinked} invoices: each one is a separate AI call, so one question covers at most {answers.answeredFor}.</p>
+                )}
+                {answers && answers.results.map((a, i) => (
+                  <div key={a.invoiceId ?? i} className={`vb-explain vb-audit-answer${a.error ? ' vb-audit-answer-err' : ''}`}>
                     <div className="vb-explain-label">{a.invoiceNumber ?? 'Invoice'}</div>
-                    <p>{a.answer}</p>
-                    <p className={`vb-small ${a.grounded ? 'vb-dim' : 'vb-audit-caution'}`}>{groundingNote(a)}</p>
+                    {a.error && <p>This invoice could not be answered: {a.error}</p>}
+                    {a.skipped && <p className="vb-dim">{a.skipped}</p>}
+                    {a.answer !== undefined && (
+                      <>
+                        <p>{a.answer}</p>
+                        <p className={`vb-small ${a.grounded ? 'vb-dim' : 'vb-audit-caution'}`}>{groundingNote(a)}</p>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
