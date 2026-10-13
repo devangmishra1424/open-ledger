@@ -19,13 +19,17 @@ export interface FrontendPbcRequest {
   requested_by: string;
   date_requested: string;
   status: "open" | "in_progress" | "closed";
-  tie_out_status: "matched" | "discrepant";
+  /** "none" when no invoice is linked: there is nothing to tie out, so it must not read as matched. */
+  tie_out_status: "matched" | "discrepant" | "none";
+  linked_count: number;
 }
 
 export interface FrontendEvidenceRecord {
   evidence_id: string;
   request_id: string;
   invoice_id: string;
+  /** The number printed on the invoice, which is what an auditor asks about (invoice_id is internal). */
+  invoice_number: string;
   vendor: string;
   amount: number;
   /** The invoice's own currency code; the screen must not assume dollars. */
@@ -89,7 +93,7 @@ export async function listFrontendPbcRequests(): Promise<FrontendPbcRequest[]> {
   const results: FrontendPbcRequest[] = [];
   for (const row of rows) {
     const linkedIds: string[] = (row.linked_invoice_ids ?? "").split(",").filter(Boolean);
-    let tieOutStatus: FrontendPbcRequest["tie_out_status"] = "matched";
+    let tieOutStatus: FrontendPbcRequest["tie_out_status"] = linkedIds.length > 0 ? "matched" : "none";
     if (linkedIds.length > 0) {
       const billRows = await sql`SELECT status FROM vendor_bills WHERE id = ANY(${linkedIds})`;
       if (billRows.some((b: any) => b.status === "exception" || b.status === "void")) tieOutStatus = "discrepant";
@@ -101,6 +105,7 @@ export async function listFrontendPbcRequests(): Promise<FrontendPbcRequest[]> {
       date_requested: (row.created_at as string).slice(0, 10),
       status: statusToFrontend(row.status),
       tie_out_status: tieOutStatus,
+      linked_count: linkedIds.length,
     });
   }
   return results;
@@ -137,6 +142,7 @@ export async function listFrontendEvidenceRecords(requestId?: string): Promise<F
         evidence_id: `EV-${billId.slice(0, 8)}`,
         request_id: req.id,
         invoice_id: billId,
+        invoice_number: bill.invoice_number,
         vendor: bill.vendor_name,
         amount: Number(bill.total_amount),
         currency: bill.currency ?? "USD",
