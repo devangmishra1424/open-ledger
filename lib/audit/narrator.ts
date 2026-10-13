@@ -6,7 +6,13 @@ import { getSql } from "@/db/client";
  * Finds all invoices linked to the PBC request, and runs the "ask why" explanation
  * over each one to answer the auditor's question.
  */
-export async function narratePbcResponse(requestId: string, question: string): Promise<ExplainResult[]> {
+/** One answer per linked invoice, saying which invoice it is about (several are shown together). */
+export interface PbcNarrativeResult extends ExplainResult {
+  invoiceId: string;
+  invoiceNumber: string | null;
+}
+
+export async function narratePbcResponse(requestId: string, question: string): Promise<PbcNarrativeResult[]> {
   const sql = getSql();
   const requests = await sql`SELECT * FROM pbc_requests WHERE id = ${requestId}`;
   if (requests.length === 0) throw new Error(`narratePbcResponse: no pbc_requests row found with id '${requestId}'`);
@@ -14,7 +20,7 @@ export async function narratePbcResponse(requestId: string, question: string): P
   const req = requests[0];
   const linkedIds: string[] = (req.linked_invoice_ids ?? "").split(",").filter(Boolean);
 
-  const results: ExplainResult[] = [];
+  const results: PbcNarrativeResult[] = [];
   
   for (const invoiceId of linkedIds) {
     // Anchor to the latest decision for the invoice
@@ -22,7 +28,8 @@ export async function narratePbcResponse(requestId: string, question: string): P
     if (decisionsRows.length > 0) {
       const anchorDecisionId = decisionsRows[0].id;
       const res = await explain(invoiceId, anchorDecisionId, question);
-      results.push(res);
+      const [bill] = await sql`SELECT invoice_number FROM vendor_bills WHERE id = ${invoiceId}`;
+      results.push({ ...res, invoiceId, invoiceNumber: bill?.invoice_number ?? null });
     }
   }
 

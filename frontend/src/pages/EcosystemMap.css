@@ -1,30 +1,30 @@
-.ecosystem-canvas-card {
-  padding: 0;
-  height: 480px;
-  position: relative;
-  overflow: hidden;
-}
+/* Network page, built from the workbench tokens (styles/workbench.css). */
+.vb-net { max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.vb-net-intro { margin: 0; max-width: 80ch; line-height: 1.55; }
+.vb-net-intro b { color: var(--vb-text); }
+.vb-net-flagged { color: var(--vb-danger); font-weight: 600; }
 
-.ecosystem-svg {
-  width: 100%;
-  height: 100%;
-}
+.vb-net-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap: 18px; align-items: start; }
+.vb-net-canvas { padding: 12px; }
+.vb-net-svg { display: block; width: 100%; height: auto; }
 
-.network-link-line {
-  stroke: rgba(255, 255, 255, 0.15);
-  stroke-width: 2;
-  stroke-dasharray: 6;
-  animation: dash 20s linear infinite;
-}
+.vb-net-link { fill: none; stroke: var(--vb-border); stroke-width: 1.5; stroke-dasharray: 5 6; animation: vb-net-dash 22s linear infinite; }
+.vb-net-pulse { fill: var(--vb-accent); }
+@keyframes vb-net-dash { to { stroke-dashoffset: -110; } }
 
-@keyframes dash {
-  to { stroke-dashoffset: -100; }
-}
+.vb-net-node { cursor: pointer; outline: none; }
+.vb-net-ring { fill: var(--vb-panel-2); stroke-width: 2; transition: r 0.2s ease, stroke-width 0.2s ease; }
+.vb-net-node:hover .vb-net-ring, .vb-net-node:focus-visible .vb-net-ring { stroke-width: 3; }
+.vb-net-node.is-selected .vb-net-ring { stroke-width: 3; fill: var(--vb-raised); }
+.vb-net-node:focus-visible .vb-net-label { text-decoration: underline; }
+.vb-net-label { fill: var(--vb-text); font-size: 13px; font-weight: 600; font-family: var(--font-sans, system-ui, sans-serif); }
 
-.ecosystem-node-circle {
-  transition: all 0.25s ease;
-}
+.vb-net-detail { padding: 20px 22px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.vb-net-detail h2 { margin: 0; font-size: 18px; }
+.vb-net-detail p { margin: 0; font-size: 14px; line-height: 1.55; }
 
-.ecosystem-node-circle:hover {
-  filter: drop-shadow(0 0 10px rgba(99, 102, 241, 0.6));
+@media (max-width: 1000px) { .vb-net-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) {
+  .vb-net-link { animation: none; }
+  .vb-net-pulse { display: none; }
 }

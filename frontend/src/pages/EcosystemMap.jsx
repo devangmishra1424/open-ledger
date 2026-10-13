@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import GlassCard from '../components/GlassCard';
-import { Network, Building2, Landmark, Bot, ShieldCheck, Zap } from 'lucide-react';
+import { Building2, Landmark, Bot, ShieldCheck } from 'lucide-react';
 import { api } from '../services/api';
-import { Banner } from '../components/ui';
+import { Banner, Empty } from '../components/ui';
 import './EcosystemMap.css';
 
 const ICON_BY_TYPE = {
@@ -12,7 +11,32 @@ const ICON_BY_TYPE = {
   Ledger: ShieldCheck,
 };
 
-const EcosystemMap = () => {
+// The drawing's own coordinate space; the SVG scales to its card through viewBox.
+const W = 820;
+const H = 480;
+
+/**
+ * Where each node sits. The server's x/y put up to eight vendors on a short arc about 36px apart with
+ * 56px circles, so they overlapped and hid each other's names. Here vendors stand in one evenly spaced
+ * column with their names to the left, the core in the middle, and the payment rail and the decision
+ * ledger to the right.
+ */
+function layout(nodes) {
+  const vendors = nodes.filter((n) => n.type === 'Vendor');
+  const top = 48;
+  const step = vendors.length > 1 ? Math.min(70, (H - 2 * top) / (vendors.length - 1)) : 0;
+  const startY = H / 2 - (step * (vendors.length - 1)) / 2;
+  const pos = new Map();
+  vendors.forEach((v, i) => pos.set(v.id, { x: 250, y: startY + i * step }));
+  for (const n of nodes) {
+    if (n.type === 'Core') pos.set(n.id, { x: 470, y: H / 2 });
+    if (n.type === 'Bank') pos.set(n.id, { x: 680, y: H / 2 - 110 });
+    if (n.type === 'Ledger') pos.set(n.id, { x: 680, y: H / 2 + 110 });
+  }
+  return pos;
+}
+
+export default function EcosystemMap() {
   const [nodes, setNodes] = useState([]);
   const [connections, setConnections] = useState([]);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
@@ -31,90 +55,70 @@ const EcosystemMap = () => {
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
-  const activeDetails = nodes.find((n) => n.id === selectedNodeId) ?? nodes[0] ?? null;
+  const pos = layout(nodes);
+  const active = nodes.find((n) => n.id === selectedNodeId) ?? nodes[0] ?? null;
+  const vendorCount = nodes.filter((n) => n.type === 'Vendor').length;
+  const flaggedCount = nodes.filter((n) => n.type === 'Vendor' && n.color === '#ff5757').length;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%' }}>
+    <div className="vb-net">
       {error && <Banner kind="error">Could not load the network: {error.message}</Banner>}
-      <GlassCard style={{ padding: '24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <h2 style={{ fontSize: '24px', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Network size={24} color="#a7c957" />
-              Vendors around the pipeline
-            </h2>
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Real vendors from your ledger, arranged around the core pipeline. Red means flagged.
-            </p>
-          </div>
-          <span className="status-chip clean">
-            <span className="status-dot" />
-            {nodes.filter((n) => n.type === 'Vendor').length} vendors
-          </span>
-        </div>
-      </GlassCard>
+      <p className="vb-muted vb-small vb-net-intro">
+        Real vendors from your ledger, feeding the pipeline. Approved invoices go to the payment rail, and every decision is written to the decision ledger.
+        {' '}<b>{vendorCount}</b> vendor{vendorCount === 1 ? '' : 's'}{flaggedCount > 0 && <>, <span className="vb-net-flagged">{flaggedCount} flagged</span></>}.
+      </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' }}>
-        <GlassCard className="ecosystem-canvas-card">
+      <div className="vb-net-grid">
+        <section className="vb-card vb-net-canvas" aria-label="Vendor network">
           {nodes.length === 0 ? (
-            <div style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-              No vendors on file yet — nodes appear here once an invoice creates a real vendor.
-            </div>
+            <Empty title="No vendors yet">Vendors appear here once an invoice creates one.</Empty>
           ) : (
-            <svg className="ecosystem-svg">
+            <svg viewBox={`0 0 ${W} ${H}`} className="vb-net-svg" role="img" aria-label={`${vendorCount} vendors connected to the VeriBook pipeline`}>
               {connections.map((conn, idx) => {
-                const sourceNode = nodes.find(n => n.id === conn.from);
-                const targetNode = nodes.find(n => n.id === conn.to);
-                if (!sourceNode || !targetNode) return null;
+                const a = pos.get(conn.from);
+                const b = pos.get(conn.to);
+                if (!a || !b) return null;
+                const mx = (a.x + b.x) / 2;
+                const d = `M ${a.x} ${a.y} C ${mx} ${a.y}, ${mx} ${b.y}, ${b.x} ${b.y}`;
                 return (
                   <g key={idx}>
-                    <line
-                      x1={sourceNode.x}
-                      y1={sourceNode.y}
-                      x2={targetNode.x}
-                      y2={targetNode.y}
-                      className="network-link-line"
-                    />
-                    <circle r="3" fill="#a7c957" className="link-pulse-particle">
-                      <animateMotion
-                        path={`M ${sourceNode.x} ${sourceNode.y} L ${targetNode.x} ${targetNode.y}`}
-                        dur={`${3 + idx}s`}
-                        repeatCount="indefinite"
-                      />
+                    <path d={d} className="vb-net-link" />
+                    <circle r="3" className="vb-net-pulse">
+                      <animateMotion path={d} dur={`${3 + (idx % 4)}s`} repeatCount="indefinite" />
                     </circle>
                   </g>
                 );
               })}
 
               {nodes.map((node) => {
+                const p = pos.get(node.id);
+                if (!p) return null;
                 const Icon = ICON_BY_TYPE[node.type] ?? Building2;
-                const isSelected = activeDetails?.id === node.id;
+                const isVendor = node.type === 'Vendor';
+                const isSelected = active?.id === node.id;
+                const r = isVendor ? 20 : 30;
                 return (
                   <g
                     key={node.id}
-                    transform={`translate(${node.x}, ${node.y})`}
+                    transform={`translate(${p.x}, ${p.y})`}
                     onClick={() => setSelectedNodeId(node.id)}
-                    style={{ cursor: 'pointer' }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedNodeId(node.id); } }}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={node.label}
+                    className={`vb-net-node${isSelected ? ' is-selected' : ''}`}
                   >
-                    <circle
-                      r={isSelected ? "34" : "28"}
-                      fill="#0d122b"
-                      stroke={node.color}
-                      strokeWidth={isSelected ? "3" : "2"}
-                      className="ecosystem-node-circle"
-                    />
-                    <foreignObject x="-14" y="-14" width="28" height="28" style={{ pointerEvents: 'none' }}>
-                      <div style={{ color: node.color, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                        <Icon size={18} />
+                    <circle r={r + (isSelected ? 4 : 0)} className="vb-net-ring" style={{ stroke: node.color }} />
+                    <foreignObject x={-10} y={-10} width="20" height="20" style={{ pointerEvents: 'none' }}>
+                      <div style={{ color: node.color, display: 'grid', placeItems: 'center', height: '100%' }}>
+                        <Icon size={isVendor ? 15 : 18} />
                       </div>
                     </foreignObject>
                     <text
-                      y="46"
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      fontSize="12"
-                      fontWeight="600"
-                      fontFamily="Plus Jakarta Sans"
+                      className="vb-net-label"
+                      x={isVendor ? -(r + 12) : 0}
+                      y={isVendor ? 4 : r + 22}
+                      textAnchor={isVendor ? 'end' : 'middle'}
                     >
                       {node.label}
                     </text>
@@ -123,39 +127,23 @@ const EcosystemMap = () => {
               })}
             </svg>
           )}
-        </GlassCard>
+        </section>
 
-        <GlassCard style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {activeDetails ? (
+        <section className="vb-card vb-net-detail" aria-live="polite">
+          {active ? (
             <>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.05)', border: `1px solid ${activeDetails.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: activeDetails.color }}>
-                  <Zap size={20} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#ffffff' }}>{activeDetails.label}</h3>
-                  <span className="status-chip clean" style={{ fontSize: '11px', marginTop: '2px' }}>
-                    {activeDetails.type} Node
-                  </span>
-                </div>
-              </div>
-
-              <p style={{ fontSize: '14px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                {activeDetails.details}
-              </p>
-
-              <div style={{ padding: '14px', background: 'rgba(255, 255, 255, 0.04)', borderRadius: '12px', border: '1px solid var(--border-glass)' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>Node ID</div>
-                <div className="font-mono" style={{ fontSize: '13px', color: '#ffffff', wordBreak: 'break-all' }}>{activeDetails.id}</div>
-              </div>
+              <span className="vb-chip vb-chip-neutral">{active.type === 'Vendor' ? 'Vendor' : active.type === 'Core' ? 'Pipeline' : active.type === 'Bank' ? 'Payments' : 'Decision ledger'}</span>
+              <h2>{active.label}</h2>
+              <p className="vb-muted">{active.details}</p>
+              {active.type === 'Vendor' && (
+                <p className="vb-dim vb-small">Select another node on the map to compare.</p>
+              )}
             </>
           ) : (
-            <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Select a node to inspect it.</p>
+            <p className="vb-muted">Select a node to inspect it.</p>
           )}
-        </GlassCard>
+        </section>
       </div>
     </div>
   );
-};
-
-export default EcosystemMap;
+}

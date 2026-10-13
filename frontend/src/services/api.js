@@ -138,7 +138,7 @@ export const api = {
 
   // --- PBC requests & evidence (audit support) ---
   getPbcRequests: () => request('/pbc/requests'),
-  createPbcRequest: ({ description, requestedBy, itemType, dueDate }) => request('/pbc/requests', { method: 'POST', body: { description, requestedBy, itemType, dueDate } }),
+  createPbcRequest: ({ description, requestedBy, itemType, dueDate, linkedInvoiceIds }) => request('/pbc/requests', { method: 'POST', body: { description, requestedBy, itemType, dueDate, linkedInvoiceIds } }),
   closePbcRequest: (requestId) => request(`/pbc/requests/${encodeURIComponent(requestId)}/close`, { method: 'POST' }),
   getEvidenceRecords: (params = {}) => request(`/pbc/evidence${qs(params)}`),
   narratePbcRequest: (requestId, question) => request(`/pbc/${encodeURIComponent(requestId)}/narrate`, { method: 'POST', body: { question }, timeout: LONG_TIMEOUT_MS }),
