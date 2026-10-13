@@ -6,8 +6,9 @@ import '../styles/landing.css';
 
 /**
  * The public front page. Everything it says is true of the code as it stands (no invented numbers
- * or customers), including the limits at the bottom. It calls no protected endpoint: only the
- * public session check, to decide between "Log in" and "Open the workbench".
+ * or customers), including the limits at the bottom. VeriBook runs open (no sign-in) unless an
+ * operator configures accounts, so the way in is one button straight to the workbench; it only
+ * becomes "Log in" on a server that actually has accounts.
  */
 
 const DOCS = [
@@ -47,10 +48,10 @@ export default function Landing() {
   const { signedOut, acknowledgeSignedOut } = auth;
   useEffect(() => { if (signedOut) acknowledgeSignedOut(); }, [signedOut, acknowledgeSignedOut]);
   const signedIn = Boolean(auth.user);
-  // Sign-in switched off (local development only): there is nothing to log in to.
-  const openServer = auth.status === 'ready' && !auth.required;
-  const enterLabel = signedIn || openServer ? 'Open the workbench' : 'Log in';
-  const enterTo = signedIn || openServer ? '/app' : '/login';
+  // Only a server that has accounts configured asks anyone to log in; otherwise it is straight in.
+  const needsLogin = auth.status === 'ready' && auth.required && !signedIn;
+  const enterLabel = needsLogin ? 'Log in' : 'Enter VeriBook';
+  const enterTo = needsLogin ? '/login' : '/app';
 
   return (
     <div className="lp-root">
@@ -66,7 +67,7 @@ export default function Landing() {
           <a href="#limits">What it doesn’t do</a>
         </nav>
         <Link to={enterTo} className="lp-btn lp-btn-solid">
-          {signedIn ? <ArrowRight size={16} aria-hidden="true" /> : <LogIn size={16} aria-hidden="true" />}
+          {needsLogin ? <LogIn size={16} aria-hidden="true" /> : <ArrowRight size={16} aria-hidden="true" />}
           {enterLabel}
         </Link>
       </header>

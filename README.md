@@ -20,7 +20,7 @@ Deterministic code makes the money decisions; AI is used where judgment is neede
 | Ask by voice | Real, read-only. The browser's own speech recognition and voice, on top of the existing explain endpoint (answers only from recorded decisions). Chrome and Edge for the microphone; typing works everywhere. See `docs/HOW_IT_WORKS.md` section 10b. |
 | **Payments** | **Simulated.** Recorded and posted (Dr AP / Cr Cash), no money moves. Every screen says so. |
 | **Vendor bank-detail callbacks** | **Manual.** A person phones the vendor and records the answer; a different person signs off. No automated call is placed. |
-| Sign-in | Real when configured (`VERIBOOK_USERS`, `VERIBOOK_AUTH_SECRET`): named accounts with scrypt-hashed passwords, signed session tokens, every API route behind it, and decisions recorded under the signed-in account. A production server with no accounts refuses to run open. No roles yet. See `docs/HOW_IT_WORKS.md` section 9b. |
+| Sign-in | Off by default: VeriBook runs as an open proof of concept, entered straight from the home page, with reviewer names typed in. Optional, and real when switched on (`VERIBOOK_USERS`, `VERIBOOK_AUTH_SECRET`): named accounts with scrypt-hashed passwords, signed session tokens, every API route behind it, decisions recorded under the signed-in account. No roles yet. See `docs/HOW_IT_WORKS.md` section 9b. |
 
 ## Try it
 
@@ -34,7 +34,7 @@ npm run dev:demo                 # API on :3001, against the demo schema
 npm --prefix frontend install && npm --prefix frontend run dev   # UI on :5173
 ```
 
-The home page is at http://localhost:5173 and the workbench at `/app`. With no `VERIBOOK_USERS` set, local development runs without sign-in; to try sign-in locally, set `VERIBOOK_USERS` and `VERIBOOK_AUTH_SECRET` (see `.env.example`).
+The home page is at http://localhost:5173; **Enter VeriBook** goes straight to the workbench at `/app`. There is no sign-in unless you configure accounts (`VERIBOOK_USERS` and `VERIBOOK_AUTH_SECRET`, see `.env.example`).
 
 Open the inbox. Six invoices will be waiting, each for a different reason: a bank-detail change on the vendor, a price variance, a unit-of-measure mismatch, a missing PO, a blanket-PO ceiling, a credit memo. Open the bank-detail one and walk the verification: log the call, record the vendor's answer, then sign off as a second person (with sign-in on, sign in as a second account; with it off, switch name in the sidebar); only then can it be approved.
 
@@ -59,7 +59,7 @@ npm run bench:llm -- 6          # compare candidate models for the Investigator
 
 ## Known limits
 
-- Single tenant. Sign-in has accounts but no roles: any signed-in account can approve. With sign-in off (local development) reviewer identity is a typed name.
+- Single tenant, and open by default: with sign-in off (the default) anyone with the link can use it and reviewer identity is a typed name. Sign-in, when switched on, has accounts but no roles: any signed-in account can approve.
 - Only the invoice is read from a document. The purchase order and goods receipt are records (seeded, or entered on the Orders screen; a PO document can be read into an editable draft, deterministic parser only). A receipt document is not read.
 - PDFs need a text layer; there is no OCR, so a scan is refused with a clear message. An invoice in a layout neither the template parser nor the AI can read goes to a person.
 - Payments are a simulation, made at approval rather than scheduled by due date or early-payment terms.
