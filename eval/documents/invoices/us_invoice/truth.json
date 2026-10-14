@@ -1,0 +1,32 @@
+{
+  "vendor_name": "Bayside Industrial Supply Co.",
+  "vendor_tax_id": null,
+  "invoice_number": "10442",
+  "invoice_date": "2026-10-02",
+  "po_reference": "PO-7731",
+  "currency": "USD",
+  "line_items": [
+    {
+      "description": "Pneumatic Cylinder, 50 mm bore x 200 mm stroke",
+      "quantity": 4.0,
+      "unit_price": 189.0
+    },
+    {
+      "description": "Air Hose 3/8\" x 25 ft, polyurethane",
+      "quantity": 10.0,
+      "unit_price": 32.5
+    },
+    {
+      "description": "Pressure Regulator with Gauge, 1/4 NPT",
+      "quantity": 2.0,
+      "unit_price": 74.95
+    }
+  ],
+  "subtotal": 1230.9,
+  "tax": 101.55,
+  "charges": 45.0,
+  "discount": 0.0,
+  "round_off": 0.0,
+  "total": 1377.45,
+  "notes": null
+}

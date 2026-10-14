@@ -52,6 +52,31 @@ describe("assertBalanced", () => {
   });
 });
 
+describe("buildBillApprovalDraft: round off and invoice-level discount (adjustment)", () => {
+  const base = { billId: "bill-adj", invoiceNumber: "INV-ADJ", currency: "INR", exchangeRate: 1.0, apAccountId: "2000", taxAccountId: "2210", entryDate: "2026-10-01" };
+  const sums = (lines: Array<{ debitAmount: number; creditAmount: number }>) => [
+    Math.round(lines.reduce((s, l) => s + l.debitAmount, 0) * 100) / 100,
+    Math.round(lines.reduce((s, l) => s + l.creditAmount, 0) * 100) / 100,
+  ];
+
+  it("a round off up (+0.34, a GST invoice rounded to the rupee) is a debit to 7300 and the entry balances", () => {
+    const d = buildBillApprovalDraft({ ...base, totalAmount: 12434, taxTotal: 1896.66, adjustmentTotal: 0.34, adjustmentAccountId: "7300", lines: [{ accountId: "6000", amount: 10537 }] });
+    expect(d.lines.find((l) => l.accountId === "7300")).toMatchObject({ debitAmount: 0.34, creditAmount: 0 });
+    expect(sums(d.lines)).toEqual([12434, 12434]);
+  });
+
+  it("a round off down or a discount (-0.35) is a credit to 7300 and the entry balances", () => {
+    const d = buildBillApprovalDraft({ ...base, totalAmount: 32368, taxTotal: 1541.35, adjustmentTotal: -0.35, adjustmentAccountId: "7300", lines: [{ accountId: "6000", amount: 30827 }] });
+    expect(d.lines.find((l) => l.accountId === "7300")).toMatchObject({ debitAmount: 0, creditAmount: 0.35 });
+    expect(sums(d.lines)).toEqual([32368.35, 32368.35]);
+  });
+
+  it("an adjustment with no 7300 account fails loudly instead of posting an unbalanced or misfiled entry", () => {
+    expect(() => buildBillApprovalDraft({ ...base, totalAmount: 100.34, taxTotal: 0, adjustmentTotal: 0.34, adjustmentAccountId: null, lines: [{ accountId: "6000", amount: 100 }] }))
+      .toThrow(/no rounding\/discount account \(7300\)/);
+  });
+});
+
 describe("buildBillApprovalDraft", () => {
   it("builds a balanced Dr Expense / Cr AP entry with no tax", () => {
     const draft = buildBillApprovalDraft({

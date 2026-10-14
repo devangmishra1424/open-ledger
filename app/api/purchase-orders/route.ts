@@ -1,4 +1,6 @@
 import { createPurchaseOrder, listPurchaseOrders, receiptFromBody } from "@/lib/purchase-orders";
+import { getDocument } from "@/lib/documents/store";
+import { recheckWaitingForNewPo } from "@/lib/pipeline/recheck";
 import { handle, HttpError, readJsonBody } from "@/lib/http";
 
 /**
@@ -19,13 +21,25 @@ export const GET = handle("GET /api/purchase-orders", async (req) => {
  * POST /api/purchase-orders — the PO an invoice is matched against:
  *   { vendor | vendorId, poNumber, orderDate?, currency?, buyerName?,
  *     items: [{ description, qty, rate, uom? }],
- *     receipt?: { receivedInFull?: true, lines?: [{ line, qty }], receiptDate?, receiverName?, condition? } }
+ *     receipt?: { receivedInFull?: true, lines?: [{ line, qty }], receiptDate?, receiverName?, condition? },
+ *     sourceDocumentId? }  (the PO document it was read from: POST /api/documents/read with purpose purchase_order)
  * With `receipt`, the goods receipt is recorded in the same transaction. 400 malformed, 409 if a PO
  * with this number already exists. An unknown vendor name creates the vendor with trust tier 'new'.
+ *
+ * Invoices that were saved before this PO existed, cite its number and come from the same vendor are linked to it
+ * and checked again: `recheckedInvoices` lists them (lib/pipeline/recheck.ts).
  */
 export const POST = handle("POST /api/purchase-orders", async (req) => {
   const body = await readJsonBody(req);
   if (!Array.isArray(body.items)) throw new HttpError(400, "items must be an array of { description, qty, rate }");
+  let sourceDocumentId: string | null = null;
+  if (body.sourceDocumentId != null) {
+    const doc = typeof body.sourceDocumentId === "string" ? await getDocument(body.sourceDocumentId) : null;
+    if (!doc) throw new HttpError(404, `no document '${String(body.sourceDocumentId)}'`);
+    if (doc.purpose !== "purchase_order") throw new HttpError(400, "that document was read as an invoice, not a purchase order");
+    if (doc.purchaseOrderId) throw new HttpError(409, `that document was already saved as a purchase order (id ${doc.purchaseOrderId})`);
+    sourceDocumentId = doc.id;
+  }
 
   const created = await createPurchaseOrder({
     vendorId: typeof body.vendorId === "string" ? body.vendorId : undefined,
@@ -36,6 +50,8 @@ export const POST = handle("POST /api/purchase-orders", async (req) => {
     buyerName: typeof body.buyerName === "string" ? body.buyerName : null,
     lines: body.items.map((it: any) => ({ description: it?.description, quantity: it?.qty, unitPrice: it?.rate, uom: typeof it?.uom === "string" ? it.uom : null })),
     receipt: body.receipt === undefined || body.receipt === null ? null : receiptFromBody(body.receipt),
+    sourceDocumentId,
   });
-  return Response.json(created, { status: 201 });
+  const recheckedInvoices = await recheckWaitingForNewPo({ poNumber: created.poNumber, vendorId: created.vendorId });
+  return Response.json({ ...created, recheckedInvoices }, { status: 201 });
 });

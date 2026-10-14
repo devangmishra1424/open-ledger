@@ -47,12 +47,26 @@ CREATE TABLE exchange_rates (
   id TEXT PRIMARY KEY, from_currency TEXT NOT NULL, to_currency TEXT NOT NULL,
   rate NUMERIC(18,8) NOT NULL, rate_date TEXT NOT NULL, rate_source TEXT
 );
+-- The original file behind an invoice or a purchase order, exactly as uploaded (a PDF, a scan, a phone photo,
+-- a Word or Excel file), with what the document reader made of it (`reading`: its text, tables, OCR confidence
+-- and what was done to each page) and the fields read from it (`extraction`). Kept so anyone can open the
+-- document an invoice was entered from and compare. Content is BYTEA in the database: fine at these sizes
+-- (the reader takes at most 20 MB); a high-volume deployment would keep it in object storage instead.
+CREATE TABLE source_documents (
+  id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, filename TEXT NOT NULL, media_type TEXT NOT NULL,
+  byte_size INTEGER NOT NULL CHECK (byte_size > 0), content BYTEA NOT NULL,
+  purpose TEXT NOT NULL CHECK (purpose IN ('invoice','purchase_order')),
+  source_kind TEXT NOT NULL, page_count INTEGER, ocr_used BOOLEAN NOT NULL DEFAULT false, ocr_confidence NUMERIC(5,3),
+  reading JSONB NOT NULL, extraction JSONB, uploaded_by TEXT,
+  uploaded_at TEXT NOT NULL DEFAULT now()::text
+);
 CREATE TABLE purchase_orders (
   id TEXT PRIMARY KEY, po_number TEXT UNIQUE NOT NULL, vendor_id TEXT NOT NULL REFERENCES vendors(id), buyer_name TEXT,
   order_date TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','partial','closed')),
   po_type TEXT NOT NULL DEFAULT 'standard' CHECK (po_type IN ('standard','blanket')),
   max_value_ceiling NUMERIC(18,4), max_qty_ceiling NUMERIC(18,4),
-  currency TEXT NOT NULL DEFAULT 'USD', exchange_rate NUMERIC(18,8) NOT NULL DEFAULT 1.0
+  currency TEXT NOT NULL DEFAULT 'USD', exchange_rate NUMERIC(18,8) NOT NULL DEFAULT 1.0,
+  source_document_id TEXT REFERENCES source_documents(id)
 );
 CREATE TABLE purchase_order_lines (
   id TEXT PRIMARY KEY, po_id TEXT NOT NULL REFERENCES purchase_orders(id), line_number INTEGER NOT NULL,
@@ -90,6 +104,12 @@ CREATE TABLE vendor_bills (
   invoice_number TEXT NOT NULL, invoice_date TEXT NOT NULL, due_date TEXT,
   currency TEXT NOT NULL DEFAULT 'USD', exchange_rate NUMERIC(18,8) NOT NULL DEFAULT 1.0,
   subtotal NUMERIC(18,4) NOT NULL, tax_total NUMERIC(18,4) NOT NULL DEFAULT 0, total_amount NUMERIC(18,4) NOT NULL,
+  -- total_amount = subtotal + tax_total + adjustment_total. The adjustment is the invoice's round off minus any
+  -- invoice-level discount (signed); it posts to account 7300 so the bill still balances in the ledger.
+  adjustment_total NUMERIC(18,4) NOT NULL DEFAULT 0,
+  -- The PO number printed on the invoice, kept even when no such PO was on file at the time (po_id stays NULL), so
+  -- the invoice can be linked when the PO is added later (lib/pipeline/recheck.ts).
+  po_reference TEXT,
   raw_source TEXT, ap_account_id TEXT REFERENCES chart_of_accounts(id), journal_entry_id TEXT REFERENCES journal_entries(id),
   status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing','matched','exception','approved','posted','paid','void')),
   -- EXC-CREDIT_MEMO extension (spec §2 EXC-07): invoice_type distinguishes a credit memo from
@@ -98,6 +118,7 @@ CREATE TABLE vendor_bills (
   -- Both NULL/'standard' for every ordinary bill — additive, no existing row changes meaning.
   invoice_type TEXT NOT NULL DEFAULT 'standard' CHECK (invoice_type IN ('standard', 'credit_memo')),
   related_invoice_id TEXT REFERENCES vendor_bills(id),
+  source_document_id TEXT REFERENCES source_documents(id),
   received_at TEXT NOT NULL DEFAULT now()::text, UNIQUE(vendor_id, invoice_number)
 );
 CREATE TABLE vendor_bill_lines (
@@ -179,3 +200,4 @@ CREATE INDEX idx_decisions_seq ON decisions(seq);
 CREATE INDEX idx_vendor_bills_vendor ON vendor_bills(vendor_id);
 CREATE INDEX idx_jel_account ON journal_entry_lines(account_id);
 CREATE INDEX idx_pbc_evidence_files_request ON pbc_evidence_files(pbc_request_id);
+CREATE INDEX idx_source_documents_sha256 ON source_documents(sha256);

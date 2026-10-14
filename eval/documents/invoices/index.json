@@ -1,0 +1,89 @@
+[
+  {
+    "layout": "tally_gst",
+    "title": "Tally-style GST invoice (CGST+SGST, round off, HSN summary)",
+    "forms": [
+      "digital.pdf",
+      "scan_clean.pdf",
+      "scan_messy.pdf",
+      "photo.jpg",
+      "screenshot.png"
+    ]
+  },
+  {
+    "layout": "zoho_igst",
+    "title": "Zoho-style IGST invoice (per-line tax columns, DD/MM dates)",
+    "forms": [
+      "digital.pdf",
+      "scan_clean.pdf",
+      "scan_messy.pdf",
+      "photo.jpg",
+      "workbook.xlsx"
+    ]
+  },
+  {
+    "layout": "service_bill",
+    "title": "Professional-services bill (amount-only rows, lakh grouping, no PO)",
+    "forms": [
+      "digital.pdf",
+      "scan_clean.pdf",
+      "scan_messy.pdf",
+      "photo.jpg",
+      "document.docx"
+    ]
+  },
+  {
+    "layout": "us_invoice",
+    "title": "US invoice (qty first, MM/DD dates, sales tax + shipping)",
+    "forms": [
+      "digital.pdf",
+      "scan_clean.pdf",
+      "scan_messy.pdf",
+      "photo.jpg",
+      "screenshot.png",
+      "workbook.xlsx"
+    ]
+  },
+  {
+    "layout": "uk_vat",
+    "title": "UK VAT invoice (codes, Net/VAT/Gross, Your Order Ref)",
+    "forms": [
+      "digital.pdf",
+      "scan_clean.pdf",
+      "scan_messy.pdf",
+      "photo.jpg",
+      "document.docx"
+    ]
+  },
+  {
+    "layout": "multipage_gst",
+    "title": "Two-page GST invoice (28 lines, repeated header, DD.MM.YYYY)",
+    "forms": [
+      "digital.pdf",
+      "scan_clean.pdf",
+      "scan_messy.pdf"
+    ]
+  },
+  {
+    "layout": "discount_uom",
+    "title": "Trader's GST bill (line discounts, KG quantities, per-line tax and total columns)",
+    "forms": [
+      "digital.pdf",
+      "scan_clean.pdf",
+      "scan_messy.pdf",
+      "photo.jpg"
+    ]
+  },
+  {
+    "layout": "plain_bill",
+    "title": "Small vendor's plain bill (no table, '@ rate = amount' lines, no tax)",
+    "forms": [
+      "digital.pdf",
+      "scan_clean.pdf",
+      "scan_messy.pdf",
+      "photo.jpg",
+      "screenshot.png",
+      "document.docx"
+    ]
+  }
+]

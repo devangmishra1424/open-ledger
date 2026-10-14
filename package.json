@@ -15,7 +15,9 @@
     "migrate:apply": "tsx --env-file=.env db/apply-migration.ts",
     "auth:hash": "tsx scripts/hash-password.ts",
     "bench:llm": "tsx --env-file=.env scripts/llm-bench.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "reader": "node scripts/run-reader.cjs",
+    "eval:documents": "tsx --env-file=.env eval/documents/run.ts"
   },
   "dependencies": {
     "@types/pdfkit": "^0.17.6",

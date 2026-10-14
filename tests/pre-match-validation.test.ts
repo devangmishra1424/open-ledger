@@ -76,6 +76,11 @@ describe("runPreMatchValidation (spec §1.2)", () => {
     it("USD/EUR/GBP/CAD are all supported", () => {
       for (const c of ["USD", "EUR", "GBP", "CAD"]) expect(isCurrencySupported(c)).toBe(true);
     });
+    it("regression: an Indian (INR) invoice read off a GST document is not stopped as an unsupported currency; nor are SGD and AUD", () => {
+      for (const c of ["INR", "SGD", "AUD"]) expect(isCurrencySupported(c)).toBe(true);
+      const r = runPreMatchValidation(baseInput({ invoice: { ...baseInput().invoice, currency: "INR" } }));
+      expect(r.findings.find((f) => f.check === "currency")?.passed).toBe(true);
+    });
     it("an unsupported currency fails with EXC-CURRENCY / block", () => {
       const r = runPreMatchValidation(baseInput({ invoice: { ...baseInput().invoice, currency: "XYZ" } }));
       expect(r.passed).toBe(false);

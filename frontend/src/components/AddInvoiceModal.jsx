@@ -1,30 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Trash2, Upload } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 import { useInvoices } from '../state/Invoices';
 import { useToasts } from '../state/Toasts';
 import { Banner, Spinner } from './ui';
+import DocumentIntake from './DocumentIntake';
 
 const today = () => new Date().toISOString().slice(0, 10);
-
-const sampleText = () => `Northwind Parts Ltd.
-INVOICE
-Invoice Number: NW-${Math.floor(1000 + Math.random() * 9000)}
-Invoice Date: ${today()}
-
-Line Items:
-1. Industrial Bearing Set
-   Qty: 12
-   Unit Price: $145.00
-2. Maintenance Kit
-   Qty: 4
-   Unit Price: $62.50
----
-Subtotal: $1,990.00
-Tax: $159.20
-Total Amount Due: $2,149.20
-`;
 
 export default function AddInvoiceModal({ onClose }) {
   const [mode, setMode] = useState('document');
@@ -36,13 +19,13 @@ export default function AddInvoiceModal({ onClose }) {
 
   return (
     <div className="vb-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <div className="vb-modal" role="dialog" aria-modal="true" aria-labelledby="vb-add-title" style={{ width: 'min(680px, 100%)' }} onMouseDown={(e) => e.stopPropagation()}>
+      <div className={`vb-modal${mode === 'document' ? ' vb-modal-wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby="vb-add-title" style={mode === 'document' ? undefined : { width: 'min(680px, 100%)' }} onMouseDown={(e) => e.stopPropagation()}>
         <h2 id="vb-add-title">Add an invoice</h2>
         <div className="vb-tabs" role="tablist" aria-label="How to add it">
           <button type="button" role="tab" className="vb-tab" aria-selected={mode === 'document'} onClick={() => setMode('document')}>From a document</button>
           <button type="button" role="tab" className="vb-tab" aria-selected={mode === 'manual'} onClick={() => setMode('manual')}>Type it in</button>
         </div>
-        {mode === 'document' ? <FromDocument onClose={onClose} /> : <Manual onClose={onClose} />}
+        {mode === 'document' ? <FromDocumentFile onClose={onClose} /> : <Manual onClose={onClose} />}
       </div>
     </div>
   );
@@ -59,112 +42,18 @@ function useAfterCreate(onClose) {
   };
 }
 
-function FromDocument({ onClose }) {
+/** Read a document (any format) into the form, check it next to the original, save it. */
+function FromDocumentFile({ onClose }) {
   const afterCreate = useAfterCreate(onClose);
   const toast = useToasts();
-  const [text, setText] = useState('');
-  const [fileName, setFileName] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const [created, setCreated] = useState(null);
-  const fileRef = useRef(null);
-
-  const onFile = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setError(null);
-    setFileName(file.name);
-    try {
-      if (file.name.toLowerCase().endsWith('.pdf')) {
-        const dataUrl = await new Promise((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result);
-          r.onerror = () => reject(new Error('Could not read the file.'));
-          r.readAsDataURL(file);
-        });
-        setText(dataUrl); // sent as-is; the server extracts the PDF text
-      } else {
-        setText(await file.text());
-      }
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const inv = await api.ingestInvoice(text);
-      toast.success('Invoice received. Checking it now.');
-      setCreated(inv);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (created) {
-    const ex = created.extraction;
-    return (
-      <>
-        <Banner kind={ex.confidence >= 0.85 ? 'info' : 'warn'}>
-          <strong>Read {ex.method === 'llm' ? 'by AI' : ex.method === 'template' ? 'with the template parser' : 'partially'}, {Math.round(ex.confidence * 100)}% sure.</strong>
-          {ex.confidence < 0.85 && ' That is below the 85% bar, so a person will review it before anything is paid.'}
-          {ex.fallbackReason && <div style={{ marginTop: 6 }}>{ex.fallbackReason}</div>}
-          {ex.uncertainFields.length > 0 && (
-            <ul className="vb-claims" style={{ marginTop: 6 }}>{ex.uncertainFields.map((f) => <li key={f}>{f}</li>)}</ul>
-          )}
-        </Banner>
-        {ex.poReference && created.poNumber === 'Non-PO' && (ex.poOnFileFor ? (
-          <Banner kind="warn">
-            <strong>{ex.poReference} belongs to &ldquo;{ex.poOnFileFor}&rdquo;, but this invoice is from &ldquo;{created.vendor}&rdquo;,</strong> so it cannot be matched to that order and is treated as a non-PO invoice.
-            {' '}A PO only matches an invoice from the same vendor name (case and spacing do not matter). Check the names on both documents.
-          </Banner>
-        ) : (
-          <Banner kind="warn">
-            <strong>No purchase order {ex.poReference} is on file,</strong> so this invoice is treated as a non-PO invoice and cannot be three-way matched.
-            {' '}<Link to="/app/orders" onClick={onClose}>Add the PO and its goods receipt</Link> first, then add the invoice again under a new invoice number.
-          </Banner>
-        ))}
-        <div className="vb-modal-actions">
-          <button type="button" className="vb-btn vb-btn-primary" onClick={() => afterCreate(created)}>Open the invoice</button>
-        </div>
-      </>
-    );
-  }
-
   return (
-    <>
-      <p className="vb-muted" style={{ margin: 0, fontSize: 14 }}>
-        Paste the text of an invoice or upload a PDF or text file. It is read automatically; anything it is unsure of is flagged for a person instead of being guessed.
-        {' '}For a three-way match the purchase order and goods receipt must already be on file (<Link to="/app/orders" onClick={onClose}>Orders</Link>).
-      </p>
-      <label className="vb-field">
-        <span>Invoice text</span>
-        <textarea
-          style={{ minHeight: 200, fontFamily: 'var(--vb-mono)', fontSize: 13 }}
-          value={text.startsWith('data:application/pdf') ? `(PDF: ${fileName})` : text}
-          readOnly={text.startsWith('data:application/pdf')}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Paste the invoice here…"
-        />
-      </label>
-      <div className="vb-inline">
-        <input ref={fileRef} type="file" accept=".pdf,.txt,text/plain,application/pdf" onChange={onFile} hidden />
-        <button type="button" className="vb-btn vb-btn-sm" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload PDF or text</button>
-        <button type="button" className="vb-link-btn" onClick={() => { setFileName(''); setText(sampleText()); }}>Use a sample invoice</button>
-      </div>
-      {error && <Banner kind="error">{error}</Banner>}
-      <div className="vb-modal-actions">
-        <button type="button" className="vb-btn" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="button" className="vb-btn vb-btn-primary" onClick={submit} disabled={busy || !text.trim()}>
-          {busy ? <Spinner label="Reading the document…" /> : 'Read and check it'}
-        </button>
-      </div>
-    </>
+    <DocumentIntake
+      onSaved={(invoice) => {
+        const n = invoice.corrections?.length ?? 0;
+        toast.success(`Invoice ${invoice.invoiceNumber} saved${n ? ` with ${n} correction${n === 1 ? '' : 's'} recorded` : ''}. Checking it now.`);
+        afterCreate(invoice);
+      }}
+    />
   );
 }
 

@@ -1,0 +1,27 @@
+{
+  "vendor_name": "Arjun Mehta & Associates",
+  "vendor_tax_id": "07AAJFA3391P1ZQ",
+  "invoice_number": "AMA/112/26-27",
+  "invoice_date": "2026-09-30",
+  "po_reference": null,
+  "currency": "INR",
+  "line_items": [
+    {
+      "description": "Professional fees for statutory audit FY 2025-26",
+      "quantity": 1.0,
+      "unit_price": 85000.0
+    },
+    {
+      "description": "Out of pocket expenses (travel and stationery)",
+      "quantity": 1.0,
+      "unit_price": 3250.0
+    }
+  ],
+  "subtotal": 88250.0,
+  "tax": 15885.0,
+  "charges": 0.0,
+  "discount": 0.0,
+  "round_off": 0.0,
+  "total": 104135.0,
+  "notes": null
+}

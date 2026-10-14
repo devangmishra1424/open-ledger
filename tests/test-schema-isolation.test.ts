@@ -24,7 +24,7 @@ describe("test schema isolation", () => {
       WHERE c.oid = to_regclass('decisions')`;
     expect(owner).toBe("veribook_test");
     const [{ accounts }] = await sql`SELECT count(*)::int AS accounts FROM chart_of_accounts`;
-    expect(accounts).toBe(23);
+    expect(accounts).toBe(24); // 23 + 7300 Rounding and Discounts (migration 006)
   });
 });
 

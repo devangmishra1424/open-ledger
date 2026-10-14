@@ -12,7 +12,7 @@ Deterministic code makes the money decisions; AI is used where judgment is neede
 
 | | Status |
 |---|---|
-| Reading invoices | Real. A deterministic template parser first; an LLM only for layouts it cannot read. Confidence is computed from checks (required fields, lines add up, subtotal + tax = total), not taken from the model. |
+| Reading invoices and POs from documents | Real. PDFs (digital or scanned), phone photos, Word, Excel: a document reader (Docling + RapidOCR, with scanner-style page cleanup) and then layout rules; an AI model only fills what the rules could not read, and only with values printed in the document. Every line and total is checked to add up; a person checks the filled form beside the original before anything is saved. On 39 test invoices: 348/351 fields right, every wrong one flagged (`docs/EVAL.md` section 5). |
 | Three-way matching, tolerances, exception taxonomy (14 codes), approval policy | Real. Deterministic; from the written spec in `docs/ap-three-way-match-spec.md`. |
 | AI investigation and second-opinion review | Real, on Groq (`openai/gpt-oss-120b` and `qwen/qwen3.8-27b` by default, configurable). Subject to the provider's free-tier quotas. |
 | Double-entry ledger, accounting periods | Real. Balanced journal entries in Postgres; a month's period is opened on first use; closed periods block posting. |
@@ -32,7 +32,14 @@ DB_SCHEMA=veribook_demo npm run migrate
 DB_SCHEMA=veribook_demo npm run seed       # 8 invoices through the real pipeline (uses AI quota)
 npm run dev:demo                 # API on :3001, against the demo schema
 npm --prefix frontend install && npm --prefix frontend run dev   # UI on :5173
+
+# the document reader (Python 3.12; about 2 GB of packages, 1.1 GB of memory when running)
+python -m venv docreader/.venv
+docreader/.venv/Scripts/pip install -r docreader/requirements.txt   # bin/pip on Linux/macOS
+npm run reader                   # on :8090; the first start downloads the layout/table models
 ```
+
+Add an invoice with **Add invoice → From a document**: drop a PDF, a scan or a phone photo (or pick one of the samples), check the filled form beside the original, and save. Without the reader running, documents are refused with a 503 that says so; typed-in invoices still work.
 
 The home page is at http://localhost:5173; **Enter VeriBook** goes straight to the workbench at `/app`. There is no sign-in unless you configure accounts (`VERIBOOK_USERS` and `VERIBOOK_AUTH_SECRET`, see `.env.example`).
 
@@ -47,6 +54,9 @@ npm run typecheck
 npm test                        # runs in its own schema (veribook_test); live tables are never touched
 SKIP_LIVE_LLM=1 npm test        # skip the suites that call the AI provider and spend quota
 npm run eval                    # extraction benchmark: deterministic, no cost  (docs/EVAL.md)
+npx tsx eval/documents/run.ts --no-llm --cached-only   # document reading, scored on 39 saved real reader outputs (CI runs this)
+npm run eval:documents          # the same through the running reader, with the AI pass (uses quota)
+docreader/.venv/Scripts/python -m pytest docreader/tests   # the reader itself, with the real models
 npm run bench:llm -- 6          # compare candidate models for the Investigator
 ```
 
@@ -60,8 +70,9 @@ npm run bench:llm -- 6          # compare candidate models for the Investigator
 ## Known limits
 
 - Single tenant, and open by default: with sign-in off (the default) anyone with the link can use it and reviewer identity is a typed name. Sign-in, when switched on, has accounts but no roles: any signed-in account can approve.
-- Only the invoice is read from a document. The purchase order and goods receipt are records (seeded, or entered on the Orders screen; a PO document can be read into an editable draft, deterministic parser only). A receipt document is not read.
-- PDFs need a text layer; there is no OCR, so a scan is refused with a clear message. An invoice in a layout neither the template parser nor the AI can read goes to a person.
+- Invoices and purchase orders are read from documents; a goods receipt (delivery note) document is not, so receipts are typed in.
+- OCR reads English (Latin script). A Hindi / Devanagari invoice, handwriting, a page photographed sideways, or an invoice split across several photos is not read; the reader says so or a person types the fields. The test invoices are generated, not real vendors' invoices.
+- The document reader is a separate Python service of about 2 GB (Docling, PyTorch, OCR models) and reads one document at a time.
 - Payments are a simulation, made at approval rather than scheduled by due date or early-payment terms.
 - One currency in the ledger: invoices carry a currency, but there is no FX conversion and amounts are not summed across currencies.
 - No goods-receipt accrual (GR/IR clearing); bills post Dr Expense / Cr AP.

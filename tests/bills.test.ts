@@ -17,6 +17,14 @@ const post = (handler: any, body: unknown) => handler(new Request("http://t/x", 
 
 const lines = [{ description: "Widget", quantity: 50, unitPrice: 12 }, { description: "Bolt", quantity: 200, unitPrice: 0.75 }]; // 600 + 150 = 750
 
+describe("normalizeBillInput: round off and discount (adjustment)", () => {
+  it("total = lines + tax + adjustment, checked strictly, with the adjustment named when it does not add up", () => {
+    expect(normalizeBillInput({ lines, tax: 60, adjustment: 0.4, total: 810.4, strictTotals: true })).toMatchObject({ subtotal: 750, tax: 60, adjustment: 0.4, total: 810.4 });
+    expect(normalizeBillInput({ lines, tax: 60, adjustment: -10, total: 800, strictTotals: true }).adjustment).toBe(-10);
+    expect(() => normalizeBillInput({ lines, tax: 60, adjustment: 0.4, total: 810, strictTotals: true })).toThrow(/round off \/ discount \(0\.40\)/);
+  });
+});
+
 describe("normalizeBillInput", () => {
   it("lines are the source of truth for the subtotal; tax and stated total are kept, not dropped", () => {
     const n = normalizeBillInput({ lines, tax: 60, total: 810, strictTotals: true });

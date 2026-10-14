@@ -10,7 +10,7 @@ export const TABLES_IN_DROP_ORDER = [
   "app_settings", "pbc_evidence_files", "pbc_requests", "reviews", "decisions", "reason_codes",
   "payment_applications", "payments", "vendor_bill_lines", "vendor_bills",
   "journal_entry_lines", "journal_entries",
-  "goods_receipt_lines", "goods_receipts", "purchase_order_lines", "purchase_orders",
+  "goods_receipt_lines", "goods_receipts", "purchase_order_lines", "purchase_orders", "source_documents",
   "exchange_rates", "tax_codes", "vendor_corrections", "vendor_bank_change_reviews", "vendors",
   "accounting_periods", "chart_of_accounts",
 ];
@@ -39,6 +39,7 @@ const ACCOUNTS: Array<[string, string, string, string, string, boolean]> = [
   ["6900", "6900", "Depreciation Expense", "expense", "debit", false],
   ["7100", "7100", "Interest Expense", "expense", "debit", false],
   ["7200", "7200", "Realized FX Gain/Loss", "expense", "debit", false],
+  ["7300", "7300", "Rounding and Discounts", "expense", "debit", false],
   ["7210", "7210", "Unrealized FX Gain/Loss", "expense", "debit", false],
 ];
 

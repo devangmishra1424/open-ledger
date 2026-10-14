@@ -72,6 +72,27 @@ Properties that are tested as properties, not just examples:
 
 ## 4. Not measured
 
-- Real invoices. There is no labelled corpus of real documents here.
+- Real invoices. There is no labelled corpus of real vendors' documents here; the document test set (section 5) is generated.
 - Throughput and latency at volume (the provider tier used cannot sustain it).
 - The matching engine's accuracy against an independent labelled set: it is covered by 130+ tests derived from the written spec in `docs/ap-three-way-match-spec.md`, which is a check of the implementation against the spec, not of the spec against the world.
+
+## 5. Reading documents: scans, photos, Word, Excel (October 2026)
+
+**What:** the whole document path, reader (Docling + RapidOCR + page cleanup) and field extraction (layout rules, AI only for gaps), scored field by field against answer keys. `eval/documents/run.ts`; the test set and its answer keys are built by `eval/documents/generate.py`.
+
+**The test set:** 8 invoice layouts written to look like real ones (a Tally-style GST tax invoice with CGST + SGST, round off and an HSN summary table; a Zoho-style IGST invoice with per-line tax columns and DD/MM dates; a chartered accountant's bill with amount-only rows and lakh grouping; a US invoice with quantity first, MM/DD dates, sales tax and shipping; a UK VAT invoice; a 28-line invoice over two pages; a trader's bill with line discounts and KG quantities; a small vendor's bill with no table at all). Each comes in up to 6 forms made from the printed PDF: the digital PDF, a clean 200 dpi scan, a messy scan (150 dpi, 1.2-2.2 degree skew, blur, speckle, JPEG artefacts), a phone photo (perspective, a desk around the page, uneven light), a screenshot, and for some a Word or Excel file. 39 documents, 9 fields each = 351 fields. The answer keys are computed from the same numbers that printed the documents.
+
+**Outcomes per field:** right; wrong but flagged (named in the reading's unsure fields, or the reading is under the 85% bar, so a person checks it before anything is paid); SILENT (wrong and not flagged). SILENT is the number that matters.
+
+| | Fields right | Wrong but flagged | Silent | Documents fully right |
+|---|---|---|---|---|
+| Layout rules only (no AI) | 346 / 351 (98.6%) | 5 | 0 | 35 / 39 |
+| Rules, then the AI for gaps (values must be printed) | 348 / 351 (99.1%) | 3 | 0 | 37 / 39 |
+
+The AI ran on 3 of the 39 documents. What is still wrong: the deliberately wrecked scan of the service bill (lines garbled by OCR; flagged), and the Excel copy of the US invoice, which states no currency and writes 10/02/2026 with no country to go by (both fields flagged: that is the right answer for that file). Run-to-run, the AI's answer varies: in one of three runs it paired a printed list price (640) with a printed discounted amount (15,200) on one line. Both numbers are on the page, so grounding passed; the line check (quantity x price must equal the amount) caught it and flagged it. Three repeated runs: 0 silent errors each.
+
+**Speed (laptop CPU, models loaded):** Word/Excel 0.1 s; digital PDF 1-7 s; a scan or photo 3-14 s a page. The first versions took 60-70 s on the Tally layout (Docling's ACCURATE table model on a dense grid); FAST mode takes 6-8 s with the same fields, because the fields are read from the page layout, not from the table model.
+
+**Purchase orders:** 5 PO documents (digital, scan, photo, messy scan; two layouts) read with every field right, the vendor taken from the Vendor/Supplier block and never from the buyer's letterhead.
+
+**What this does not show:** these are generated documents, so their fonts, layouts and damage are ones I chose; real vendors' invoices (and real phone photos) will find cases these do not. No handwriting, no Hindi/Devanagari (RapidOCR's models here read Latin script), no page photographed sideways. Speed is one laptop, one document at a time. CI scores the field rules on the 44 saved reader outputs in `eval/documents/readings/` (`--no-llm --cached-only --min-correct 340`, failing on any silent error); the reader itself is tested locally with its models (`docreader/tests`).

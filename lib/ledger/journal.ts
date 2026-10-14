@@ -74,6 +74,10 @@ export interface BillApprovalDraftInput {
   /** Resolved tax account (e.g. via the bill line's tax_code_id, or a 2210 fallback) — required only when taxTotal > 0. */
   taxAccountId: string | null;
   lines: Array<{ accountId: string; amount: number }>;
+  /** Round off minus invoice-level discount, signed (vendor_bills.adjustment_total); 0 for most bills. */
+  adjustmentTotal?: number;
+  /** Account 7300 Rounding and Discounts — required only when adjustmentTotal is not 0. */
+  adjustmentAccountId?: string | null;
   entryDate: string;
 }
 
@@ -105,6 +109,21 @@ export function buildBillApprovalDraft(input: BillApprovalDraftInput): JournalEn
       creditAmount: 0,
       currencyAmount: input.taxTotal,
       baseCurrencyAmount: input.taxTotal * input.exchangeRate,
+    });
+  }
+
+  const adjustment = input.adjustmentTotal ?? 0;
+  if (Math.abs(adjustment) > BALANCE_EPSILON) {
+    if (!input.adjustmentAccountId) {
+      throw new Error(`buildBillApprovalDraft: bill '${input.billId}' has an adjustment of ${adjustment} but no rounding/discount account (7300) could be resolved`);
+    }
+    // A round off up is a small extra cost (debit); a discount or a round off down reduces it (credit).
+    lines.push({
+      accountId: input.adjustmentAccountId,
+      debitAmount: adjustment > 0 ? adjustment : 0,
+      creditAmount: adjustment < 0 ? -adjustment : 0,
+      currencyAmount: Math.abs(adjustment),
+      baseCurrencyAmount: Math.abs(adjustment) * input.exchangeRate,
     });
   }
 
@@ -322,6 +341,13 @@ export async function postBillApprovalInTx(tx: TransactionSql<{}>, billId: strin
     }
   }
 
+  const adjustmentTotal = Number(bill.adjustment_total ?? 0);
+  let adjustmentAccountId: string | null = null;
+  if (adjustmentTotal !== 0) {
+    const adjRows = await tx`SELECT id FROM chart_of_accounts WHERE account_number = '7300'`;
+    adjustmentAccountId = adjRows[0]?.id ?? null;
+  }
+
   const entryDate = new Date().toISOString().slice(0, 10);
   const draft = buildBillApprovalDraft({
     billId,
@@ -333,6 +359,8 @@ export async function postBillApprovalInTx(tx: TransactionSql<{}>, billId: strin
     apAccountId,
     taxAccountId,
     lines: resolvedLines,
+    adjustmentTotal,
+    adjustmentAccountId,
     entryDate,
   });
 

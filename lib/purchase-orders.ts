@@ -41,6 +41,8 @@ export interface NewPoInput {
   lines: NewPoLine[];
   /** Optionally record the goods receipt in the same transaction. */
   receipt?: NewReceipt | null;
+  /** The uploaded PO document this was read from (source_documents.id); checked by the caller. */
+  sourceDocumentId?: string | null;
 }
 
 export interface CreatedPo { poId: string; poNumber: string; vendorId: string; vendorCreated: boolean; receiptId: string | null }
@@ -179,8 +181,8 @@ export async function createPurchaseOrder(input: NewPoInput): Promise<CreatedPo>
 
       const poId = randomUUID();
       await tx`
-        INSERT INTO purchase_orders (id, po_number, vendor_id, buyer_name, order_date, status, po_type, currency, exchange_rate)
-        VALUES (${poId}, ${n.poNumber}, ${vendorId}, ${n.buyerName}, ${n.orderDate}, 'open', 'standard', ${n.currency}, 1.0)`;
+        INSERT INTO purchase_orders (id, po_number, vendor_id, buyer_name, order_date, status, po_type, currency, exchange_rate, source_document_id)
+        VALUES (${poId}, ${n.poNumber}, ${vendorId}, ${n.buyerName}, ${n.orderDate}, 'open', 'standard', ${n.currency}, 1.0, ${input.sourceDocumentId ?? null})`;
       const lineIdByNumber = new Map<number, string>();
       for (const l of n.lines) {
         const id = randomUUID();
@@ -199,7 +201,7 @@ export async function createPurchaseOrder(input: NewPoInput): Promise<CreatedPo>
   }
 }
 
-export async function recordReceipt(poId: string, input: NewReceipt): Promise<{ receiptId: string }> {
+export async function recordReceipt(poId: string, input: NewReceipt): Promise<{ receiptId: string; poNumber: string; receiptDate: string; condition: ReceiptCondition }> {
   const sql = getSql();
   return sql.begin(async (tx) => {
     // Receipts for one PO are serialized, so two identical submissions cannot both pass the duplicate check below.
@@ -227,7 +229,7 @@ export async function recordReceipt(poId: string, input: NewReceipt): Promise<{ 
         throw new HttpError(409, "this exact receipt (same date, receiver, condition and quantities) is already recorded for this purchase order");
       }
     }
-    return { receiptId: await insertReceipt(tx, poId, lineIdByNumber, n) };
+    return { receiptId: await insertReceipt(tx, poId, lineIdByNumber, n), poNumber: po.po_number as string, receiptDate: n.receiptDate, condition: n.condition };
   });
 }
 

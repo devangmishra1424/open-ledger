@@ -36,6 +36,9 @@ jobs:
       - run: npm test
       # Deterministic extraction benchmark; fails if any damaged document is let through unflagged.
       - run: npx tsx scripts/eval.ts   # not `npm run eval`: that script passes --env-file=.env, and CI has no .env file
+      # Document reading: the field rules scored on the saved real reader output for 39 invoices (scans, photos, Word,
+      # Excel). Fails on any wrong field that was not flagged for a person, or if accuracy drops below the floor.
+      - run: npx tsx eval/documents/run.ts --no-llm --cached-only --min-correct 340
 
   frontend:
     runs-on: ubuntu-latest
@@ -52,3 +55,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  docreader:
+    # The document reader's own tests that need no models (file-type detection, page straightening, finding the page
+    # in a photo). The full read tests need the Docling/OCR models (about 2 GB) and run locally:
+    #   docreader/.venv/Scripts/python -m pytest docreader/tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest numpy pillow pypdfium2 opencv-python-headless
+      - run: python -m pytest docreader/tests -q
+

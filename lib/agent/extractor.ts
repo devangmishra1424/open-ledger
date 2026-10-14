@@ -10,13 +10,24 @@ export interface ExtractionSubmission {
   invoice_number: string | null;
   invoice_date: string | null;
   po_reference: string | null;
-  line_items: Array<{ description: string; quantity: number; unit_price: number }>;
+  line_items: Array<{ description: string; quantity: number; unit_price: number; uom?: string | null; amount?: number | null }>;
   subtotal: number | null;
   tax: number | null;
   total: number | null;
   currency: string | null;
   confidence: number;
   uncertain_fields: string[];
+  // Read from uploaded documents by lib/documents/invoice.ts (absent on the plain-text template path):
+  vendor_tax_id?: string | null;
+  due_date?: string | null;
+  /** Each tax charged (CGST, SGST, IGST, VAT, sales tax...); `tax` is their sum. */
+  tax_lines?: Array<{ label: string; amount: number }>;
+  /** Shipping, freight, packing...: charged on the invoice but not an ordered item. */
+  other_charges?: Array<{ label: string; amount: number }>;
+  /** Invoice-level discount, as a positive amount. */
+  discount?: number | null;
+  /** Rounding to the nearest unit, signed (+0.34, -0.35). */
+  round_off?: number | null;
 }
 
 export type ExtractionMethod =
@@ -31,6 +42,17 @@ export interface ExtractionResult extends AgentLoopResult<ExtractionSubmission> 
   method: ExtractionMethod;
   /** Why the LLM path was not used or did not work (set only for "template-incomplete"). */
   fallbackReason?: string;
+  /**
+   * Set when a person checked the reading against the document before saving it (POST /api/invoices/from-document):
+   * who, how sure the machine reading was, and which fields they changed. The saved values are then the person's,
+   * so the extract decision records them as a person's confirmed entry, with the machine reading kept as evidence.
+   */
+  review?: {
+    by: string;
+    document: { id: string; filename: string; sourceKind: string; ocrConfidence: number | null };
+    machineConfidence: number;
+    corrections: Array<{ field: string; read: string; saved: string }>;
+  };
 }
 
 /** Cap on stated confidence per method: a parse that reconciles is good evidence, never certainty. */
