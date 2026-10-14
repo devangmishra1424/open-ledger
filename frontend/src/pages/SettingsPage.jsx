@@ -77,7 +77,7 @@ export default function SettingsPage() {
             <dt>Sign-in</dt>
             <dd>{system.authentication?.mode === 'accounts'
               ? <><strong>Accounts.</strong> Every request is signed in, and decisions are recorded under the signed-in account, so “a different person must sign off” compares real accounts. Accounts are set by the operator; there is no self-sign-up, and no roles yet (any account can approve).</>
-              : <><strong>Off</strong> (local development). Reviewer names are self-declared, so “a different person” checks compare typed names. A public server refuses to run like this.</>}</dd>
+              : <><strong>Off.</strong> VeriBook runs as an open proof of concept: anyone with the link can use it, and reviewer names are self-declared, so “a different person” checks compare typed names. Accounts can be switched on by the operator (VERIBOOK_USERS).</>}</dd>
             <dt>Audit trail</dt>
             <dd>
               <span className="vb-chain"><span className={`vb-dot ${system.chain.valid ? 'vb-dot-ok' : 'vb-dot-bad'}`} />
