@@ -99,10 +99,13 @@ describe("authConfig", () => {
     expect(c.required).toBe(true);
     expect(c.problem).toMatch(/VERIBOOK_AUTH_SECRET/);
   });
-  it("is open in local development with nothing set, and closed with a reason in production", () => {
+  it("is open with no accounts configured, in development and in production alike (an open proof of concept)", () => {
     expect(authConfig({ NODE_ENV: "development" })).toEqual({ required: false, secret: null, problem: null });
-    expect(authConfig({ NODE_ENV: "production" }).problem).toMatch(/not configured/);
+    expect(authConfig({ NODE_ENV: "production" })).toEqual({ required: false, secret: null, problem: null });
     expect(authConfig({ NODE_ENV: "production", VERIBOOK_AUTH: "off" })).toEqual({ required: false, secret: null, problem: null });
+  });
+  it("VERIBOOK_AUTH=off keeps it open even when accounts are listed", () => {
+    expect(authConfig({ VERIBOOK_USERS: "[...]", VERIBOOK_AUTH_SECRET: SECRET, VERIBOOK_AUTH: "off" }).required).toBe(false);
   });
 });
 
@@ -138,13 +141,19 @@ describe("middleware (the sign-in gate in front of every /api route)", () => {
     expect((await middleware(api("/api/auth/session"))).status).toBe(200);
     expect((await middleware(api("/api/invoices", { method: "OPTIONS" }))).status).toBe(204);
   });
-  it("in production with no accounts configured, refuses protected routes with the reason (503) instead of running open", async () => {
+  it("in production with no accounts configured, runs open, and still strips identity headers a caller tries to send", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("VERIBOOK_USERS", "");
+    const res = await middleware(api("/api/invoices", { headers: { "x-veribook-user": "priya", "x-veribook-user-name": "Priya%20Shah" } }));
+    expect(res.status).toBe(200);
+    expect(forwardedUser(res)).toBeNull();
+  });
+  it("half-configured sign-in (accounts without a usable secret) refuses protected routes with the reason (503)", async () => {
+    vi.stubEnv("VERIBOOK_USERS", '[{"username":"a","name":"A","passwordHash":"x"}]');
+    vi.stubEnv("VERIBOOK_AUTH_SECRET", "short");
     const res = await middleware(api("/api/invoices"));
     expect(res.status).toBe(503);
-    expect((await res.json()).error).toMatch(/not configured/);
-    expect((await middleware(api("/api/auth/session"))).status).toBe(200);
+    expect((await res.json()).error).toMatch(/VERIBOOK_AUTH_SECRET/);
   });
 });
 
