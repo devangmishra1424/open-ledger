@@ -1,0 +1,24 @@
+{
+  "po_number": "PO-2026-0871",
+  "document_number": "SGIS/DC/0388",
+  "receipt_date": "2026-09-10",
+  "receiver_name": "R. Patil (Stores)",
+  "line_items": [
+    {
+      "description": "Hex Bolt M10 x 50 (Zinc Plated)",
+      "quantity": 500.0
+    },
+    {
+      "description": "Spring Washer M10",
+      "quantity": 500.0
+    },
+    {
+      "description": "Industrial Grease 1 kg (Lithium Complex)",
+      "quantity": 12.0
+    },
+    {
+      "description": "Safety Gloves, Cut Resistant (Level 5)",
+      "quantity": 20.0
+    }
+  ]
+}

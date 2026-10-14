@@ -3,6 +3,7 @@ import type { TransactionSql } from "postgres";
 import { getSql } from "@/db/client";
 import { HttpError } from "@/lib/http";
 import { findOrCreateVendor } from "@/lib/bills";
+import { PURPOSE_WORDS, type DocumentPurpose } from "@/lib/documents/store";
 
 /**
  * Purchase orders and goods receipts: the other two documents of a three-way match.
@@ -148,11 +149,12 @@ type Tx = TransactionSql;
 async function insertReceipt(
   tx: Tx, poId: string, lineIdByNumber: Map<number, string>,
   n: { lines: Array<{ lineNumber: number; quantity: number }>; condition: ReceiptCondition; receiverName: string | null; receiptDate: string },
+  sourceDocumentId: string | null = null,
 ): Promise<string> {
   const receiptId = randomUUID();
   await tx`
-    INSERT INTO goods_receipts (id, po_id, receipt_date, receiver_name, condition, final_delivery_indicator)
-    VALUES (${receiptId}, ${poId}, ${n.receiptDate}, ${n.receiverName}, ${n.condition}, false)`;
+    INSERT INTO goods_receipts (id, po_id, receipt_date, receiver_name, condition, final_delivery_indicator, source_document_id)
+    VALUES (${receiptId}, ${poId}, ${n.receiptDate}, ${n.receiverName}, ${n.condition}, false, ${sourceDocumentId})`;
   for (const l of n.lines) {
     await tx`
       INSERT INTO goods_receipt_lines (id, goods_receipt_id, po_line_id, qty_received)
@@ -201,7 +203,14 @@ export async function createPurchaseOrder(input: NewPoInput): Promise<CreatedPo>
   }
 }
 
-export async function recordReceipt(poId: string, input: NewReceipt): Promise<{ receiptId: string; poNumber: string; receiptDate: string; condition: ReceiptCondition }> {
+/**
+ * Records goods received against a PO. `sourceDocumentId` is the delivery note / GRN / packing slip it was read from
+ * (POST /api/documents/read, purpose goods_receipt): it must be one, and not already recorded as another receipt.
+ * The document row is locked for the check, so one document cannot become two receipts.
+ */
+export async function recordReceipt(
+  poId: string, input: NewReceipt, opts: { sourceDocumentId?: string | null } = {},
+): Promise<{ receiptId: string; poNumber: string; receiptDate: string; condition: ReceiptCondition }> {
   const sql = getSql();
   return sql.begin(async (tx) => {
     // Receipts for one PO are serialized, so two identical submissions cannot both pass the duplicate check below.
@@ -229,8 +238,18 @@ export async function recordReceipt(poId: string, input: NewReceipt): Promise<{ 
         throw new HttpError(409, "this exact receipt (same date, receiver, condition and quantities) is already recorded for this purchase order");
       }
     }
-    return { receiptId: await insertReceipt(tx, poId, lineIdByNumber, n), poNumber: po.po_number as string, receiptDate: n.receiptDate, condition: n.condition };
+    const documentId = opts.sourceDocumentId ? await receiptDocument(tx, opts.sourceDocumentId) : null;
+    return { receiptId: await insertReceipt(tx, poId, lineIdByNumber, n, documentId), poNumber: po.po_number as string, receiptDate: n.receiptDate, condition: n.condition };
   });
+}
+
+async function receiptDocument(tx: Tx, id: string): Promise<string> {
+  const [doc] = await tx`SELECT id, purpose FROM source_documents WHERE id = ${id} FOR UPDATE`;
+  if (!doc) throw new HttpError(404, `no document '${id}'`);
+  if (doc.purpose !== "goods_receipt") throw new HttpError(400, `that document was read as ${PURPOSE_WORDS[doc.purpose as DocumentPurpose]}, not a goods receipt`);
+  const [used] = await tx`SELECT id FROM goods_receipts WHERE source_document_id = ${id} LIMIT 1`;
+  if (used) throw new HttpError(409, `that document was already recorded as a goods receipt (id ${used.id})`);
+  return id;
 }
 
 /** The vendor a PO number belongs to, or null if no PO has that number. Used to explain why an invoice that cites a PO did not match it. */
@@ -256,12 +275,24 @@ export interface PoSummary {
 /** Newest first, capped. "received" counts accepted receipts only: damaged and rejected goods are not received for matching. */
 export async function listPurchaseOrders(limit = 50): Promise<PoSummary[]> {
   const cap = Math.min(Math.max(1, Math.floor(limit)), 200);
-  const sql = getSql();
-  const pos = await sql`
+  const pos = await getSql()`
     SELECT po.id, po.po_number, po.order_date, po.currency, po.status, v.name AS vendor
     FROM purchase_orders po JOIN vendors v ON v.id = po.vendor_id
     ORDER BY po.order_date DESC, po.po_number DESC LIMIT ${cap}`;
+  return summarize(pos);
+}
+
+/** One PO with its lines and what has been received on each, or null. */
+export async function getPurchaseOrder(id: string): Promise<PoSummary | null> {
+  const pos = await getSql()`
+    SELECT po.id, po.po_number, po.order_date, po.currency, po.status, v.name AS vendor
+    FROM purchase_orders po JOIN vendors v ON v.id = po.vendor_id WHERE po.id = ${id}`;
+  return (await summarize(pos))[0] ?? null;
+}
+
+async function summarize(pos: readonly any[]): Promise<PoSummary[]> {
   if (pos.length === 0) return [];
+  const sql = getSql();
   const ids = pos.map((p) => p.id as string);
 
   const lineRows = await sql`

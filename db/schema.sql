@@ -55,7 +55,7 @@ CREATE TABLE exchange_rates (
 CREATE TABLE source_documents (
   id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, filename TEXT NOT NULL, media_type TEXT NOT NULL,
   byte_size INTEGER NOT NULL CHECK (byte_size > 0), content BYTEA NOT NULL,
-  purpose TEXT NOT NULL CHECK (purpose IN ('invoice','purchase_order')),
+  purpose TEXT NOT NULL CHECK (purpose IN ('invoice','purchase_order','goods_receipt')),
   source_kind TEXT NOT NULL, page_count INTEGER, ocr_used BOOLEAN NOT NULL DEFAULT false, ocr_confidence NUMERIC(5,3),
   reading JSONB NOT NULL, extraction JSONB, uploaded_by TEXT,
   uploaded_at TEXT NOT NULL DEFAULT now()::text
@@ -77,7 +77,8 @@ CREATE TABLE purchase_order_lines (
 CREATE TABLE goods_receipts (
   id TEXT PRIMARY KEY, po_id TEXT NOT NULL REFERENCES purchase_orders(id), receipt_date TEXT NOT NULL,
   receiver_name TEXT, condition TEXT NOT NULL DEFAULT 'accepted' CHECK (condition IN ('accepted','damaged','rejected')),
-  final_delivery_indicator BOOLEAN NOT NULL DEFAULT false
+  final_delivery_indicator BOOLEAN NOT NULL DEFAULT false,
+  source_document_id TEXT REFERENCES source_documents(id)
 );
 CREATE TABLE goods_receipt_lines (
   id TEXT PRIMARY KEY, goods_receipt_id TEXT NOT NULL REFERENCES goods_receipts(id),

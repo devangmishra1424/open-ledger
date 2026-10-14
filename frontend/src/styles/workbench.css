@@ -70,6 +70,7 @@ body { background: var(--vb-bg); }
 .vb-btn-sm { min-height: 32px; padding: 4px 12px; font-size: 13px; }
 .vb-muted { color: var(--vb-muted); }
 .vb-dim { color: var(--vb-dim); }
+.vb-text-warn { color: var(--vb-attention); }
 .vb-mono { font-family: var(--vb-mono); }
 .vb-card { background: var(--vb-panel); border: 1px solid var(--vb-border-soft); border-radius: var(--vb-radius); }
 .vb-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--vb-muted); }

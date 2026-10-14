@@ -10,7 +10,7 @@ root = Path(__file__).resolve().parent
 cache = root / "readings"
 cache.mkdir(exist_ok=True)
 reader.warm_up()
-for path in sorted((root / "invoices").glob("*/*")) + sorted((root / "purchase_orders").glob("*/*")):
+for path in sorted((root / "invoices").glob("*/*")) + sorted((root / "purchase_orders").glob("*/*")) + sorted((root / "goods_receipts").glob("*/*")):
     if path.name == "truth.json":
         continue
     data = path.read_bytes()

@@ -27,6 +27,7 @@ const docRoute = await import("@/app/api/documents/[id]/route");
 const fileRoute = await import("@/app/api/documents/[id]/file/route");
 const saveRoute = await import("@/app/api/invoices/from-document/route");
 const poRoute = await import("@/app/api/purchase-orders/route");
+const receiptRoute = await import("@/app/api/purchase-orders/[id]/receipts/route");
 const { runExtractStage } = await import("@/lib/pipeline/orchestrator");
 const { runInBackground } = await import("@/lib/background");
 
@@ -40,19 +41,20 @@ function saved(folder: string, layout: string, form: string): { bytes: Buffer; r
 /** The same file with a different byte at the end: a different upload (new hash) with the same content. */
 const variant = (bytes: Buffer, n: number) => Buffer.concat([bytes, Buffer.from(`\n%variant-${n}-${Date.now()}`)]);
 
-function upload(bytes: Buffer, filename: string, purpose = "invoice", type = "application/pdf"): Request {
+function upload(bytes: Buffer, filename: string, purpose = "invoice", type = "application/pdf", fields: Record<string, string> = {}): Request {
   const form = new FormData();
   form.append("purpose", purpose);
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
   form.append("file", new Blob([bytes], { type }), filename);
   return new Request("http://test/api/documents/read", { method: "POST", body: form });
 }
 const json = (body: unknown) => new Request("http://test/api", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 
-async function readAs(folder: string, layout: string, form: string, n: number, purpose = "invoice") {
+async function readAs(folder: string, layout: string, form: string, n: number, purpose = "invoice", fields: Record<string, string> = {}) {
   const { bytes, reading } = saved(folder, layout, form);
   vi.mocked(readDocument).mockResolvedValueOnce(reading);
-  const res = await readRoute.POST(upload(variant(bytes, n), `${layout}-${form}`, purpose), undefined as never);
+  const res = await readRoute.POST(upload(variant(bytes, n), `${layout}-${form}`, purpose, "application/pdf", fields), undefined as never);
   return { res, body: await res.json() };
 }
 
@@ -214,5 +216,74 @@ describe("purchase orders from documents", () => {
     const [po] = await getSql()`SELECT source_document_id FROM purchase_orders WHERE id = ${(await first.json()).poId}`;
     expect(po.source_document_id).toBe(body.documentId);
     expect((await poRoute.POST(make(`PO-DOC-${Date.now()}-2`), undefined as never)).status).toBe(409);
+  });
+});
+
+describe("goods receipts from documents", () => {
+  const ITEMS = [
+    { description: "Hex Bolt M10 x 50 (Zinc Plated)", qty: 500, rate: 6.4 },
+    { description: "Spring Washer M10", qty: 500, rate: 0.85 },
+    { description: "Industrial Grease 1 kg (Lithium Complex)", qty: 12, rate: 285 },
+    { description: "Safety Gloves, Cut Resistant (Level 5)", qty: 24, rate: 145.5 },
+  ];
+  const newPo = async (poNumber: string) => (await (await poRoute.POST(json({ vendor: "Shree Ganesh Industrial Supplies", poNumber, orderDate: "2026-09-02", currency: "INR", items: ITEMS }), undefined as never)).json()).poId as string;
+
+  it("a delivery challan (phone photo) is read against the PO: each item lands on its PO line, and the receipt keeps the document", async () => {
+    const poNumber = `PO-GR-${Date.now()}`;
+    const poId = await newPo(poNumber);
+    const { bytes, reading } = saved("goods_receipts", "gr_challan", "photo.jpg");
+    const file = variant(bytes, 20);
+    vi.mocked(readDocument).mockResolvedValueOnce(reading);
+    const res = await readRoute.POST(upload(file, "challan.jpg", "goods_receipt", "image/jpeg", { poId }), undefined as never);
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body.extraction).toMatchObject({ documentNumber: "SGIS/DC/0388", poNumber: "PO-2026-0871", receiptDate: "2026-09-10", receiverName: "R. Patil (Stores)" });
+    expect(body.books.po).toMatchObject({ id: poId, poNumber });
+    expect(body.books.match.poLines.map((l: any) => [l.lineNumber, l.quantity, l.sure])).toEqual([[1, 500, true], [2, 500, true], [3, 12, true], [4, 20, true]]);
+    // the challan cites the PO it was printed against, which is not this test's PO number: said, not hidden
+    expect(body.books.match.warnings).toEqual([`The document cites purchase order PO-2026-0871, not ${poNumber}. Check it is being recorded against the right PO.`]);
+
+    const lines = body.books.match.poLines.filter((l: any) => l.quantity > 0).map((l: any) => ({ line: l.lineNumber, qty: l.quantity }));
+    const recorded = await receiptRoute.POST(json({ lines, receiptDate: body.extraction.receiptDate, receiverName: body.extraction.receiverName, sourceDocumentId: body.documentId }), ctx(poId));
+    expect(recorded.status).toBe(201);
+    const { receiptId } = await recorded.json();
+    const [row] = await getSql()`SELECT source_document_id, receipt_date, receiver_name FROM goods_receipts WHERE id = ${receiptId}`;
+    expect(row).toEqual({ source_document_id: body.documentId, receipt_date: "2026-09-10", receiver_name: "R. Patil (Stores)" });
+    const received = await getSql()`SELECT pl.line_number, grl.qty_received FROM goods_receipt_lines grl JOIN purchase_order_lines pl ON pl.id = grl.po_line_id WHERE grl.goods_receipt_id = ${receiptId} ORDER BY pl.line_number`;
+    expect(received.map((r: any) => [r.line_number, Number(r.qty_received)])).toEqual([[1, 500], [2, 500], [3, 12], [4, 20]]);
+
+    // the same document cannot become a second receipt, and uploading it again says it was already recorded
+    const again = await receiptRoute.POST(json({ lines: [{ line: 4, qty: 4 }], receiptDate: "2026-09-20", sourceDocumentId: body.documentId }), ctx(poId));
+    expect(again.status).toBe(409);
+    expect((await again.json()).error).toMatch(/already recorded as a goods receipt/);
+    const reread = await readRoute.POST(upload(file, "challan.jpg", "goods_receipt", "image/jpeg", { poId }), undefined as never);
+    expect(reread.status).toBe(200);
+    const rereadBody = await reread.json();
+    expect(rereadBody.documentId).toBe(body.documentId);
+    expect(rereadBody.alreadyUploaded).toMatchObject({ receiptId });
+  });
+
+  it("refuses an invoice document as a receipt's source (400), an unknown PO (404) before reading anything, and a bad poId (400)", async () => {
+    const poId = await newPo(`PO-GR-${Date.now()}-2`);
+    const inv = await readAs("invoices", "tally_gst", "digital.pdf", 21);
+    const wrong = await receiptRoute.POST(json({ receivedInFull: true, receiptDate: "2026-09-10", sourceDocumentId: inv.body.documentId }), ctx(poId));
+    expect(wrong.status).toBe(400);
+    expect((await wrong.json()).error).toMatch(/read as an invoice, not a goods receipt/);
+
+    vi.mocked(readDocument).mockClear();
+    const { bytes } = saved("goods_receipts", "gr_grn", "digital.pdf");
+    const unknown = await readRoute.POST(upload(variant(bytes, 22), "grn.pdf", "goods_receipt", "application/pdf", { poId: "no-such-po" }), undefined as never);
+    expect(unknown.status).toBe(404);
+    expect(readDocument).not.toHaveBeenCalled();
+    const bad = await readRoute.POST(upload(variant(bytes, 23), "grn.pdf", "goods_receipt", "application/pdf", { poId: "x".repeat(101) }), undefined as never);
+    expect(bad.status).toBe(400);
+  });
+
+  it("without a PO, a receipt document still says whether the PO it cites is on file", async () => {
+    const { body } = await readAs("goods_receipts", "gr_packing_slip", "digital.pdf", 24, "goods_receipt");
+    expect(body.extraction).toMatchObject({ poNumber: "PO-7731", documentNumber: "PS-10442", dateKind: "document" });
+    expect(body.books.match).toBeNull();
+    const [cited] = await getSql()`SELECT id FROM purchase_orders WHERE po_number = 'PO-7731'`;
+    expect(body.books.po?.id ?? null).toBe(cited?.id ?? null);
   });
 });

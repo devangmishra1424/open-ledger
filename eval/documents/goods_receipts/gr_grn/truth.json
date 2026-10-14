@@ -1,0 +1,25 @@
+{
+  "po_number": "PO-2026-0962",
+  "document_number": "NW/GRN/2026/1142",
+  "receipt_date": "2026-10-11",
+  "receiver_name": "R. Patil (Stores)",
+  "line_items": [
+    {
+      "description": "Black Pepper Whole (Grade A, 550 GL)",
+      "quantity": 24.0
+    },
+    {
+      "description": "Green Cardamom 8 mm Bold",
+      "quantity": 4.5
+    },
+    {
+      "description": "Turmeric Powder 1 kg Pouch",
+      "quantity": 40.0
+    }
+  ],
+  "rejected": [
+    1.0,
+    0.0,
+    0.0
+  ]
+}
