@@ -35,8 +35,11 @@ function useEscape(onClose) {
   }, [onClose]);
 }
 
-/** Goods received: what the warehouse recorded. `value` is owned by the parent so it can be sent with the PO. */
-function ReceiptFields({ lines, value, onChange, allowNone }) {
+/**
+ * Goods received: what the warehouse recorded. `value` is owned by the parent so it can be sent with the PO.
+ * `hints` (optional, one per line) says where a line's quantity came from when it was read from a document.
+ */
+function ReceiptFields({ lines, value, onChange, allowNone, hints }) {
   const set = (patch) => onChange({ ...value, ...patch });
   const modes = [
     ...(allowNone ? [['none', 'Not received yet']] : []),
@@ -56,7 +59,10 @@ function ReceiptFields({ lines, value, onChange, allowNone }) {
           <span className="vb-dim vb-small">Line</span><span className="vb-dim vb-small">Ordered</span><span className="vb-dim vb-small">Received</span>
           {lines.map((l, i) => (
             <React.Fragment key={i}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.description || `Line ${i + 1}`}</span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.description || `Line ${i + 1}`}</span>
+                {hints?.[i] && <span className={hints[i].check ? 'vb-small vb-text-warn' : 'vb-small vb-dim'} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={hints[i].text}>{hints[i].check ? 'Check: ' : ''}{hints[i].text}</span>}
+              </span>
               <span className="vb-mono">{l.qty}</span>
               <input aria-label={`Quantity received for line ${i + 1}`} type="number" min="0" step="any" value={value.qty[i] ?? ''} onChange={(e) => { const qty = [...value.qty]; qty[i] = e.target.value; set({ qty }); }} />
             </React.Fragment>
@@ -227,7 +233,7 @@ export function AddPoModal({ onClose, onSaved }) {
                 <button type="button" className="vb-link-btn" onClick={() => setDoc(samplePo())}>Use a sample PO</button>
               </div>
               <div className="vb-field-hint" style={{ marginTop: 6 }}>Read by the same document reader as invoices (OCR for scans and photos). The vendor is taken from the Vendor / Supplier / To block, not your own letterhead. Nothing is saved until you press Save; anything it cannot read, you type.</div>
-              {readFrom && <div className="vb-field-hint" style={{ marginTop: 4 }}>Read {readFrom.filename}: {readFrom.ocrUsed ? `OCR ${Math.round((readFrom.ocrConfidence ?? 0) * 100)}% confident` : 'no OCR needed'}{readFrom.timingMs?.total ? `, ${(readFrom.timingMs.total / 1000).toFixed(1)} s` : ''}.</div>}
+              {readFrom && <div className="vb-field-hint" style={{ marginTop: 4 }}>Read {readFrom.filename}: {readFrom.ocrUsed ? `OCR ${Math.floor((readFrom.ocrConfidence ?? 0) * 100)}% confident` : 'no OCR needed'}{readFrom.timingMs?.total ? `, ${(readFrom.timingMs.total / 1000).toFixed(1)} s` : ''}.</div>}
             </details>
             {readNote && <Banner kind={readNote.kind}>{readNote.text}</Banner>}
 
@@ -266,21 +272,72 @@ export function AddPoModal({ onClose, onSaved }) {
   );
 }
 
-/** Record goods received against a PO that is already on file (a later or partial delivery). */
+/** One line of the read notes: field gaps read "Could not read the date.", line problems and warnings as they are. */
+const missingWords = (m) => (m.startsWith('"') ? `${m}.` : m.startsWith('this was') ? `This was${m.slice('this was'.length)}.` : `Could not read ${m}.`);
+
+/**
+ * Record goods received against a PO that is already on file (a later or partial delivery). The quantities can be
+ * read from the delivery note / challan, GRN or packing slip: each item is put on the PO line it matches by name,
+ * and anything that does not fit (another PO's number, more than is due, an item not on the PO) is listed to check.
+ */
 export function ReceiptModal({ po, onClose, onSaved }) {
   useEscape(onClose);
   const toast = useToasts();
+  const fileRef = useRef(null);
   const lines = po.lines.map((l) => ({ description: l.description, qty: String(l.ordered) }));
   const [receipt, setReceipt] = useState(newReceipt('full'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [reading, setReading] = useState(false);
+  const [readFrom, setReadFrom] = useState(null);
+  const [notes, setNotes] = useState(null);
+  const [hints, setHints] = useState(null);
+  const [documentId, setDocumentId] = useState(null);
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setReading(true);
+    setError(null);
+    setNotes(null);
+    try {
+      const r = await api.readDocument(file, 'goods_receipt', { poId: po.id });
+      const d = r.extraction;
+      const match = r.books?.match;
+      const recordedBefore = Boolean(r.alreadyUploaded?.receiptId);
+      setReadFrom(r.reading);
+      setDocumentId(recordedBefore ? null : r.documentId);
+      setReceipt({
+        mode: 'partial',
+        date: d.receiptDate ?? today(),
+        condition: 'accepted',
+        receiver: d.receiverName ?? '',
+        qty: (match?.poLines ?? []).map((l) => (l.quantity == null ? '' : String(l.quantity))),
+      });
+      setHints((match?.poLines ?? []).map((l) => (l.documentLine == null
+        ? { text: 'Not on the document', check: false }
+        : { text: `From the document: “${d.lines[l.documentLine - 1].description}”`, check: !l.sure })));
+      const list = [];
+      if (recordedBefore) list.push('This exact file was already recorded as a goods receipt. Recording it again would count the goods twice.');
+      if (d.dateKind === 'document' && d.receiptDate) list.push(`The date filled in is the document's “${d.dateLabel}” (${d.receiptDate}), usually the day the goods were sent. Change it if they arrived later.`);
+      list.push(...(match?.warnings ?? []));
+      list.push(...d.missing.map(missingWords));
+      setNotes(list);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setReading(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const recorded = await api.recordReceipt(po.id, receiptPayload(receipt, lines));
+      const payload = { ...receiptPayload(receipt, lines), ...(documentId ? { sourceDocumentId: documentId } : {}) };
+      const recorded = await api.recordReceipt(po.id, payload);
       toast.success(`Goods receipt recorded for ${po.poNumber}.${recheckedWords(recorded.recheckedInvoices, 'was waiting for these goods', 'checked again')}`);
       onSaved?.();
       onClose();
@@ -296,7 +353,24 @@ export function ReceiptModal({ po, onClose, onSaved }) {
       <form className="vb-modal" role="dialog" aria-modal="true" aria-labelledby="vb-rcv-title" onSubmit={submit} onMouseDown={(e) => e.stopPropagation()}>
         <h2 id="vb-rcv-title">Record goods received</h2>
         <div className="vb-muted vb-small">{po.poNumber} &middot; {po.vendor}</div>
-        <ReceiptFields lines={lines} value={receipt} onChange={setReceipt} allowNone={false} />
+        <div>
+          <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.webp,.docx,.xlsx,.pptx,.html,.htm,.csv,.md" onChange={onFile} hidden />
+          <button type="button" className="vb-btn vb-btn-sm" onClick={() => fileRef.current?.click()} disabled={reading || busy}>
+            {reading ? <Spinner label="Reading…" /> : <><Upload size={14} /> Fill from a delivery note, GRN or packing slip</>}
+          </button>
+          <div className="vb-field-hint" style={{ marginTop: 6 }}>
+            {readFrom
+              ? <>Read {readFrom.filename}: {readFrom.ocrUsed ? `OCR ${Math.floor((readFrom.ocrConfidence ?? 0) * 100)}% confident` : 'no OCR needed'}{readFrom.timingMs?.total ? `, ${(readFrom.timingMs.total / 1000).toFixed(1)} s` : ''}. Check the quantities below before recording.</>
+              : 'PDF, scan, photo, Word or Excel. Each item is put on the PO line it matches by name; nothing is recorded until you press Record receipt.'}
+          </div>
+        </div>
+        {notes?.length > 0 && (
+          <Banner kind="warn">
+            <ul style={{ margin: 0, paddingLeft: 18 }}>{notes.map((n, i) => <li key={i}>{n}</li>)}</ul>
+          </Banner>
+        )}
+        {notes?.length === 0 && <Banner kind="info">Every item on the document matched a line on this PO. Check the quantities before recording.</Banner>}
+        <ReceiptFields lines={lines} value={receipt} onChange={setReceipt} allowNone={false} hints={hints} />
         {error && <Banner kind="error">{error}</Banner>}
         <div className="vb-modal-actions">
           <button type="button" className="vb-btn" onClick={onClose} disabled={busy}>Cancel</button>

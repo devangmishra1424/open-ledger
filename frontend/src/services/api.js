@@ -171,9 +171,11 @@ export const api = {
   ingestInvoice: (rawText, vendorName) => request('/invoices/ingest', { method: 'POST', body: { rawText, vendorName }, timeout: LONG_TIMEOUT_MS }),
 
   // --- Documents: read any invoice / PO file (PDF, scan, photo, Word, Excel), check it, then save it ---
-  readDocument: (file, purpose = 'invoice') => {
+  /** Read a document (purpose invoice | purchase_order | goods_receipt); `fields` adds form fields, e.g. { poId } for a receipt. */
+  readDocument: (file, purpose = 'invoice', fields = {}) => {
     const form = new FormData();
     form.append('purpose', purpose);
+    for (const [k, v] of Object.entries(fields)) if (v != null) form.append(k, v);
     form.append('file', file, file.name);
     return upload('/documents/read', form);
   },

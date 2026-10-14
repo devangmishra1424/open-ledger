@@ -433,7 +433,7 @@ export function ReadingFacts({ reading }) {
     <dl className="vb-reading-facts">
       <div><dt>File</dt><dd>{reading.filename}</dd></div>
       <div><dt>What it is</dt><dd>{KIND_LABEL[reading.sourceKind] ?? reading.sourceKind}{reading.pageCount > 1 ? ` · ${reading.pageCount} pages` : ''}</dd></div>
-      {reading.ocrUsed && <div><dt>OCR</dt><dd>{reading.ocrConfidence != null ? `${Math.round(reading.ocrConfidence * 100)}% confident` : 'used'} (RapidOCR via Docling)</dd></div>}
+      {reading.ocrUsed && <div><dt>OCR</dt><dd>{reading.ocrConfidence != null ? `${Math.floor(reading.ocrConfidence * 100)}% confident` : 'used'} (RapidOCR via Docling)</dd></div>}
       {steps.length > 0 && <div><dt>Done to the page</dt><dd>{steps.join(' · ')}</dd></div>}
       {reading.timingMs?.total != null && <div><dt>Read in</dt><dd>{(reading.timingMs.total / 1000).toFixed(1)} s</dd></div>}
       {(reading.warnings ?? []).length > 0 && <div><dt>Note</dt><dd>{reading.warnings.join(' ')}</dd></div>}

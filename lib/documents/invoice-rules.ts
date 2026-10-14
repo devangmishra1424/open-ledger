@@ -154,7 +154,7 @@ function assignCells(row: DocRow, cols: Column[]): Partial<Record<Role, DocCell[
 }
 
 /** "500 Nos" -> 500 + "Nos"; "4.500" -> 4.5; "6.00 hrs" -> 6 + "hrs". */
-function parseQty(text: string): { qty: number | null; uom: string | null } {
+export function parseQty(text: string): { qty: number | null; uom: string | null } {
   const m = text.trim().match(/^([\d,]*\.?\d+)\s*([A-Za-z][A-Za-z./]{0,9})?\.?$/);
   if (!m) return { qty: null, uom: null };
   return { qty: parseAmount(m[1]), uom: m[2] ?? null };
@@ -592,13 +592,25 @@ export function readLines(rows: DocRow[]): { lines: RuleLine[]; problems: string
   return { lines, problems: table ? lines.filter((l) => l.problem).map((l) => `line_items: ${l.problem}`) : ["line_items: no item table found"] };
 }
 
-/** The value printed with a label (same cell, next cell, or under it), for the given label pattern and kind of value. */
-export function labelledValue(rows: DocRow[], label: RegExp, kind: "id" | "date" | "text", order: DateOrder = null): { value: string; conf: number | null } | null {
-  const accept = kind === "id" ? acceptId
+/**
+ * The value printed with a label (same cell, next cell, or under it), for the given label pattern and kind of value
+ * (or a function that accepts or refuses a candidate). `label` is the label as printed ("GRN Date", "Ship Date").
+ */
+export function labelledValue(
+  rows: DocRow[], label: RegExp, kind: "id" | "date" | "text" | ((s: string) => string | null), order: DateOrder = null,
+): { value: string; conf: number | null; label: string } | null {
+  const accept = typeof kind === "function" ? kind
+    : kind === "id" ? acceptId
     : kind === "date" ? (s: string) => { const tok = s.match(DATE_TOKEN)?.[0]; return tok && parseDate(tok, order) ? tok : null; }
     : (s: string) => (/[A-Za-z]{2}/.test(s) && !isLabel(s) ? s.replace(/\s+/g, " ").trim() : null);
-  const found = first(rows, label, accept);
-  return found ? { value: found.value, conf: found.conf } : null;
+  for (const hit of labelHits(rows, label)) {
+    const found = valueFor(rows, hit, accept);
+    if (found) return { value: found.value, conf: found.conf, label: rows[hit.r].cells[hit.c].text.match(label)![0].trim() };
+  }
+  return null;
 }
+
+/** Whether a cell's text is a field label ("Invoice No.", "GSTIN", "Ship to"...), not a value. */
+export const isFieldLabel = isLabel;
 
 export const LABELS = L;

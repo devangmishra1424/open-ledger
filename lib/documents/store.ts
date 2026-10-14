@@ -3,15 +3,18 @@ import { getSql } from "@/db/client";
 import type { Reading } from "@/lib/documents/reader-client";
 
 /**
- * The uploaded files behind invoices and purchase orders (table source_documents): the original bytes, what the
+ * The uploaded files behind invoices, purchase orders and goods receipts (table source_documents): the original bytes, what the
  * reader made of them, and the fields read from them. A file is stored when it is read, before anyone saves the
- * invoice, so the review screen can show it; it is linked to the invoice or PO when that is saved.
+ * invoice, so the review screen can show it; it is linked to the invoice, PO or receipt when that is saved.
  *
  * The same file uploaded again (same SHA-256, same purpose) is not stored twice: the earlier record is returned,
  * with the invoice it became if it was saved, so the person is told instead of the invoice being entered twice.
  */
 
-export type DocumentPurpose = "invoice" | "purchase_order";
+export type DocumentPurpose = "invoice" | "purchase_order" | "goods_receipt";
+
+/** "an invoice", for messages like "that document was read as an invoice, not a purchase order". */
+export const PURPOSE_WORDS: Record<DocumentPurpose, string> = { invoice: "an invoice", purchase_order: "a purchase order", goods_receipt: "a goods receipt" };
 
 export interface StoredDocumentSummary {
   id: string;
@@ -25,9 +28,10 @@ export interface StoredDocumentSummary {
   ocrConfidence: number | null;
   uploadedBy: string | null;
   uploadedAt: string;
-  /** The invoice or PO this file became, once saved. */
+  /** The invoice, PO or goods receipt this file became, once saved. */
   invoiceId: string | null;
   purchaseOrderId: string | null;
+  receiptId: string | null;
 }
 
 export function sha256(bytes: Uint8Array): string {
@@ -39,14 +43,15 @@ function summary(row: any): StoredDocumentSummary {
     id: row.id, filename: row.filename, mediaType: row.media_type, byteSize: row.byte_size, purpose: row.purpose,
     sourceKind: row.source_kind, pageCount: row.page_count, ocrUsed: row.ocr_used,
     ocrConfidence: row.ocr_confidence == null ? null : Number(row.ocr_confidence),
-    uploadedBy: row.uploaded_by, uploadedAt: row.uploaded_at, invoiceId: row.invoice_id ?? null, purchaseOrderId: row.po_id ?? null,
+    uploadedBy: row.uploaded_by, uploadedAt: row.uploaded_at, invoiceId: row.invoice_id ?? null, purchaseOrderId: row.po_id ?? null, receiptId: row.receipt_id ?? null,
   };
 }
 
 const SUMMARY_COLUMNS = `d.id, d.filename, d.media_type, d.byte_size, d.purpose, d.source_kind, d.page_count, d.ocr_used, d.ocr_confidence,
   d.uploaded_by, d.uploaded_at,
   (SELECT b.id FROM vendor_bills b WHERE b.source_document_id = d.id LIMIT 1) AS invoice_id,
-  (SELECT p.id FROM purchase_orders p WHERE p.source_document_id = d.id LIMIT 1) AS po_id`;
+  (SELECT p.id FROM purchase_orders p WHERE p.source_document_id = d.id LIMIT 1) AS po_id,
+  (SELECT r.id FROM goods_receipts r WHERE r.source_document_id = d.id LIMIT 1) AS receipt_id`;
 
 /** An earlier upload of exactly this file for this purpose, or null. */
 export async function findByHash(hash: string, purpose: DocumentPurpose): Promise<(StoredDocumentSummary & { reading: Reading; extraction: unknown }) | null> {

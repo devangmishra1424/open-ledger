@@ -12,7 +12,7 @@ Deterministic code makes the money decisions; AI is used where judgment is neede
 
 | | Status |
 |---|---|
-| Reading invoices and POs from documents | Real. PDFs (digital or scanned), phone photos, Word, Excel: a document reader (Docling + RapidOCR, with scanner-style page cleanup) and then layout rules; an AI model only fills what the rules could not read, and only with values printed in the document. Every line and total is checked to add up; a person checks the filled form beside the original before anything is saved. On 39 test invoices: 348/351 fields right, every wrong one flagged (`docs/EVAL.md` section 5). |
+| Reading invoices, POs and goods receipts from documents | Real. PDFs (digital or scanned), phone photos, Word, Excel: a document reader (Docling + RapidOCR, with scanner-style page cleanup) and then layout rules; an AI model only fills what the rules could not read, and only with values printed in the document. Every line and total is checked to add up; a person checks the filled form (for an invoice, beside the original) before anything is saved. On 39 test invoices: 348/351 fields right, every wrong one flagged (`docs/EVAL.md` section 5). |
 | Three-way matching, tolerances, exception taxonomy (14 codes), approval policy | Real. Deterministic; from the written spec in `docs/ap-three-way-match-spec.md`. |
 | AI investigation and second-opinion review | Real, on Groq (`openai/gpt-oss-120b` and `qwen/qwen3.8-27b` by default, configurable). Subject to the provider's free-tier quotas. |
 | Double-entry ledger, accounting periods | Real. Balanced journal entries in Postgres; a month's period is opened on first use; closed periods block posting. |
@@ -70,7 +70,7 @@ npm run bench:llm -- 6          # compare candidate models for the Investigator
 ## Known limits
 
 - Single tenant, and open by default: with sign-in off (the default) anyone with the link can use it and reviewer identity is a typed name. Sign-in, when switched on, has accounts but no roles: any signed-in account can approve.
-- Invoices and purchase orders are read from documents; a goods receipt (delivery note) document is not, so receipts are typed in.
+- Goods-receipt documents (delivery note / challan, GRN, packing slip) are read by layout rules only, no AI: what the rules miss is typed in. The 7 test receipt documents are generated, like the test invoices.
 - OCR reads English (Latin script). A Hindi / Devanagari invoice, handwriting, a page photographed sideways, or an invoice split across several photos is not read; the reader says so or a person types the fields. The test invoices are generated, not real vendors' invoices.
 - The document reader is a separate Python service of about 2 GB (Docling, PyTorch, OCR models) and reads one document at a time.
 - Payments are a simulation, made at approval rather than scheduled by due date or early-payment terms.

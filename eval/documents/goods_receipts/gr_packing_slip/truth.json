@@ -1,0 +1,20 @@
+{
+  "po_number": "PO-7731",
+  "document_number": "PS-10442",
+  "receipt_date": "2026-09-30",
+  "receiver_name": null,
+  "line_items": [
+    {
+      "description": "Pneumatic Cylinder, 50 mm bore x 200 mm stroke",
+      "quantity": 4.0
+    },
+    {
+      "description": "Air Hose 3/8\" x 25 ft, polyurethane",
+      "quantity": 8.0
+    },
+    {
+      "description": "Pressure Regulator with Gauge, 1/4 NPT",
+      "quantity": 2.0
+    }
+  ]
+}

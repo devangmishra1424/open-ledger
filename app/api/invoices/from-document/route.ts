@@ -3,7 +3,7 @@ import { getFrontendInvoice } from "@/lib/api-shapes";
 import { runInBackground } from "@/lib/background";
 import { createBill } from "@/lib/bills";
 import type { InvoiceExtraction } from "@/lib/documents/invoice";
-import { getDocument } from "@/lib/documents/store";
+import { getDocument, PURPOSE_WORDS } from "@/lib/documents/store";
 import { handle, HttpError, readJsonBody, reviewerName } from "@/lib/http";
 import { runPipeline } from "@/lib/pipeline/orchestrator";
 
@@ -32,7 +32,7 @@ export const POST = handle("POST /api/invoices/from-document", async (req) => {
   if (!documentId) throw new HttpError(400, "documentId is required");
   const doc = await getDocument(documentId);
   if (!doc) throw new HttpError(404, `no document '${documentId}'`);
-  if (doc.purpose !== "invoice") throw new HttpError(400, "this document was read as a purchase order, not an invoice");
+  if (doc.purpose !== "invoice") throw new HttpError(400, `this document was read as ${PURPOSE_WORDS[doc.purpose]}, not an invoice`);
   if (doc.invoiceId) throw new HttpError(409, `this document was already saved as an invoice (id ${doc.invoiceId})`);
 
   const inv = parseInvoice(body.invoice);

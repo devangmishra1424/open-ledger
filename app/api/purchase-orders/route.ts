@@ -1,5 +1,5 @@
 import { createPurchaseOrder, listPurchaseOrders, receiptFromBody } from "@/lib/purchase-orders";
-import { getDocument } from "@/lib/documents/store";
+import { getDocument, PURPOSE_WORDS } from "@/lib/documents/store";
 import { recheckWaitingForNewPo } from "@/lib/pipeline/recheck";
 import { handle, HttpError, readJsonBody } from "@/lib/http";
 
@@ -36,7 +36,7 @@ export const POST = handle("POST /api/purchase-orders", async (req) => {
   if (body.sourceDocumentId != null) {
     const doc = typeof body.sourceDocumentId === "string" ? await getDocument(body.sourceDocumentId) : null;
     if (!doc) throw new HttpError(404, `no document '${String(body.sourceDocumentId)}'`);
-    if (doc.purpose !== "purchase_order") throw new HttpError(400, "that document was read as an invoice, not a purchase order");
+    if (doc.purpose !== "purchase_order") throw new HttpError(400, `that document was read as ${PURPOSE_WORDS[doc.purpose]}, not a purchase order`);
     if (doc.purchaseOrderId) throw new HttpError(409, `that document was already saved as a purchase order (id ${doc.purchaseOrderId})`);
     sourceDocumentId = doc.id;
   }

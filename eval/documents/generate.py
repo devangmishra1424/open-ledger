@@ -772,6 +772,8 @@ def main() -> None:
         (OUT / "index.json").write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
     if not args.only or any(n.startswith("po_") for n in args.only):
         build_purchase_orders(browser, rng)
+    if not args.only or any(n.startswith("gr_") for n in args.only):
+        build_goods_receipts(browser, rng)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -829,10 +831,93 @@ def po_us() -> Layout:
     return Layout("po_us", "US purchase order (Supplier block, MM/DD date)", body, t, forms=("digital.pdf", "scan_messy.pdf"))
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# Goods receipts: the proof that goods arrived. Three real shapes: a vendor's delivery challan (letterhead = vendor,
+# quantities dispatched, signed "received in good condition"), a buyer's goods receipt note (ordered / received /
+# accepted / rejected columns), and a US packing slip (ordered / shipped / backordered). Truth: po_number,
+# document_number, receipt_date, receiver_name, line_items [{description, quantity}] where quantity is what counts
+# as received (accepted when there is an accepted column, else shipped/dispatched).
+# ---------------------------------------------------------------------------------------------------------------
+GR_OUT = Path(__file__).resolve().parent / "goods_receipts"
+
+
+def gr_challan() -> Layout:
+    items = [("Hex Bolt M10 x 50 (Zinc Plated)", "73181500", D(500), "Nos"), ("Spring Washer M10", "73182100", D(500), "Nos"),
+             ("Industrial Grease 1 kg (Lithium Complex)", "34031900", D(12), "Nos"), ("Safety Gloves, Cut Resistant (Level 5)", "61161000", D(20), "Pairs")]
+    rows = "".join(f"<tr><td class='c'>{i}</td><td>{e(d)}</td><td class='c'>{h}</td><td class='num'>{q}</td><td class='c'>{u}</td></tr>"
+                   for i, (d, h, q, u) in enumerate(items, 1))
+    body = f"""
+<style>{BASE_CSS} .grid td {{ border: 1px solid #000; padding: 4px 6px; }} .items th, .items td {{ border: 1px solid #000; padding: 5px; }}</style>
+<div class='c b' style='font-size:15px'>DELIVERY CHALLAN</div>
+<table class='grid'><tr><td style='width:55%' rowspan='2'><b style='font-size:13px'>Shree Ganesh Industrial Supplies</b><br>Plot 14, MIDC Bhosari, Pune - 411026<br>GSTIN: 27AAKFS4821M1Z3</td>
+<td>Challan No.<br><b>SGIS/DC/0388</b></td><td>Date<br><b>10-Sep-2026</b></td></tr>
+<tr><td>Buyer's Order No.<br><b>PO-2026-0871</b></td><td>Vehicle No.<br>MH-14-HJ-2231</td></tr>
+<tr><td colspan='3'>Consignee: <b>Northwind Manufacturing Pvt Ltd</b>, Gat No. 112, Chakan Industrial Area, Pune 410501</td></tr></table>
+<br>
+<table class='items'><tr><th>Sl</th><th>Description of Goods</th><th>HSN</th><th>Quantity</th><th>Unit</th></tr>{rows}</table>
+<p>Balance 4 Pairs of Safety Gloves to follow. Goods sent for: Sale against PO.</p>
+<table style='margin-top:30px'><tr><td style='width:50%'>Received the above goods in good condition.<br><br>Received by: R. Patil (Stores)<br>Signature &amp; Stamp</td>
+<td style='text-align:right'>for Shree Ganesh Industrial Supplies<br><br><br>Authorised Signatory</td></tr></table>
+"""
+    t = {"po_number": "PO-2026-0871", "document_number": "SGIS/DC/0388", "receipt_date": "2026-09-10", "receiver_name": "R. Patil (Stores)",
+         "line_items": [{"description": d, "quantity": float(q)} for d, _, q, _ in items]}
+    return Layout("gr_challan", "Vendor's delivery challan (partial: 20 of 24 gloves)", body, t, forms=("digital.pdf", "scan_clean.pdf", "photo.jpg"))
+
+
+def gr_grn() -> Layout:
+    items = [("Black Pepper Whole (Grade A, 550 GL)", "KG", D("25.000"), D("25.000"), D("24.000"), D("1.000"), "1 kg bag torn"),
+             ("Green Cardamom 8 mm Bold", "KG", D("4.500"), D("4.500"), D("4.500"), D("0"), ""),
+             ("Turmeric Powder 1 kg Pouch", "PCS", D(40), D(40), D(40), D(0), "")]
+    rows = "".join(f"<tr><td class='c'>{i}</td><td>{e(d)}</td><td class='c'>{u}</td><td class='num'>{o}</td><td class='num'>{r}</td><td class='num'>{a}</td><td class='num'>{j}</td><td>{e(m)}</td></tr>"
+                   for i, (d, u, o, r, a, j, m) in enumerate(items, 1))
+    body = f"""
+<style>{BASE_CSS} .items th {{ border: 1px solid #333; background: #eef2f7; padding: 5px; }} .items td {{ border: 1px solid #999; padding: 5px; }}</style>
+<table><tr><td><div style='font-size:18px;font-weight:bold;color:#1f3a5f'>Northwind Foods Pvt Ltd</div>Edappally, Kochi 682024 &middot; Stores &amp; Receiving</td>
+<td style='text-align:right'><div style='font-size:18px;font-weight:bold'>GOODS RECEIPT NOTE</div>GRN No.: <b>NW/GRN/2026/1142</b><br>GRN Date: 11-10-2026</td></tr></table>
+<br>
+<table><tr><td style='width:50%'>Supplier: <b>Malabar Spice Traders</b><br>Mattancherry, Kochi 682002</td><td>PO No.: <b>PO-2026-0962</b><br>Supplier Invoice: MST/1029</td></tr></table>
+<br>
+<table class='items'><tr><th>Sr</th><th>Item</th><th>UoM</th><th>Ordered</th><th>Received</th><th>Accepted</th><th>Rejected</th><th>Remarks</th></tr>{rows}</table>
+<table style='margin-top:30px;width:100%'><tr><td>Inspected by: S. Nair (QC)</td><td>Received by: R. Patil (Stores)</td><td style='text-align:right'>Store In-charge</td></tr></table>
+"""
+    t = {"po_number": "PO-2026-0962", "document_number": "NW/GRN/2026/1142", "receipt_date": "2026-10-11", "receiver_name": "R. Patil (Stores)",
+         "line_items": [{"description": d, "quantity": float(a)} for d, _, _, _, a, _, _ in items], "rejected": [float(j) for *_, j, _ in items]}
+    return Layout("gr_grn", "Buyer's goods receipt note (ordered / received / accepted / rejected)", body, t, forms=("digital.pdf", "scan_messy.pdf"))
+
+
+def gr_packing_slip() -> Layout:
+    items = [("CYL-50-200", "Pneumatic Cylinder, 50 mm bore x 200 mm stroke", 4, 4, 0), ("AH-38-25", 'Air Hose 3/8" x 25 ft, polyurethane', 10, 8, 2),
+             ("PR-14-G", "Pressure Regulator with Gauge, 1/4 NPT", 2, 2, 0)]
+    rows = "".join(f"<tr><td>{c}</td><td>{e(d)}</td><td class='num'>{o}</td><td class='num'>{s}</td><td class='num'>{b}</td></tr>" for c, d, o, s, b in items)
+    body = f"""
+<style>{BASE_CSS} body {{ font-size: 12px; }} .items th {{ border-bottom: 2px solid #234; padding: 6px; text-align: left; }} .items td {{ padding: 6px; border-bottom: 1px solid #ccd; }}</style>
+<table><tr><td><div style='font-size:20px;font-weight:bold;color:#234'>Bayside Industrial Supply Co.</div>1850 Zanker Road, Suite 140, San Jose, CA 95112</td>
+<td style='text-align:right'><div style='font-size:24px;letter-spacing:2px;color:#234'>PACKING SLIP</div></td></tr></table>
+<br>
+<table><tr><td style='width:50%'><b>SHIP TO</b><br>Northwind Manufacturing Inc.<br>Dock 4, 2200 Mission College Blvd<br>Santa Clara, CA 95054</td>
+<td><table><tr><td class='b'>Packing Slip #</td><td class='num'>PS-10442</td></tr><tr><td class='b'>Ship Date</td><td class='num'>09/30/2026</td></tr>
+<tr><td class='b'>PO Number</td><td class='num'>PO-7731</td></tr><tr><td class='b'>Carrier</td><td class='num'>UPS Ground</td></tr></table></td></tr></table>
+<br>
+<table class='items'><tr><th>Item #</th><th>Description</th><th class='num'>Qty Ordered</th><th class='num'>Qty Shipped</th><th class='num'>Backordered</th></tr>{rows}</table>
+<p>Backordered items will ship separately. Please check the contents against this slip on arrival.</p>
+"""
+    t = {"po_number": "PO-7731", "document_number": "PS-10442", "receipt_date": "2026-09-30", "receiver_name": None,
+         "line_items": [{"description": d, "quantity": float(s)} for _, d, _, s, _ in items]}
+    return Layout("gr_packing_slip", "US packing slip (ordered / shipped / backordered)", body, t, forms=("digital.pdf", "photo.jpg"))
+
+
+def build_goods_receipts(browser: str, rng) -> None:
+    build_set(browser, rng, GR_OUT, (gr_challan, gr_grn, gr_packing_slip))
+
+
 def build_purchase_orders(browser: str, rng) -> None:
-    for make in (po_indian, po_us):
+    build_set(browser, rng, PO_OUT, (po_indian, po_us))
+
+
+def build_set(browser: str, rng, out: Path, makers) -> None:
+    for make in makers:
         lay = make()
-        folder = PO_OUT / lay.name
+        folder = out / lay.name
         if folder.exists():
             shutil.rmtree(folder)
         folder.mkdir(parents=True)
