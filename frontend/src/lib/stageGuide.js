@@ -58,7 +58,7 @@ export const STAGE_GUIDE = {
   audit: {
     name: 'Post and record',
     kind: 'rules',
-    what: 'On approval, posts the journal entry and sends the payment (simulated) for what is owed: the total less any credit memos approved against it. A credit memo is posted but never paid. In every case, writes the final record into the tamper-evident trail.',
+    what: 'On approval, posts the journal entry and sends the payment (simulated) for what is owed: the total less the vendor’s approved credit not yet used, in the same currency, oldest credit first. A credit memo is posted but never paid. In every case, writes the final record into the tamper-evident trail.',
     why: 'Nothing is paid without a record, and no record can be changed without it showing.',
     when: 'Every invoice, as its last automatic step.',
   },

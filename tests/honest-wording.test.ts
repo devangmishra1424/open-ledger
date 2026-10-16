@@ -12,11 +12,11 @@ import { toFrontendInvoice } from "@/lib/api-shapes";
  * Everything a reviewer (or an interviewer) reads must describe what VeriBook actually does. These
  * phrases name steps it has no screen or code for: contacting the vendor, credit notes or corrected
  * invoices, coding to an expense account, a whitelist, reviewer roles ("senior reviewer"), recording a
- * unit conversion, part-approving or part-rejecting an invoice, using a credit against a later invoice,
- * onboarding, teams. (An approved credit memo does come off its own invoice's payment while that is unpaid.)
+ * unit conversion, part-approving or part-rejecting an invoice, onboarding, teams. (An approved credit memo
+ * does come off what is owed: its own invoice while that is unpaid, then the vendor's later invoices.)
  * Phoning the vendor IS a step: the bank-change callback records it and a second person signs off.
  */
-const UNDOABLE = /ask the vendor|contact|credit note|corrected invoice|reissue|finance|expense account|\bcod(e|ed|ing) it\b|coding|whitelist|senior|treasury|new callback|record the conversion|conversion, record it|reject the excess|pay what was received|part that was delivered|netted|net it against|onboard|\bw-?9\b|e-?mail|fraud review team/i;
+const UNDOABLE = /ask the vendor|contact|credit note|corrected invoice|reissue|finance|expense account|\bcod(e|ed|ing) it\b|coding|whitelist|senior|treasury|new callback|record the conversion|conversion, record it|reject the excess|pay what was received|part that was delivered|netted|onboard|\bw-?9\b|e-?mail|fraud review team/i;
 
 function allText(value: unknown): string[] {
   if (typeof value === "string") return [value];
@@ -88,7 +88,7 @@ describe("a credit memo is never described as paid", () => {
 
   it("the Approve and Reject buttons say what happens to a credit", () => {
     const { choices } = explainCase(credit);
-    expect(choices.approve).toBe("Posts this credit of $2,000.00 to the ledger: it lowers what you owe Acme Corp. Nothing is paid. Your name goes on the record.");
+    expect(choices.approve).toBe("Posts this credit of $2,000.00 to the ledger: it lowers what you owe Acme Corp, first on its own invoice if that is still open, then on their next approved invoices. Nothing is paid. Your name goes on the record.");
     expect([choices.approve, choices.reject].filter((t) => SAYS_PAID.test(t))).toEqual([]);
     // An ordinary invoice still says it is paid.
     expect(explainCase({ ...credit, invoiceType: "standard" }).choices.approve).toMatch(/then pays it/);

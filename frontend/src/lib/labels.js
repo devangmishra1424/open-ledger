@@ -26,7 +26,7 @@ const ACTION_WORDS = {
   disagreement: 'Disagreed with the first AI',
   payment_failed: 'Payment did not go out',
   no_payment: 'Nothing paid',
-  paid_less_credit: 'Paid, less credits',
+  paid_less_credit: 'Paid, less the vendor’s credit',
   human_approved: 'Approved',
   human_rejected: 'Rejected',
   human_contested: 'Challenged',
@@ -60,7 +60,7 @@ export function outcomeWords(decision, invoice) {
     return invoice?.invoiceType === 'credit_memo' ? 'Credit posted to the ledger; nothing paid' : 'Posted to the ledger and paid';
   }
   if (decision.nodeId === 'audit' && a === 'no_payment') return 'Posted to the ledger; nothing paid';
-  if (decision.nodeId === 'audit' && a === 'paid_less_credit') return 'Paid, less the credits against it';
+  if (decision.nodeId === 'audit' && a === 'paid_less_credit') return 'Paid, less the vendor’s credit';
   if (decision.nodeId === 'audit' && ['block', 'block_fraud_flag', 'escalate_l1', 'escalate_l2'].includes(a)) return 'Not posted: held for a person';
   if (decision.nodeId === 'audit' && a === 'auto_reject') return 'Not posted: rejected';
   if (decision.nodeId === 'policy') return `Decided: ${actionWords(a).toLowerCase()}`;
