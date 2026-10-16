@@ -7,6 +7,7 @@ import CasePage from '../components/case/CasePage';
 import { Banner, Empty } from '../components/ui';
 import { formatMoney, timeAgo } from '../lib/labels';
 import { queueRoute } from '../lib/caseExplain';
+import { briefPoints, mainMismatch } from '../lib/mismatch';
 
 const TABS = [
   { key: 'needs_attention', label: 'Needs attention', test: (i) => i.state === 'needs_attention', help: 'Held by a rule or the AI. Nothing here is paid until a person approves it.' },
@@ -77,6 +78,33 @@ function Orientation({ invoices, onOpen }) {
 }
 
 /** The queue. Opening an invoice replaces it with that invoice's full page (components/case/CasePage). */
+/** A held invoice's row: what is off in plain words, then the figures, with the wrong one marked. Others: the headline. */
+function RowWhy({ invoice: i }) {
+  const m = i.state === 'needs_attention' || i.state === 'rejected' ? mainMismatch(i.mismatches, i.reason?.code) : null;
+  const figures = m ? briefPoints(m) : [];
+  if (!m || figures.length === 0) {
+    return (
+      <>
+        <b>{m?.title ?? i.summary.headline}</b>
+        {i.summary.detail && <span className="vb-row-detail">{i.summary.detail}</span>}
+      </>
+    );
+  }
+  const more = (i.mismatches?.length ?? 1) - 1;
+  return (
+    <>
+      <b>{m.title}{more > 0 && <span className="vb-row-more"> +{more} more</span>}</b>
+      <span className="vb-row-detail vb-row-figures">
+        {figures.map((f, k) => (
+          <span key={k} className="vb-row-fig">
+            {f.label}: {f.wrong ? <mark className="vb-wrong">{f.value}</mark> : f.value}
+          </span>
+        ))}
+      </span>
+    </>
+  );
+}
+
 export default function Inbox() {
   const { id } = useParams();
   if (id) return <CasePage />;
@@ -196,8 +224,7 @@ function Queue() {
               </span>
               <span className="vb-row-why">
                 {route && <span className={`vb-route vb-route-sm vb-route-${route.tone}`} title={route.meaning}>{route.label}</span>}
-                <b>{i.summary.headline}</b>
-                {i.summary.detail && <span className="vb-row-detail">{i.summary.detail}</span>}
+                <RowWhy invoice={i} />
               </span>
               <span>
                 <div className="vb-row-amount">{formatMoney(i.amount, i.currency)}</div>

@@ -2,7 +2,8 @@ import { getSql } from "@/db/client";
 import { checkHumanAction } from "@/lib/bill-workflow";
 import { detectBankChangeGates, type BankChangeGateCheck } from "@/lib/ledger/bank-change-review";
 import { buildThreeWay, type ThreeWay } from "@/lib/three-way";
-import type { BillStatus } from "@/lib/types";
+import type { BillStatus, FactShown } from "@/lib/types";
+import { mismatchesFor, type MismatchView } from "@/lib/mismatches";
 import { readableAgentFailure } from "@/lib/agent/llm";
 
 /**
@@ -153,6 +154,8 @@ export interface FrontendInvoice {
   } | null;
   humanActions: HumanActionView[];
   payment: { reference: string; simulated: boolean } | null;
+  /** What does not match, finding by finding: a plain title and the figures side by side (lib/mismatches.ts). */
+  mismatches: MismatchView[];
 }
 
 /** One readable sentence-ish for a headline box; the full text stays in the decision trail. */
@@ -178,6 +181,8 @@ export interface DecisionInput {
   hash: string;
   createdAt: string;
   claims?: string[];
+  /** Recorded figures behind a claim, aligned with `claims` (null where a claim has none). */
+  shown?: Array<FactShown | null>;
   triggeredByActor?: string | null;
 }
 
@@ -240,6 +245,9 @@ export function toFrontendInvoice(params: {
   reasons: Map<string, { name: string; description: string }>;
   gate?: BankChangeGateCheck;
   payment?: { reference: string } | null;
+  /** The purchase-order comparison, for working out the figures of an older record that did not record them. */
+  threeWay?: ThreeWay | null;
+  vendorTrustTier?: string | null;
 }): FrontendInvoice {
   const { bill, vendorName, taxId, paymentTermsCode, poNumber, decisions, lines, reasons, gate, payment } = params;
   const status = bill.status as BillStatus;
@@ -359,6 +367,8 @@ export function toFrontendInvoice(params: {
 
   const priority: FrontendInvoice["priority"] = state === "needs_attention" ? "High" : state === "processing" ? "Medium" : "Low";
   const latest = decisions[decisions.length - 1];
+  const lastMatch = lastOf(machine, (d) => d.nodeId === "match");
+  const lastValidate = lastOf(machine, (d) => d.nodeId === "validate");
 
   return {
     id: bill.id,
@@ -409,22 +419,70 @@ export function toFrontendInvoice(params: {
       : null,
     humanActions,
     payment: payment ? { reference: payment.reference, simulated: payment.reference.startsWith("SIMULATED-") } : null,
+    mismatches: mismatchesFor({
+      match: lastMatch ? { claims: lastMatch.claims ?? [], shown: lastMatch.shown } : undefined,
+      validate: lastValidate ? { claims: lastValidate.claims ?? [] } : undefined,
+      threeWay: params.threeWay ?? null,
+      bill: { amount: Number(bill.total_amount), currency: bill.currency, invoiceDate: String(bill.invoice_date), poReference: bill.po_reference ?? null, hasPo: Boolean(bill.po_id) },
+      vendorTrustTier: params.vendorTrustTier ?? null,
+      bankChange: gate?.gating ? { status: gate.status, oldBankLast4: gate.review?.oldBankLast4 ?? null, newBankLast4: gate.review?.newBankLast4 ?? null } : null,
+    }),
   };
 }
 
-function parseClaims(raw: unknown): string[] {
-  if (typeof raw !== "string" || raw === "") return [];
+function parseClaims(raw: unknown): { texts: string[]; shown: Array<FactShown | null> } {
+  if (typeof raw !== "string" || raw === "") return { texts: [], shown: [] };
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map((c: any) => String(c?.text ?? "")).filter(Boolean) : [];
+    const kept = Array.isArray(parsed) ? parsed.filter((c: any) => String(c?.text ?? "") !== "") : [];
+    return { texts: kept.map((c: any) => String(c.text)), shown: kept.map((c: any) => (c?.shown && Array.isArray(c.shown.points) ? c.shown as FactShown : null)) };
   } catch {
     // A claims column that is not valid JSON is a data fault, not something to hide: show it as one claim.
-    return [`(unreadable claims: ${raw.slice(0, 80)})`];
+    return { texts: [`(unreadable claims: ${raw.slice(0, 80)})`], shown: [null] };
   }
 }
 
-/** Loads and assembles the views for a set of vendor_bills rows in a fixed number of queries (not per invoice). */
-async function assemble(bills: any[]): Promise<FrontendInvoice[]> {
+/** The purchase-order comparison for each of these bills that has a PO, in a fixed number of queries (not per invoice). */
+async function loadThreeWays(bills: Array<{ id: string; po_id: string | null }>): Promise<Map<string, ThreeWay>> {
+  const out = new Map<string, ThreeWay>();
+  const withPo = bills.filter((b) => b.po_id);
+  if (withPo.length === 0) return out;
+  const sql = getSql();
+  const poIds = [...new Set(withPo.map((b) => b.po_id as string))];
+  const [poRows, poLines, receipts, receiptLines, billLines] = await Promise.all([
+    sql`SELECT id, po_number, status, po_type, currency, max_value_ceiling FROM purchase_orders WHERE id IN ${sql(poIds)}`,
+    sql`SELECT id, po_id, line_number, description, uom, qty_ordered, unit_price, tolerance_pct FROM purchase_order_lines WHERE po_id IN ${sql(poIds)}`,
+    sql`SELECT id, po_id, receipt_date, receiver_name, condition, final_delivery_indicator FROM goods_receipts WHERE po_id IN ${sql(poIds)} ORDER BY receipt_date`,
+    sql`SELECT grl.goods_receipt_id, grl.po_line_id, grl.qty_received FROM goods_receipt_lines grl JOIN goods_receipts gr ON gr.id = grl.goods_receipt_id WHERE gr.po_id IN ${sql(poIds)}`,
+    sql`SELECT id, vendor_bill_id, description, uom, qty_invoiced, unit_price FROM vendor_bill_lines WHERE vendor_bill_id IN ${sql(withPo.map((b) => b.id))}`,
+  ]);
+  for (const b of withPo) {
+    const po = poRows.find((p: any) => p.id === b.po_id);
+    if (!po) continue;
+    const here = receipts.filter((r: any) => r.po_id === b.po_id);
+    const receiptIds = new Set(here.map((r: any) => r.id));
+    out.set(b.id, buildThreeWay({
+      po: po as any, poLines: poLines.filter((l: any) => l.po_id === b.po_id) as any, receipts: here as any,
+      receiptLines: receiptLines.filter((rl: any) => receiptIds.has(rl.goods_receipt_id)) as any,
+      billLines: billLines.filter((l: any) => l.vendor_bill_id === b.id) as any,
+    }));
+  }
+  return out;
+}
+
+const HELD_FINDING = /^EXC-[A-Z_]+:\s*(?!auto_approve)[a-z_0-9]+$/;
+
+/** Whether this invoice's match record has a finding with no recorded figures: an older record, worked out from the comparison. */
+function needsWorkingOut(decisions: DecisionInput[]): boolean {
+  const match = lastOf(decisions, (d) => d.nodeId === "match");
+  return Boolean(match?.claims?.some((c, i) => HELD_FINDING.test(c.trim()) && !match.shown?.[i + 1]));
+}
+
+/**
+ * Loads and assembles the views for a set of vendor_bills rows in a fixed number of queries (not per invoice).
+ * `threeWays`, when the caller already has them; otherwise they are loaded only for invoices that need them.
+ */
+async function assemble(bills: any[], threeWays?: Map<string, ThreeWay>): Promise<FrontendInvoice[]> {
   if (bills.length === 0) return [];
   const sql = getSql();
   const ids = bills.map((b) => b.id);
@@ -432,7 +490,7 @@ async function assemble(bills: any[]): Promise<FrontendInvoice[]> {
   const poIds = [...new Set(bills.map((b) => b.po_id).filter(Boolean))];
 
   const [vendors, pos, lines, decisions, reasons, gates, payments] = await Promise.all([
-    sql`SELECT id, name, tax_id, payment_terms_code FROM vendors WHERE id IN ${sql(vendorIds)}`,
+    sql`SELECT id, name, tax_id, payment_terms_code, trust_tier FROM vendors WHERE id IN ${sql(vendorIds)}`,
     poIds.length > 0 ? sql`SELECT id, po_number FROM purchase_orders WHERE id IN ${sql(poIds)}` : Promise.resolve([] as any[]),
     sql`SELECT vendor_bill_id, description, qty_invoiced, unit_price FROM vendor_bill_lines WHERE vendor_bill_id IN ${sql(ids)}`,
     sql`SELECT id, invoice_id, node_id, agent_id, model, action_taken, reason_code, confidence, hash, created_at, claims, triggered_by_actor
@@ -450,12 +508,14 @@ async function assemble(bills: any[]): Promise<FrontendInvoice[]> {
   for (const l of lines) (linesByBill.get(l.vendor_bill_id) ?? linesByBill.set(l.vendor_bill_id, []).get(l.vendor_bill_id)!).push(l);
   const decisionsByBill = new Map<string, DecisionInput[]>();
   for (const d of decisions) {
+    const claims = parseClaims(d.claims);
     const input: DecisionInput = {
       id: d.id, nodeId: d.node_id, agentId: d.agent_id, model: d.model, actionTaken: d.action_taken, reasonCode: d.reason_code,
-      confidence: d.confidence, hash: d.hash, createdAt: d.created_at, claims: parseClaims(d.claims), triggeredByActor: d.triggered_by_actor,
+      confidence: d.confidence, hash: d.hash, createdAt: d.created_at, claims: claims.texts, shown: claims.shown, triggeredByActor: d.triggered_by_actor,
     };
     (decisionsByBill.get(d.invoice_id) ?? decisionsByBill.set(d.invoice_id, []).get(d.invoice_id)!).push(input);
   }
+  const comparisons = threeWays ?? await loadThreeWays(bills.filter((b) => needsWorkingOut(decisionsByBill.get(b.id) ?? [])));
 
   return bills.map((bill) => {
     const vendor: any = vendorById.get(bill.vendor_id);
@@ -470,6 +530,8 @@ async function assemble(bills: any[]): Promise<FrontendInvoice[]> {
       reasons: reasonByCode,
       gate: gates.get(bill.vendor_id),
       payment: paymentByBill.get(bill.id) ?? null,
+      threeWay: comparisons.get(bill.id) ?? null,
+      vendorTrustTier: vendor?.trust_tier ?? null,
     });
   });
 }
@@ -496,26 +558,12 @@ export async function getFrontendInvoiceDetail(billId: string | undefined | null
   const rows = await sql`SELECT * FROM vendor_bills WHERE id = ${billId}`;
   if (rows.length === 0) return undefined;
   const bill = rows[0];
-  const [view] = await assemble(rows);
+  const threeWays = await loadThreeWays([bill as { id: string; po_id: string | null }]);
+  const [view] = await assemble(rows, threeWays);
 
   const reasonRows = await sql`SELECT code, name FROM reason_codes`;
   const reasonNames = Object.fromEntries(reasonRows.map((r: any) => [r.code as string, r.name as string]));
-
-  let threeWay: ThreeWay | null = null;
-  if (bill.po_id) {
-    const [poRows, poLines, receipts, billLines] = await Promise.all([
-      sql`SELECT po_number, status, po_type, currency, max_value_ceiling FROM purchase_orders WHERE id = ${bill.po_id}`,
-      sql`SELECT id, line_number, description, uom, qty_ordered, unit_price, tolerance_pct FROM purchase_order_lines WHERE po_id = ${bill.po_id}`,
-      sql`SELECT id, receipt_date, receiver_name, condition, final_delivery_indicator FROM goods_receipts WHERE po_id = ${bill.po_id} ORDER BY receipt_date`,
-      sql`SELECT id, description, uom, qty_invoiced, unit_price FROM vendor_bill_lines WHERE vendor_bill_id = ${bill.id}`,
-    ]);
-    if (poRows.length > 0) {
-      const receiptIds = receipts.map((r: any) => r.id);
-      const receiptLines = receiptIds.length === 0 ? [] : await sql`SELECT goods_receipt_id, po_line_id, qty_received FROM goods_receipt_lines WHERE goods_receipt_id IN ${sql(receiptIds)}`;
-      threeWay = buildThreeWay({ po: poRows[0] as any, poLines: poLines as any, receipts: receipts as any, receiptLines: receiptLines as any, billLines: billLines as any });
-    }
-  }
-  return { ...view, threeWay, reasonNames };
+  return { ...view, threeWay: threeWays.get(bill.id) ?? null, reasonNames };
 }
 
 export const DEFAULT_LIST_LIMIT = 100;

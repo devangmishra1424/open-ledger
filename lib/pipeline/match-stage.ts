@@ -50,8 +50,9 @@ export interface MatchStageResult {
 }
 
 /** Pushes a finding with its action decided once, so the fact sentence quotes the action the engine really chose. */
-function addFinding(findings: ExceptionFinding[], code: ExceptionFinding["code"], action: ExceptionFinding["action"], fact: (a: ExceptionFinding["action"]) => string) {
-  findings.push({ code, action, fact: fact(action) });
+function addFinding(findings: ExceptionFinding[], code: ExceptionFinding["code"], action: ExceptionFinding["action"], fact: (a: ExceptionFinding["action"]) => facts.Fact) {
+  const f = fact(action);
+  findings.push({ code, action, fact: f.text, shown: f.shown });
 }
 
 export async function runMatchStage(vendorBillId: string): Promise<MatchStageResult> {
@@ -100,7 +101,11 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
       await getOrCreateBankChangeReview({ vendorId: bill.vendor_id, newBankLast4: vendor.bank_account_last4, sourceInvoiceId: bill.id });
     }
     detail.bankChangeGateStatus = bankGate.status;
-    addFinding(findings, "EXC-FRAUD_BANK", evaluateFraudBank(), (action) => facts.bankChangeFact({ status: bankGate.status, action }));
+    const review = bankGate.review ?? null;
+    addFinding(findings, "EXC-FRAUD_BANK", evaluateFraudBank(), (action) => facts.bankChange({
+      status: bankGate.status, action, oldLast4: review?.oldBankLast4 ?? null, newLast4: vendor.bank_account_last4 ?? review?.newBankLast4 ?? null,
+      fromThisInvoice: review?.sourceInvoiceId === bill.id,
+    }));
     return { findings, combined: combineExceptions(findings), detail };
   }
 
@@ -137,7 +142,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     const remainingOpenAmount = await openAmountOn(sql, related as any);
     const netAmount = remainingOpenAmount - bill.total_amount;
     detail.creditMemoNetAmount = netAmount;
-    addFinding(findings, "EXC-CREDIT_MEMO", evaluateCreditMemo(netAmount, relatedVoid), (action) => facts.creditMemoFact({
+    addFinding(findings, "EXC-CREDIT_MEMO", evaluateCreditMemo(netAmount, relatedVoid), (action) => facts.creditMemo({
       credit: bill.total_amount, currency: bill.currency, relatedNumber: related.invoice_number ?? null, relatedStatus: related.status,
       openAmount: remainingOpenAmount, net: netAmount, action,
     }));
@@ -151,7 +156,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     // for when a reference EXISTS but is invalid — a data-integrity problem, not a business-
     // as-usual non-PO purchase).
     const vendorWhitelisted = vendor.trust_tier === "trusted";
-    addFinding(findings, "EXC-NON_PO", evaluateNonPo(bill.total_amount, vendorWhitelisted), (action) => facts.nonPoFact({
+    addFinding(findings, "EXC-NON_PO", evaluateNonPo(bill.total_amount, vendorWhitelisted), (action) => facts.nonPo({
       amount: bill.total_amount, currency: bill.currency, printedPoReference: bill.po_reference ?? null, trustTier: vendor.trust_tier, action,
     }));
     detail.poReference = null;
@@ -163,7 +168,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
   if (!po || po.status === "closed") {
     detail.poReference = po?.po_number ?? bill.po_id;
     detail.poStatus = po?.status ?? "not_found";
-    addFinding(findings, "EXC-NO_PO", evaluateNoPo(), (action) => facts.noPoFact({ poReference: po?.po_number ?? bill.po_reference ?? "it refers to", poStatus: String(detail.poStatus), action }));
+    addFinding(findings, "EXC-NO_PO", evaluateNoPo(), (action) => facts.noPo({ poReference: po?.po_number ?? bill.po_reference ?? "it refers to", poStatus: String(detail.poStatus), action }));
     return { findings, combined: combineExceptions(findings), detail };
   }
 
@@ -180,12 +185,12 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
   // supported list at all" case earlier in the pipeline.
   if (bill.currency !== po.currency) {
     const rateVariancePct = Math.abs(bill.exchange_rate - po.exchange_rate) / (po.exchange_rate || 1);
-    addFinding(findings, "EXC-CURRENCY", evaluateCurrency(true, rateVariancePct, bill.total_amount * rateVariancePct), (action) => facts.currencyFact({
+    addFinding(findings, "EXC-CURRENCY", evaluateCurrency(true, rateVariancePct, bill.total_amount * rateVariancePct), (action) => facts.currencyMismatch({
       billCurrency: bill.currency, poCurrency: po.currency, poNumber: po.po_number, billRate: bill.exchange_rate, poRate: po.exchange_rate, ratePct: rateVariancePct, action,
     }));
   } else if (bill.exchange_rate !== po.exchange_rate) {
     const rateVariancePct = Math.abs(bill.exchange_rate - po.exchange_rate) / po.exchange_rate;
-    addFinding(findings, "EXC-CURRENCY", evaluateCurrency(false, rateVariancePct, bill.total_amount * rateVariancePct), (action) => facts.currencyFact({
+    addFinding(findings, "EXC-CURRENCY", evaluateCurrency(false, rateVariancePct, bill.total_amount * rateVariancePct), (action) => facts.currencyMismatch({
       billCurrency: bill.currency, poCurrency: po.currency, poNumber: po.po_number, billRate: bill.exchange_rate, poRate: po.exchange_rate, ratePct: rateVariancePct, action,
     }));
   }
@@ -205,7 +210,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
       const cumulativeValue = Number(priorValueRows[0]?.prior ?? 0) + bill.total_amount;
       if (cumulativeValue > po.max_value_ceiling) {
         const overagePct = (cumulativeValue - po.max_value_ceiling) / po.max_value_ceiling;
-        addFinding(findings, "EXC-BLANKET_EXCEEDED", evaluateBlanketExceeded(overagePct), (action) => facts.blanketValueFact({
+        addFinding(findings, "EXC-BLANKET_EXCEEDED", evaluateBlanketExceeded(overagePct), (action) => facts.blanketValue({
           poNumber: po.po_number, ceiling: Number(po.max_value_ceiling), prior: Number(priorValueRows[0]?.prior ?? 0), current: bill.total_amount, currency: bill.currency, action,
         }));
       }
@@ -222,7 +227,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
       const cumulativeQty = Number(priorQtyRows[0]?.prior ?? 0) + currentInvoiceQty;
       if (cumulativeQty > po.max_qty_ceiling) {
         const overagePct = (cumulativeQty - po.max_qty_ceiling) / po.max_qty_ceiling;
-        addFinding(findings, "EXC-BLANKET_EXCEEDED", evaluateBlanketExceeded(overagePct), (action) => facts.blanketQtyFact({
+        addFinding(findings, "EXC-BLANKET_EXCEEDED", evaluateBlanketExceeded(overagePct), (action) => facts.blanketQty({
           poNumber: po.po_number, ceiling: Number(po.max_qty_ceiling), prior: Number(priorQtyRows[0]?.prior ?? 0), current: currentInvoiceQty, action,
         }));
       }
@@ -236,7 +241,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
   const receiptRows = await sql`SELECT MIN(receipt_date) as earliest FROM goods_receipts WHERE po_id = ${po.id}`;
   const earliestReceiptDate: string | null = receiptRows[0]?.earliest ?? null;
   if (!earliestReceiptDate) {
-    addFinding(findings, "EXC-BEFORE_RCV", evaluateBeforeReceipt(false, 0, bill.total_amount), (action) => facts.beforeReceiptFact({
+    addFinding(findings, "EXC-BEFORE_RCV", evaluateBeforeReceipt(false, 0, bill.total_amount), (action) => facts.beforeReceipt({
       poNumber: po.po_number, invoiceDate: String(bill.invoice_date), earliestReceipt: null, action,
     }));
     detail.goodsReceiptStatus = "none_yet";
@@ -244,7 +249,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     const gap = classifyDateGap(bill.invoice_date, earliestReceiptDate);
     const invoiceIsBeforeReceipt = new Date(bill.invoice_date).getTime() < new Date(earliestReceiptDate).getTime();
     if (invoiceIsBeforeReceipt && gap.gapDays > 7) {
-      addFinding(findings, "EXC-BEFORE_RCV", evaluateBeforeReceipt(true, gap.gapDays, bill.total_amount), (action) => facts.beforeReceiptFact({
+      addFinding(findings, "EXC-BEFORE_RCV", evaluateBeforeReceipt(true, gap.gapDays, bill.total_amount), (action) => facts.beforeReceipt({
         poNumber: po.po_number, invoiceDate: String(bill.invoice_date), earliestReceipt: String(earliestReceiptDate), gapDays: gap.gapDays, action,
       }));
     }
@@ -328,7 +333,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     const perPoUnit = unitsPerPoUnit(line.uom, poLine.uom);
     if (perPoUnit === null) {
       const plausible = isPlausibleUomConversion(line.uom, poLine.uom);
-      addFinding(findings, "EXC-UOM_MISMATCH", evaluateUomMismatch(plausible), (action) => facts.uomMismatchFact({
+      addFinding(findings, "EXC-UOM_MISMATCH", evaluateUomMismatch(plausible), (action) => facts.uomMismatch({
         invoiceDescription: line.description, invoiceUom: line.uom, poLineNumber: poLine.lineNumber, poDescription: poLine.description, poUom: poLine.uom, plausible, action,
       }));
       continue;
@@ -361,7 +366,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     .filter((l) => l.amount >= 0.005);
   if (orphanLines.length > 0) {
     const unmatchedAmount = orphanLines.reduce((s, l) => s + l.amount, 0);
-    addFinding(findings, "EXC-UNMATCHED_LINE", evaluateUnmatchedLine(unmatchedAmount), (action) => facts.unmatchedLinesFact({
+    addFinding(findings, "EXC-UNMATCHED_LINE", evaluateUnmatchedLine(unmatchedAmount), (action) => facts.unmatchedLines({
       poNumber: po.po_number, lines: orphanLines, total: unmatchedAmount, currency: bill.currency, action,
     }));
     detail.lineMatch = { ...(detail.lineMatch as Record<string, unknown>), linesNotOnPo: orphanLines, amountNotOnPo: unmatchedAmount };
@@ -383,7 +388,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     const lineAmountImpact = classifyLineAmountVariance(l.unitPrice * l.qty, poLine.unitPrice * l.qty).varianceAbs;
 
     if (priceVariance.zone !== "green") {
-      addFinding(findings, "EXC-PRICE_VAR", evaluatePriceVariance(priceVariance.variancePct, lineAmountImpact), (action) => facts.priceVarianceFact({
+      addFinding(findings, "EXC-PRICE_VAR", evaluatePriceVariance(priceVariance.variancePct, lineAmountImpact), (action) => facts.priceVariance({
         lineNumber: poLine.lineNumber, description: poLine.description, uom: poLine.uom, billedPrice: l.unitPrice, poPrice: poLine.unitPrice,
         billedQty: l.qty, variancePct: priceVariance.variancePct, impact: lineAmountImpact, currency: bill.currency, action,
       }));
@@ -395,7 +400,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     // The line amount is the same in any unit, so a converted line is checked the same way.
     const rawLine = billLineRows.find((r: any) => r.id === l.invoiceLineId);
     if (rawLine?.tax_amount != null && rawLine?.tax_code_id != null) {
-      const taxCodeRows = await sql`SELECT rate FROM tax_codes WHERE id = ${rawLine.tax_code_id}`;
+      const taxCodeRows = await sql`SELECT rate, name FROM tax_codes WHERE id = ${rawLine.tax_code_id}`;
       const expectedRate = taxCodeRows[0]?.rate;
       const lineAmount = l.qty * l.unitPrice;
       if (expectedRate != null && lineAmount > 0) {
@@ -404,8 +409,9 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
         if (taxZone.zone !== "green") {
           const expectedTaxAmount = lineAmount * expectedRate;
           const amountDiff = Math.abs(rawLine.tax_amount - expectedTaxAmount);
-          addFinding(findings, "EXC-TAX_VAR", evaluateTaxVariance(taxZone.varianceAbs, amountDiff), (action) => facts.taxVarianceFact({
+          addFinding(findings, "EXC-TAX_VAR", evaluateTaxVariance(taxZone.varianceAbs, amountDiff), (action) => facts.taxVariance({
             description: rawLine.description, charged: rawLine.tax_amount, actualRate, expectedRate, expectedTax: expectedTaxAmount, currency: bill.currency, action,
+            codeName: taxCodeRows[0]?.name ?? null,
           }));
         }
       }
@@ -442,7 +448,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     if (fulfillment.excessQty > 0) {
       const variancePct = acceptedQty === 0 ? 1 : fulfillment.excessQty / acceptedQty;
       const excessAmountImpact = fulfillment.excessQty * poLine.unitPrice;
-      addFinding(findings, "EXC-QTY_VAR", evaluateQuantityVariance(variancePct, fulfillment.excessQty, excessAmountImpact), (action) => facts.quantityVarianceFact({
+      addFinding(findings, "EXC-QTY_VAR", evaluateQuantityVariance(variancePct, fulfillment.excessQty, excessAmountImpact), (action) => facts.quantityVariance({
         lineNumber: poLine.lineNumber, description: poLine.description, uom: poLine.uom, ordered: poLine.qtyOrdered, acceptedReceived: acceptedQty,
         billedBefore: qtyInvoicedPrior, billedNow: l.qty, excess: fulfillment.excessQty, impact: excessAmountImpact, currency: bill.currency, action,
       }));

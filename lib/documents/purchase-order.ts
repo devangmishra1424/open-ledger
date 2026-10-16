@@ -1,4 +1,5 @@
 import { dateOrderFor, detectCurrency, parseDate } from "@/lib/documents/formats";
+import { spendingLimit } from "@/lib/documents/hints";
 import { documentText, rowsFromReading } from "@/lib/documents/layout";
 import { LABELS, labelledValue, readLines } from "@/lib/documents/invoice-rules";
 import type { Reading } from "@/lib/documents/reader-client";
@@ -16,6 +17,8 @@ export interface PoDraft {
   orderDate: string | null;
   currency: string | null;
   lines: Array<{ description: string; quantity: number; unitPrice: number; uom: string | null }>;
+  /** "Not to exceed USD 10,000.00" and the like: a blanket order's total limit. Null when the PO states none. */
+  spendingLimit: number | null;
   /** What could not be read or does not add up, in plain words. Empty when every field was found (still worth checking). */
   missing: string[];
 }
@@ -50,6 +53,7 @@ export function readPurchaseOrder(reading: Reading): PoDraft {
     orderDate,
     currency,
     lines: lines.filter((l) => !l.problem).map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unit_price, uom: l.uom })),
+    spendingLimit: spendingLimit(text),
     missing,
   };
 }

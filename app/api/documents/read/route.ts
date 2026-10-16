@@ -1,6 +1,8 @@
 import { getSql } from "@/db/client";
 import { vendorKey } from "@/lib/bills";
+import { bankAccountLast4, isCreditNote } from "@/lib/documents/hints";
 import { extractInvoice, type InvoiceExtraction } from "@/lib/documents/invoice";
+import { documentText, rowsFromReading } from "@/lib/documents/layout";
 import { readPurchaseOrder, type PoDraft } from "@/lib/documents/purchase-order";
 import { matchReceiptToPo, readGoodsReceipt, type ReceiptDraft } from "@/lib/documents/receipt";
 import { MAX_UPLOAD_BYTES, readDocument, SUPPORTED_UPLOAD_EXTENSIONS, textReading, type Reading } from "@/lib/documents/reader-client";
@@ -26,8 +28,9 @@ const PURPOSES: DocumentPurpose[] = ["invoice", "purchase_order", "goods_receipt
  * The file is read by the document reader (Docling + OCR), its fields are extracted (lib/documents/invoice.ts,
  * purchase-order.ts or receipt.ts) and the original is stored (source_documents) so the review screen and later the
  * invoice page can show it. The answer also says what the books already know: whether the vendor exists, whether
- * the PO the document cites is on file (and for whom), and whether this invoice number was already received; for a
- * goods receipt, which PO line each item is and what does not fit (lib/documents/receipt.ts matchReceiptToPo).
+ * the PO the document cites is on file (and for whom), and whether this invoice number was already received; whether it is
+ * a credit note and which of the vendor's invoices it credits; the bank account it asks to be paid into (last 4
+ * digits only) against the one on file; for a goods receipt, which PO line each item is and what does not fit (lib/documents/receipt.ts matchReceiptToPo).
  *
  * Errors: 400 bad input, 413 too large, 415 unsupported type, 422 nothing readable, 503 reader not running/busy.
  */
@@ -58,7 +61,7 @@ export const POST = handle("POST /api/documents/read", async (req) => {
     documentId = await saveDocument({ bytes, filename, mediaType: pastedText != null ? "text/plain" : reading.media_type, purpose, reading, extraction, uploadedBy: null });
   }
 
-  const books = purpose === "invoice" ? await invoiceAgainstBooks(extraction as InvoiceExtraction)
+  const books = purpose === "invoice" ? await invoiceAgainstBooks(extraction as InvoiceExtraction, documentText(rowsFromReading(reading)))
     : purpose === "purchase_order" ? await poAgainstBooks(extraction as PoDraft)
     : await receiptAgainstBooks(extraction as ReceiptDraft, po);
   console.info(`POST /api/documents/read: ${purpose} ${documentId} (${reading.source_kind}, ${reading.page_count} page(s), ocr ${reading.ocr_used ? reading.ocr_confidence : "no"})${earlier ? " [same file as before]" : ""}`);
@@ -152,9 +155,10 @@ async function matchVendor(name: string | null): Promise<{ id: string; name: str
   return loose ? { id: loose.id, name: loose.name, exact: false } : null;
 }
 
-async function invoiceAgainstBooks(x: InvoiceExtraction) {
+async function invoiceAgainstBooks(x: InvoiceExtraction, text: string) {
   const s = x.submission;
   const vendor = await matchVendor(s.vendor_name);
+  const sql = getSql();
   let po: { number: string; onFile: boolean; vendorName: string | null; sameVendor: boolean } | null = null;
   if (s.po_reference) {
     const [row] = await getSql()`SELECT p.po_number, v.name AS vendor_name FROM purchase_orders p JOIN vendors v ON v.id = p.vendor_id WHERE p.po_number = ${s.po_reference}`;
@@ -165,7 +169,31 @@ async function invoiceAgainstBooks(x: InvoiceExtraction) {
     const [dup] = await getSql()`SELECT id FROM vendor_bills WHERE vendor_id = ${vendor.id} AND invoice_number = ${s.invoice_number}`;
     duplicateInvoiceId = dup?.id ?? null;
   }
-  return { vendor, po, duplicateInvoiceId };
+
+  // A credit note names the invoice it credits: the vendor's own invoice whose number is printed on it.
+  const creditNote = isCreditNote(text);
+  let creditedInvoice: { id: string; number: string; status: string } | null = null;
+  if (creditNote && vendor) {
+    const own = squash(s.invoice_number ?? "");
+    const printed = squash(text);
+    const candidates = await sql`
+      SELECT id, invoice_number, status FROM vendor_bills WHERE vendor_id = ${vendor.id} AND invoice_type = 'standard'
+      ORDER BY received_at DESC LIMIT 500`;
+    const hit = candidates.find((c: any) => {
+      const n = squash(c.invoice_number);
+      return n.length >= 4 && n !== own && printed.includes(n);
+    });
+    creditedInvoice = hit ? { id: hit.id, number: hit.invoice_number, status: hit.status } : null;
+  }
+
+  // Only the last 4 digits of an account are ever read out or kept.
+  const onInvoice = bankAccountLast4(text);
+  let onFile: string | null = null;
+  if (vendor) {
+    const [row] = await sql`SELECT bank_account_last4 FROM vendors WHERE id = ${vendor.id}`;
+    onFile = row?.bank_account_last4 ?? null;
+  }
+  return { vendor, po, duplicateInvoiceId, creditNote: { detected: creditNote, creditedInvoice }, bank: { onInvoice, onFile } };
 }
 
 async function poAgainstBooks(d: PoDraft) {

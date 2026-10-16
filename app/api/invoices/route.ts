@@ -22,7 +22,8 @@ export const GET = handle("GET /api/invoices", async (req) => {
 
 /**
  * POST /api/invoices — a structured invoice: { vendor | vendorId, invoiceNumber?, invoiceDate?,
- * dueDate?, currency?, poNumber | poId?, items: [{ description, qty, rate }], tax?, totalAmount? }.
+ * dueDate?, currency?, poNumber | poId?, items: [{ description, qty, rate }], tax?, totalAmount?,
+ * creditMemoFor? (a credit memo against this vendor's invoice of that number), bankLast4? }.
  * Validated at the edge (400 malformed, 422 if the stated total isn't lines + tax, 409 if this
  * vendor already sent this invoice number), created in one transaction, then the pipeline runs
  * in the background — poll GET /api/invoices/:id for the result.
@@ -45,6 +46,8 @@ export const POST = handle("POST /api/invoices", async (req) => {
     tax: typeof body.tax === "number" ? body.tax : null,
     total: typeof body.totalAmount === "number" ? body.totalAmount : null,
     rawSource: typeof body.rawSource === "string" ? body.rawSource : null,
+    creditMemoFor: typeof body.creditMemoFor === "string" ? body.creditMemoFor : null,
+    bankLast4: typeof body.bankLast4 === "string" ? body.bankLast4 : null,
     strictTotals: true,
   });
 

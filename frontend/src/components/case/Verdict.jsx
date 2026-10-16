@@ -3,6 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import { explainCase } from '../../lib/caseExplain';
 import { REASON_GUIDE, AUTO_APPROVED_GUIDE } from '../../lib/reasonGuide';
 import { Banner, Spinner } from '../ui';
+import WhatsWrong from './WhatsWrong';
 
 /** The one thing to do next, worded for where this invoice actually is. */
 function nextStep(invoice, guide) {
@@ -31,6 +32,9 @@ export default function Verdict({ invoice, aiFailed, lastAi, retry, retrying }) 
   const x = useMemo(() => explainCase(invoice), [invoice]);
   const guide = invoice.reason ? REASON_GUIDE[invoice.reason.code] : null;
   const autoApproved = (invoice.state === 'approved' || invoice.state === 'paid') && invoice.summary.decidedBy === 'system';
+  // What does not match, figure by figure; while it is held, or after a person decided it (what they decided on).
+  const mismatches = invoice.state === 'processing' || autoApproved ? [] : (invoice.mismatches ?? []);
+  const checksSaid = mismatches.length > 0 ? x.notes : x.found;
 
   return (
     <div className="vb-verdict">
@@ -54,13 +58,22 @@ export default function Verdict({ invoice, aiFailed, lastAi, retry, retrying }) 
         </Banner>
       )}
 
-      <div className="vb-verdict-grid">
-        <div>
-          <h3>What the checks found on this invoice</h3>
-          {x.found.length > 0
-            ? <ul className="vb-found">{x.found.map((f) => <li key={f}>{f}</li>)}</ul>
-            : <p className="vb-muted">{invoice.state === 'processing' ? 'Nothing yet: the checks are still running.' : 'No specific finding was recorded.'}</p>}
+      {mismatches.length > 0 && (
+        <div className="vb-ww-wrap">
+          <h3 className="vb-ww-head">What does not match</h3>
+          <WhatsWrong mismatches={mismatches} />
         </div>
+      )}
+
+      <div className={`vb-verdict-grid${mismatches.length > 0 && checksSaid.length === 0 ? ' is-single' : ''}`}>
+        {(mismatches.length === 0 || checksSaid.length > 0) && (
+          <div>
+            <h3>{mismatches.length > 0 ? 'Also found' : 'What the checks found on this invoice'}</h3>
+            {checksSaid.length > 0
+              ? <ul className="vb-found">{checksSaid.map((f) => <li key={f}>{f}</li>)}</ul>
+              : <p className="vb-muted">{invoice.state === 'processing' ? 'Nothing yet: the checks are still running.' : 'No specific finding was recorded.'}</p>}
+          </div>
+        )}
         <div>
           <h3>What the AI did</h3>
           <ul className="vb-found vb-found-ai">{x.ai.map((a) => <li key={a}>{a}</li>)}</ul>

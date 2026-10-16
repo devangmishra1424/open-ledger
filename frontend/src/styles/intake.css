@@ -81,3 +81,9 @@
 .vb-source-doc { display: flex; flex-direction: column; gap: 10px; }
 .vb-source-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .vb-source-head .vb-reading-facts { flex: 1 1 320px; }
+
+/* Credit note and bank account: pre-filled from the document, one line each unless something needs saying. */
+.vb-intake-extra { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--vb-border-soft, var(--vb-border)); border-radius: var(--vb-radius-sm); background: var(--vb-panel-2); }
+.vb-check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; cursor: pointer; }
+.vb-check input { margin-top: 3px; width: 16px; height: 16px; accent-color: var(--vb-accent); flex: none; }
+.vb-intake-extra .vb-field input { max-width: 320px; }

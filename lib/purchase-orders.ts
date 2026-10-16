@@ -44,6 +44,11 @@ export interface NewPoInput {
   receipt?: NewReceipt | null;
   /** The uploaded PO document this was read from (source_documents.id); checked by the caller. */
   sourceDocumentId?: string | null;
+  /**
+   * A spending limit makes this a blanket order: every invoice billed against it may add up to this much in total
+   * (purchase_orders.max_value_ceiling, checked by the match step as EXC-BLANKET_EXCEEDED). Null for a normal order.
+   */
+  spendingLimit?: number | null;
 }
 
 export interface CreatedPo { poId: string; poNumber: string; vendorId: string; vendorCreated: boolean; receiptId: string | null }
@@ -94,9 +99,11 @@ export function normalizePurchaseOrder(input: NewPoInput, today = new Date().toI
   const currency = (input.currency ?? "USD").toUpperCase();
   if (!CURRENCY.test(currency)) throw new HttpError(400, "currency must be a 3-letter code such as USD");
   const buyerName = typeof input.buyerName === "string" && input.buyerName.trim() ? input.buyerName.trim().slice(0, 80) : null;
+  const spendingLimit = input.spendingLimit == null ? null : round2(finite(input.spendingLimit, "spending limit", { exclusiveMin: 0 }));
 
   return {
     poNumber,
+    spendingLimit,
     orderDate: isoDate(input.orderDate, "orderDate", today),
     currency,
     buyerName,
@@ -183,8 +190,9 @@ export async function createPurchaseOrder(input: NewPoInput): Promise<CreatedPo>
 
       const poId = randomUUID();
       await tx`
-        INSERT INTO purchase_orders (id, po_number, vendor_id, buyer_name, order_date, status, po_type, currency, exchange_rate, source_document_id)
-        VALUES (${poId}, ${n.poNumber}, ${vendorId}, ${n.buyerName}, ${n.orderDate}, 'open', 'standard', ${n.currency}, 1.0, ${input.sourceDocumentId ?? null})`;
+        INSERT INTO purchase_orders (id, po_number, vendor_id, buyer_name, order_date, status, po_type, max_value_ceiling, currency, exchange_rate, source_document_id)
+        VALUES (${poId}, ${n.poNumber}, ${vendorId}, ${n.buyerName}, ${n.orderDate}, 'open', ${n.spendingLimit == null ? "standard" : "blanket"}, ${n.spendingLimit},
+                ${n.currency}, 1.0, ${input.sourceDocumentId ?? null})`;
       const lineIdByNumber = new Map<number, string>();
       for (const l of n.lines) {
         const id = randomUUID();
@@ -269,6 +277,8 @@ export interface PoSummary {
   total: number;
   receivedInFull: boolean;
   invoiceCount: number;
+  /** A blanket order's spending limit; null for a normal order. */
+  spendingLimit: number | null;
   lines: Array<{ lineNumber: number; description: string; uom: string; ordered: number; received: number; unitPrice: number }>;
 }
 
@@ -276,7 +286,7 @@ export interface PoSummary {
 export async function listPurchaseOrders(limit = 50): Promise<PoSummary[]> {
   const cap = Math.min(Math.max(1, Math.floor(limit)), 200);
   const pos = await getSql()`
-    SELECT po.id, po.po_number, po.order_date, po.currency, po.status, v.name AS vendor
+    SELECT po.id, po.po_number, po.order_date, po.currency, po.status, po.max_value_ceiling, v.name AS vendor
     FROM purchase_orders po JOIN vendors v ON v.id = po.vendor_id
     ORDER BY po.order_date DESC, po.po_number DESC LIMIT ${cap}`;
   return summarize(pos);
@@ -285,7 +295,7 @@ export async function listPurchaseOrders(limit = 50): Promise<PoSummary[]> {
 /** One PO with its lines and what has been received on each, or null. */
 export async function getPurchaseOrder(id: string): Promise<PoSummary | null> {
   const pos = await getSql()`
-    SELECT po.id, po.po_number, po.order_date, po.currency, po.status, v.name AS vendor
+    SELECT po.id, po.po_number, po.order_date, po.currency, po.status, po.max_value_ceiling, v.name AS vendor
     FROM purchase_orders po JOIN vendors v ON v.id = po.vendor_id WHERE po.id = ${id}`;
   return (await summarize(pos))[0] ?? null;
 }
@@ -316,6 +326,7 @@ async function summarize(pos: readonly any[]): Promise<PoSummary[]> {
       total: round2(lines.reduce((s, l) => s + l.ordered * l.unitPrice, 0)),
       receivedInFull: lines.length > 0 && lines.every((l) => l.received >= l.ordered),
       invoiceCount: billCount.get(p.id) ?? 0,
+      spendingLimit: p.max_value_ceiling == null ? null : Number(p.max_value_ceiling),
       lines,
     };
   });

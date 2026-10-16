@@ -60,6 +60,8 @@ export interface CaseExplanation {
   route: Route | null;
   /** What the checks found on this invoice, most specific first. */
   found: string[];
+  /** The part of `found` that is not a mismatch between documents: a Settings limit, an AI hold, a failed step. */
+  notes: string[];
   /** What each AI step said, and whether the AI changed the outcome. */
   ai: string[];
   /** What each decision button would do to this invoice. */
@@ -258,17 +260,19 @@ export function explainCase(inv: CaseLike): CaseExplanation {
   const code = inv.reason?.code ?? null;
 
   const found: string[] = [];
+  const notes: string[] = [];
   found.push(...failedGates(validate));
   if (inv.bankChange) found.push(...bankFacts(inv));
   else if (code === 'POLICY_LIMIT') {
     const breach = policy?.claims[policy.claims.length - 1];
-    if (breach) found.push(`${breach.replace(/\.\s*$/, '')}. The invoice itself matched its purchase order and delivery cleanly.`);
+    if (breach) notes.push(`${breach.replace(/\.\s*$/, '')}. The invoice itself matched its purchase order and delivery cleanly.`);
   } else if (code === 'INVESTIGATOR_HOLD') {
-    if (policy?.claims[0]) found.push(policy.claims[0]);
+    if (policy?.claims[0]) notes.push(policy.claims[0]);
   } else if (code === 'R99_AGENT_ERROR') {
     const failed = last(machine, (d) => norm(d.actionTaken) === 'error');
-    if (failed?.claims[0]) found.push(`${failed.claims[0].replace(/^(Investigator|Verifier) failed: /, '')} That is a fault in the automated review, not necessarily in the invoice.`);
+    if (failed?.claims[0]) notes.push(`${failed.claims[0].replace(/^(Investigator|Verifier) failed: /, '')} That is a fault in the automated review, not necessarily in the invoice.`);
   }
+  found.push(...notes);
   if (!inv.bankChange) {
     const facts = recordedFacts(match);
     if (facts.length > 0) found.push(...facts);
@@ -292,7 +296,7 @@ export function explainCase(inv: CaseLike): CaseExplanation {
         : routeFor('auto_approve'))
       : routeFor(policy?.actionTaken) ?? routeFor(match?.actionTaken);
 
-  return { route, found: [...new Set(found)], ai: aiStory(inv, match?.actionTaken ?? null, policy?.actionTaken ?? null), choices: choiceWords(inv) };
+  return { route, found: [...new Set(found)], notes, ai: aiStory(inv, match?.actionTaken ?? null, policy?.actionTaken ?? null), choices: choiceWords(inv) };
 }
 
 /** The route an invoice in the queue is waiting on, for a chip on its row ("Blocked", "Reviewer, level 2"). */
