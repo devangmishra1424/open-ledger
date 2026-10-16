@@ -130,7 +130,7 @@ describe("explainCase", () => {
   it("a button that is not available says why, in the server's own words", () => {
     const x = explainCase({ ...nexus, actions: { approve: { allowed: true }, reject: { allowed: true }, contest: { allowed: false, reason: "stopped by a deterministic rule before any AI review ran" } } });
     expect(x.choices.contest).toBe("Not available now: stopped by a deterministic rule before any AI review ran.");
-    expect(x.choices.approve).toBe("Posts $17,710.00 to the ledger as owed to Nexus Dynamics, then pays it (simulated: no money moves). Your name goes on the record.");
+    expect(x.choices.approve).toBe("Posts $17,710.00 to the ledger as owed to Nexus Dynamics, then pays it, less any approved credit from them not yet used (simulated: no money moves). Your name goes on the record.");
     // A repeated invoice number is refused at entry, so it never waits here to be rejected.
     expect(x.choices.reject).toBe("Voids this invoice: $17,710.00 is never posted or paid. Use it for an overcharge you will not accept, or a bill nobody ordered.");
   });

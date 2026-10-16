@@ -4,7 +4,7 @@ import { classifyDateGap, classifyTaxRateVariance, classifyPriceVariance, classi
 import { computePoLineFulfillment } from "@/lib/matching/partial-handling";
 import { isPlausibleUomConversion } from "@/lib/matching/uom-dimension";
 import { detectBankChangeGate, getOrCreateBankChangeReview } from "@/lib/ledger/bank-change-review";
-import { creditsPostedAgainst } from "@/lib/ledger/journal";
+import { openAmountOn } from "@/lib/ledger/journal";
 import {
   evaluateNoPo, evaluateNonPo, evaluateBeforeReceipt, evaluatePriceVariance, evaluateQuantityVariance,
   evaluateCurrency, evaluateBlanketExceeded, evaluateTaxVariance, evaluateCreditMemo, evaluateUomMismatch,
@@ -120,7 +120,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
       detail.creditMemoNote = "no related_invoice_id set — cannot compute netting";
       return { findings, combined: combineExceptions(findings), detail };
     }
-    const relatedRows = await sql`SELECT total_amount, status, invoice_number FROM vendor_bills WHERE id = ${bill.related_invoice_id}`;
+    const relatedRows = await sql`SELECT id, total_amount, status, invoice_number FROM vendor_bills WHERE id = ${bill.related_invoice_id}`;
     const related = relatedRows[0];
     if (!related) {
       detail.creditMemoNote = `related_invoice_id '${bill.related_invoice_id}' does not exist`;
@@ -128,15 +128,13 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     }
     // "Remaining open amount": 0 once the related invoice is 'paid' or was rejected ('void':
     // nothing was ever owed on it, so approving a credit against it would post Dr Accounts
-    // Payable for money never owed), else its total less the credit memos already posted
-    // against it (an approved credit is taken off what is paid on its invoice —
-    // lib/payments/payments.ts settleApprovedBill), so two credits cannot both "fit" inside the
-    // same open amount. Partial payments are not tracked: an invoice is only ever paid in one
-    // payment, at approval.
+    // Payable for money never owed), else its total less the credit already taken off it
+    // (credit_applications: this vendor's approved credits, its own or left over from others) and
+    // anything paid on it, so two credits cannot both "fit" inside the same open amount
+    // (lib/ledger/journal.ts openAmountOn). A credit larger than this still goes to a person; once
+    // approved, the part that does not fit comes off the vendor's later invoices.
     const relatedVoid = related.status === "void";
-    const remainingOpenAmount = related.status === "paid" || relatedVoid
-      ? 0
-      : Math.max(0, Number(related.total_amount) - await creditsPostedAgainst(sql, bill.related_invoice_id));
+    const remainingOpenAmount = await openAmountOn(sql, related as any);
     const netAmount = remainingOpenAmount - bill.total_amount;
     detail.creditMemoNetAmount = netAmount;
     addFinding(findings, "EXC-CREDIT_MEMO", evaluateCreditMemo(netAmount, relatedVoid), (action) => facts.creditMemoFact({

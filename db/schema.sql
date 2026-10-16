@@ -142,6 +142,16 @@ CREATE TABLE payment_applications (
   id TEXT PRIMARY KEY, payment_id TEXT NOT NULL REFERENCES payments(id),
   vendor_bill_id TEXT NOT NULL REFERENCES vendor_bills(id), applied_amount NUMERIC(18,4) NOT NULL
 );
+-- One use of an approved credit memo against one of the same vendor's invoices: that much of the credit
+-- came off what is owed on the invoice (lib/ledger/journal.ts). A credit is never paid out; its unused
+-- part is its total less its rows here. Written when the credit posts (against its own unpaid invoice)
+-- and when a later invoice is settled; migration 009.
+CREATE TABLE credit_applications (
+  id TEXT PRIMARY KEY, credit_memo_id TEXT NOT NULL REFERENCES vendor_bills(id),
+  vendor_bill_id TEXT NOT NULL REFERENCES vendor_bills(id),
+  applied_amount NUMERIC(18,4) NOT NULL CHECK (applied_amount > 0),
+  created_at TEXT NOT NULL DEFAULT now()::text, UNIQUE (credit_memo_id, vendor_bill_id)
+);
 CREATE TABLE reason_codes (
   code TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL
 );
@@ -202,3 +212,4 @@ CREATE INDEX idx_vendor_bills_vendor ON vendor_bills(vendor_id);
 CREATE INDEX idx_jel_account ON journal_entry_lines(account_id);
 CREATE INDEX idx_pbc_evidence_files_request ON pbc_evidence_files(pbc_request_id);
 CREATE INDEX idx_source_documents_sha256 ON source_documents(sha256);
+CREATE INDEX idx_credit_applications_bill ON credit_applications(vendor_bill_id);

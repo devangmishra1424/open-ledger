@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { getSql } from "@/db/client";
-import { postPayment, creditsPostedAgainst } from "@/lib/ledger/journal";
+import { postPayment, applyVendorCredits, creditMemoUses, type CreditUse } from "@/lib/ledger/journal";
 import { money } from "@/lib/matching/finding-facts";
 
 /**
@@ -70,43 +70,66 @@ export async function triggerPayment(billId: string, amount: number): Promise<Pa
 
 /** What settling an approved, posted invoice did. */
 export type Settlement =
-  /** A credit memo: posting it already lowered what is owed to the vendor. Nothing is paid. */
-  | { kind: "credit_memo" }
-  /** Credit memos posted against the invoice already cover all of it. Nothing is paid. */
-  | { kind: "covered_by_credit"; credited: number }
-  /** Paid what was still owed: the total less any credit memos posted against it. */
-  | { kind: "paid"; payment: PaymentResult; amount: number; credited: number };
+  /** A credit memo: posting it lowered what is owed to the vendor. Nothing is paid; `uses` is where its credit went so far. */
+  | { kind: "credit_memo"; uses: Array<{ invoiceNumber: string; amount: number }>; unused: number }
+  /** The vendor's approved credit covers all of the invoice. Nothing is paid. */
+  | { kind: "covered_by_credit"; credited: number; credits: CreditUse[] }
+  /** Paid what was still owed: the total less the vendor's approved credit taken off it. */
+  | { kind: "paid"; payment: PaymentResult; amount: number; credited: number; credits: CreditUse[] };
 
 /**
  * Settles an invoice that has just been approved and posted — the one place both approve paths
  * (the pipeline's audit stage, a person's Approve) decide whether money goes out. A credit memo is
- * never paid. Any other invoice is paid its total less the credit memos already posted against it
- * (vendor_bills.related_invoice_id), and nothing at all when those credits cover it.
+ * never paid. Any other invoice first takes the vendor's unused approved credit in its currency,
+ * oldest first (applyVendorCredits, which records each use), and is paid the rest: nothing at all
+ * when the credit covers it.
  *
- * Throws only when the payment itself fails; the invoice is posted either way.
+ * Throws only when the payment itself fails; the invoice is posted either way, and the credit it
+ * took stays taken (it is paid the rest when settled again).
  */
 export async function settleApprovedBill(billId: string): Promise<Settlement> {
   const sql = getSql();
   const rows = await sql`SELECT total_amount, invoice_type FROM vendor_bills WHERE id = ${billId}`;
   if (rows.length === 0) throw new Error(`settleApprovedBill: no vendor_bill found with id '${billId}'`);
-  if (rows[0].invoice_type === "credit_memo") return { kind: "credit_memo" };
+  if (rows[0].invoice_type === "credit_memo") return { kind: "credit_memo", ...await creditMemoUses(sql, billId) };
 
-  const credited = await creditsPostedAgainst(sql, billId);
+  const credits = await applyVendorCredits(billId);
+  const credited = Math.round(credits.reduce((s, c) => s + c.amount, 0) * 100) / 100;
   const owed = Math.round((Number(rows[0].total_amount) - credited) * 100) / 100;
-  if (owed <= 0) return { kind: "covered_by_credit", credited };
-  return { kind: "paid", payment: await triggerPayment(billId, owed), amount: owed, credited };
+  if (owed <= 0) return { kind: "covered_by_credit", credited, credits };
+  return { kind: "paid", payment: await triggerPayment(billId, owed), amount: owed, credited, credits };
+}
+
+/** "A", "A and B", "A, B and C". */
+function listWords(items: string[]): string {
+  return items.length <= 1 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/** "credit memo INV-1-CM" for one credit; each one's amount as well when there are several. */
+function creditSources(credits: CreditUse[], currency: string): string {
+  if (credits.length === 1) return `credit memo ${credits[0].creditMemoNumber}`;
+  return `credit memos ${listWords(credits.map((c) => `${c.creditMemoNumber} (${money(c.amount, currency)})`))}`;
 }
 
 /** One sentence for the trail when settling was not simply "paid in full"; null when it was. No "Label:" opening: the trail shows those as headings. */
 export function settlementNote(s: Settlement, currency: string): string | null {
   switch (s.kind) {
-    case "credit_memo":
-      return "A credit memo is never paid. Posting it lowered what is owed to the vendor.";
+    case "credit_memo": {
+      const parts = ["A credit memo is never paid. Posting it lowered what is owed to the vendor."];
+      const usedTotal = s.uses.reduce((sum, u) => sum + u.amount, 0);
+      if (s.uses.length > 0) {
+        parts.push(`${money(usedTotal, currency)} of it came off invoice${s.uses.length === 1 ? "" : "s"} ${listWords(s.uses.map((u) => u.invoiceNumber))}.`);
+      }
+      if (s.unused > 0) {
+        parts.push(`${s.uses.length > 0 ? `The other ${money(s.unused, currency)}` : `All ${money(s.unused, currency)} of it`} comes off the vendor's next approved invoices in ${currency}.`);
+      }
+      return parts.join(" ");
+    }
     case "covered_by_credit":
-      return `Credit memos of ${money(s.credited, currency)} posted against this invoice cover all of it. Nothing is paid.`;
+      return `${money(s.credited, currency)} of the vendor's approved credit, from ${creditSources(s.credits, currency)}, covers all of this invoice. Nothing is paid.`;
     case "paid":
       return s.credited > 0
-        ? `Paid ${money(s.amount, currency)}, the total less ${money(s.credited, currency)} of credit memos posted against it.`
+        ? `Paid ${money(s.amount, currency)}, the total less ${money(s.credited, currency)} of the vendor's approved credit, from ${creditSources(s.credits, currency)}.`
         : null;
   }
 }

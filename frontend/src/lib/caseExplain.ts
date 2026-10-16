@@ -241,8 +241,8 @@ function choiceWords(inv: CaseLike): CaseExplanation['choices'] {
     approve: why('approve') ?? (inv.bankChange
       ? 'Unlocks only after the bank change is verified by phone and a second person signs off (steps above).'
       : credit
-        ? `Posts this credit of ${amount} to the ledger: it lowers what you owe ${inv.vendor}. Nothing is paid. Your name goes on the record.`
-        : `Posts ${amount} to the ledger as owed to ${inv.vendor}, then pays it (simulated: no money moves). Your name goes on the record.`),
+        ? `Posts this credit of ${amount} to the ledger: it lowers what you owe ${inv.vendor}, first on its own invoice if that is still open, then on their next approved invoices. Nothing is paid. Your name goes on the record.`
+        : `Posts ${amount} to the ledger as owed to ${inv.vendor}, then pays it, less any approved credit from them not yet used (simulated: no money moves). Your name goes on the record.`),
     reject: why('reject') ?? (credit
       ? `Voids this credit: ${amount} is never posted. Use it if the credit is wrong.`
       : `Voids this invoice: ${amount} is never posted or paid. Use it for an overcharge you will not accept, or a bill nobody ordered.`),

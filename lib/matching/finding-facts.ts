@@ -137,7 +137,7 @@ export function creditMemoFact(p: {
   return `This is a credit of ${money(p.credit, p.currency)} against ${target}, ${open}. ` +
     (p.net >= 0
       ? `It fits inside the open amount (leaving ${money(p.net, p.currency)}). ${outcome(p.action)}`
-      : `${money(-p.net, p.currency)} of the credit is more than is open on that invoice, so a person decides it. ${outcome(p.action)}`);
+      : `${money(-p.net, p.currency)} of the credit is more than is open on that invoice, so a person decides it. If it is approved, that part comes off the vendor's next approved invoices. ${outcome(p.action)}`);
 }
 
 export function bankChangeFact(p: { status: string; action: Action }): string {

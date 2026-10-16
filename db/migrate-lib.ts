@@ -8,7 +8,7 @@ type Sql = ReturnType<typeof postgres>;
 /** Drop order for the default (`public`) schema, where we can't just drop the schema itself. */
 export const TABLES_IN_DROP_ORDER = [
   "app_settings", "pbc_evidence_files", "pbc_requests", "reviews", "decisions", "reason_codes",
-  "payment_applications", "payments", "vendor_bill_lines", "vendor_bills",
+  "credit_applications", "payment_applications", "payments", "vendor_bill_lines", "vendor_bills",
   "journal_entry_lines", "journal_entries",
   "goods_receipt_lines", "goods_receipts", "purchase_order_lines", "purchase_orders", "source_documents",
   "exchange_rates", "tax_codes", "vendor_corrections", "vendor_bank_change_reviews", "vendors",

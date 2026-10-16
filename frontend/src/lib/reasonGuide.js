@@ -80,7 +80,7 @@ export const REASON_GUIDE = {
       'Does the credit amount match the original invoice it corrects?',
     ],
     usually: 'Approve it if the credit is right: it is posted as a reduction of what you owe the vendor, and nothing is paid. Reject it if the credit is wrong.',
-    engine: 'Routed as approved when the credit fits inside what is still open on the related invoice (its total less credits already approved against it); a larger credit goes to a reviewer, and so does any credit against an invoice that was rejected. An approved credit comes off the related invoice’s payment while that invoice is unpaid. Once it is paid, the credit stays on the ledger as money the vendor owes you; VeriBook does not use it against their later invoices.',
+    engine: 'Routed as approved when the credit fits inside what is still open on the related invoice (its total less credits already approved against it); a larger credit goes to a reviewer, and so does any credit against an invoice that was rejected. An approved credit is never paid out. It comes off the related invoice’s payment while that invoice is unpaid; what is left over comes off the vendor’s next approved invoices in the same currency, oldest credit first, and the trail says which credit each invoice used.',
   },
   'EXC-PARTIAL': {
     means: 'The invoice covers only part of the purchase order, for example a partial shipment.',

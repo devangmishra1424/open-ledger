@@ -8,7 +8,9 @@ import { getSql } from "@/db/client";
  *   - postBillApproval: Dr 6xxx Expense (bill line's own gl_account_id, or its PO line's) —
  *     Cr 2000 Accounts Payable. For a credit memo (invoice_type 'credit_memo', its amounts
  *     stored as positive magnitudes) the same lines post the other way round: Dr Accounts
- *     Payable — Cr Expense, lowering what is owed to the vendor. A credit memo is never paid.
+ *     Payable — Cr Expense, lowering what is owed to the vendor. A credit memo is never paid;
+ *     its credit comes off what is paid on the vendor's invoices instead (credit_applications:
+ *     its own invoice when it posts, if that is unpaid, then the vendor's later invoices).
  *   - postPayment: Dr 2000 Accounts Payable — Cr 1000 Cash. Supports split/partial payment
  *     across multiple vendor_bills via the `applications` array.
  *
@@ -166,15 +168,121 @@ export function buildCreditMemoDraft(input: BillApprovalDraftInput): JournalEntr
   };
 }
 
+const cents = (x: number) => Math.round(x * 100) / 100;
+
 /**
- * The total of credit memos already posted against a bill (vendor_bills.related_invoice_id): what
- * they took off what is owed on it. A credit memo counts once it has its own journal entry.
+ * What approved credit memos have taken off what is owed on a bill: the sum of its
+ * credit_applications rows. A credit is used only through those rows (below), so no part of one can
+ * come off two invoices.
  */
-export async function creditsPostedAgainst(sql: ISql<{}>, billId: string): Promise<number> {
-  const rows = await sql`
-    SELECT COALESCE(SUM(total_amount), 0) AS credited FROM vendor_bills
-    WHERE related_invoice_id = ${billId} AND invoice_type = 'credit_memo' AND journal_entry_id IS NOT NULL`;
+export async function creditsAppliedTo(sql: ISql<{}>, billId: string): Promise<number> {
+  const rows = await sql`SELECT COALESCE(SUM(applied_amount), 0) AS credited FROM credit_applications WHERE vendor_bill_id = ${billId}`;
   return Number(rows[0].credited);
+}
+
+/**
+ * What is still owed on a bill: nothing once it is paid or was rejected ('void': nothing was ever
+ * owed), else its total less the credits and payments applied to it.
+ */
+export async function openAmountOn(sql: ISql<{}>, bill: { id: string; status: string; total_amount: number }): Promise<number> {
+  if (bill.status === "paid" || bill.status === "void") return 0;
+  const rows = await sql`
+    SELECT (SELECT COALESCE(SUM(applied_amount), 0) FROM credit_applications WHERE vendor_bill_id = ${bill.id})
+         + (SELECT COALESCE(SUM(applied_amount), 0) FROM payment_applications WHERE vendor_bill_id = ${bill.id}) AS settled`;
+  return Math.max(0, cents(Number(bill.total_amount) - Number(rows[0].settled)));
+}
+
+/** Writes one use of a credit. Callers hold the journal lock and have worked the amount out from the rows under it. */
+async function insertCreditApplication(tx: TransactionSql<{}>, creditMemoId: string, billId: string, amount: number): Promise<void> {
+  // A pair is written once in practice; adding on conflict keeps a second use of the same pair correct anyway.
+  await tx`
+    INSERT INTO credit_applications (id, credit_memo_id, vendor_bill_id, applied_amount)
+    VALUES (${randomUUID()}, ${creditMemoId}, ${billId}, ${amount})
+    ON CONFLICT (credit_memo_id, vendor_bill_id) DO UPDATE SET applied_amount = credit_applications.applied_amount + EXCLUDED.applied_amount`;
+}
+
+/**
+ * A credit memo that has just posted comes off its own invoice (related_invoice_id) by as much as is
+ * still open there, when that invoice is the same vendor's, in the same currency, and neither paid nor
+ * rejected. What is left comes off the vendor's later invoices (applyVendorCredits). Runs inside
+ * postBillApprovalInTx, under the journal lock.
+ */
+async function applyCreditToOwnInvoiceInTx(tx: TransactionSql<{}>, credit: { id: string; vendor_id: string; currency: string; total_amount: number; related_invoice_id: string | null }): Promise<void> {
+  if (!credit.related_invoice_id) return;
+  // FOR UPDATE: a reject of that invoice racing this waits, so "not void" is still true when the row is written.
+  const rows = await tx`SELECT id, vendor_id, currency, status, total_amount, invoice_type FROM vendor_bills WHERE id = ${credit.related_invoice_id} FOR UPDATE`;
+  const invoice = rows[0];
+  if (!invoice || invoice.invoice_type !== "standard" || invoice.vendor_id !== credit.vendor_id || invoice.currency !== credit.currency) return;
+  const amount = Math.min(cents(Number(credit.total_amount)), await openAmountOn(tx, invoice as any));
+  if (amount > 0) await insertCreditApplication(tx, credit.id, invoice.id, amount);
+}
+
+/** One credit memo's part in what is owed on an invoice. */
+export interface CreditUse {
+  creditMemoId: string;
+  creditMemoNumber: string;
+  amount: number;
+}
+
+/**
+ * Takes the vendor's unused approved credit off an invoice that has just been approved and posted,
+ * and returns every credit now taken off it (including any applied when a credit posted against it).
+ * Unused credit is each posted credit memo's total less its credit_applications rows; only credit in
+ * the invoice's own currency is used, oldest credit memo first (its invoice date, then when it was
+ * received), and never more than is still open on the invoice.
+ *
+ * One transaction under the journal lock, so two invoices approved at once cannot both use the same
+ * credit, and a credit posting at the same moment is either fully in or fully out. Running it again
+ * finds nothing open beyond what the payment covers and adds nothing, so re-running the audit stage
+ * is safe. Refuses a credit memo, an invoice not yet posted, and a rejected one: those use no credit.
+ */
+export async function applyVendorCredits(billId: string): Promise<CreditUse[]> {
+  return getSql().begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(${JOURNAL_LOCK_KEY})`;
+    const rows = await tx`SELECT id, vendor_id, currency, status, total_amount, invoice_type, journal_entry_id FROM vendor_bills WHERE id = ${billId} FOR UPDATE`;
+    if (rows.length === 0) throw new Error(`applyVendorCredits: no vendor_bill found with id '${billId}'`);
+    const bill = rows[0];
+    if (bill.invoice_type === "credit_memo") throw new Error(`applyVendorCredits: vendor_bill '${billId}' is a credit memo; credit is used against invoices, not other credits`);
+    if (bill.status === "void") throw new Error(`applyVendorCredits: vendor_bill '${billId}' was rejected (void) and uses no credit`);
+    if (!bill.journal_entry_id) throw new Error(`applyVendorCredits: vendor_bill '${billId}' is not posted yet`);
+
+    let open = await openAmountOn(tx, bill as any);
+    if (open > 0) {
+      const available = await tx`
+        SELECT cm.id, cm.total_amount - COALESCE(SUM(ca.applied_amount), 0) AS unused
+        FROM vendor_bills cm LEFT JOIN credit_applications ca ON ca.credit_memo_id = cm.id
+        WHERE cm.vendor_id = ${bill.vendor_id} AND cm.invoice_type = 'credit_memo' AND cm.journal_entry_id IS NOT NULL
+          AND cm.currency = ${bill.currency}
+        GROUP BY cm.id
+        HAVING cm.total_amount - COALESCE(SUM(ca.applied_amount), 0) > 0
+        ORDER BY cm.invoice_date, cm.received_at, cm.id`;
+      for (const credit of available) {
+        if (open <= 0) break;
+        const amount = Math.min(cents(Number(credit.unused)), open);
+        if (amount <= 0) continue;
+        await insertCreditApplication(tx, credit.id, billId, amount);
+        open = cents(open - amount);
+      }
+    }
+
+    const used = await tx`
+      SELECT ca.credit_memo_id, cm.invoice_number, ca.applied_amount FROM credit_applications ca
+      JOIN vendor_bills cm ON cm.id = ca.credit_memo_id
+      WHERE ca.vendor_bill_id = ${billId} ORDER BY cm.invoice_date, cm.received_at, cm.id`;
+    return used.map((r: any) => ({ creditMemoId: r.credit_memo_id, creditMemoNumber: r.invoice_number, amount: Number(r.applied_amount) }));
+  });
+}
+
+/** Where a credit memo's credit went: the invoices it came off, and what is still unused. */
+export async function creditMemoUses(sql: ISql<{}>, creditMemoId: string): Promise<{ uses: Array<{ invoiceNumber: string; amount: number }>; unused: number }> {
+  const credit = await sql`SELECT total_amount FROM vendor_bills WHERE id = ${creditMemoId}`;
+  if (credit.length === 0) throw new Error(`creditMemoUses: no vendor_bill found with id '${creditMemoId}'`);
+  const rows = await sql`
+    SELECT b.invoice_number, ca.applied_amount FROM credit_applications ca JOIN vendor_bills b ON b.id = ca.vendor_bill_id
+    WHERE ca.credit_memo_id = ${creditMemoId} ORDER BY ca.created_at, b.invoice_number`;
+  const uses = rows.map((r: any) => ({ invoiceNumber: r.invoice_number, amount: Number(r.applied_amount) }));
+  const unused = cents(Number(credit[0].total_amount) - uses.reduce((s, u) => s + u.amount, 0));
+  return { uses, unused: Math.max(0, unused) };
 }
 
 export interface PaymentDraftInput {
@@ -304,6 +412,7 @@ export interface PostResult {
 /**
  * Called by the pipeline's stage-7 "audit" node (BUILD.md §5.1) on auto-approve. Posts the
  * Dr Expense — Cr AP entry (Dr AP — Cr Expense for a credit memo) and marks the bill posted.
+ * A credit memo is also taken off its own invoice in the same transaction, if that is still unpaid.
  * Idempotent: a retried call for the same
  * billId returns the already-posted entry rather than inserting a second one, both via the
  * idempotency_key lookup and (belt-and-suspenders) via vendor_bills.journal_entry_id itself.
@@ -402,6 +511,7 @@ export async function postBillApprovalInTx(tx: TransactionSql<{}>, billId: strin
   await insertJournalEntryAndLines(tx, draft, entryId, entryNumber, periodId, postedAt);
 
   await tx`UPDATE vendor_bills SET journal_entry_id = ${entryId}, status = 'posted' WHERE id = ${billId}`;
+  if (bill.invoice_type === "credit_memo") await applyCreditToOwnInvoiceInTx(tx, bill as any);
 
   return { journalEntryId: entryId, alreadyPosted: false };
 }
@@ -414,7 +524,7 @@ export interface PaymentApplicationInput {
 /**
  * Posts the Dr AP — Cr Cash entry for a payment, writes payment_applications for each
  * application (split/partial payment across multiple vendor_bills), and flips each applied
- * bill to 'paid' once its cumulative applied amount plus the credit memos posted against it
+ * bill to 'paid' once its cumulative applied amount plus the credit applied to it (credit_applications)
  * cover its total_amount. Refuses to apply a payment to a credit memo. Idempotent the same way
  * as postBillApproval.
  *
@@ -494,8 +604,8 @@ export async function postPayment(paymentId: string, applications: PaymentApplic
 
     for (const app of resolvedApplications) {
       const sumRows = await tx`SELECT COALESCE(SUM(applied_amount), 0) as total FROM payment_applications WHERE vendor_bill_id = ${app.vendorBillId}`;
-      // Credit memos posted against the bill settle part of it too, so a bill paid net of its credits is fully paid.
-      const totalSettled = Number(sumRows[0].total) + await creditsPostedAgainst(tx, app.vendorBillId);
+      // Credit taken off the bill settles part of it too, so a bill paid net of its credits is fully paid.
+      const totalSettled = Number(sumRows[0].total) + await creditsAppliedTo(tx, app.vendorBillId);
       if (totalSettled >= app.totalAmount - BALANCE_EPSILON) {
         await tx`UPDATE vendor_bills SET status = 'paid' WHERE id = ${app.vendorBillId}`;
       }
