@@ -238,7 +238,7 @@ function choiceWords(inv: CaseLike): CaseExplanation['choices'] {
     approve: why('approve') ?? (inv.bankChange
       ? 'Unlocks only after the bank change is verified by phone and a second person signs off (steps above).'
       : `Posts ${amount} to the ledger as owed to ${inv.vendor}, then pays it (simulated: no money moves). Your name goes on the record.`),
-    reject: why('reject') ?? `Voids this invoice: ${amount} is never posted or paid. Use it for a duplicate, an overcharge you will not accept, or a bill nobody ordered.`,
+    reject: why('reject') ?? `Voids this invoice: ${amount} is never posted or paid. Use it for an overcharge you will not accept, or a bill nobody ordered.`,
     contest: why('contest') ?? 'Sends it back to the AI with your note, e.g. "the new price was agreed on 3 October". The AI re-reviews with it, but can only make the outcome stricter: it cannot approve what the rules flagged.',
   };
 }
