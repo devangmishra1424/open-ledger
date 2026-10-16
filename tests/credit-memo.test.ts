@@ -246,7 +246,18 @@ describe("an approved credit memo comes off what is paid on its invoice", () => 
     const r = await runMatchStage(secondCredit);
 
     expect(r.detail.creditMemoNetAmount).toBe(-500);
-    expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.stringContaining("USD 500.00 still open") }]);
+    expect(r.findings).toEqual([{
+      code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.stringContaining("USD 500.00 still open"),
+      // The same facts as figures for the screens: the credit, what is still open, and how much more it is.
+      shown: expect.objectContaining({
+        title: "Credit is more than is still owed on its invoice",
+        points: expect.arrayContaining([
+          expect.objectContaining({ label: "Credit on this document", value: "USD 1,000.00", wrong: true }),
+          expect.objectContaining({ value: "USD 500.00 still open" }),
+          expect.objectContaining({ label: "More than is open", value: "USD 500.00", wrong: true }),
+        ]),
+      }),
+    }]);
   });
 
   it("the match step: a credit against an invoice a person rejected has nothing to come off, so it goes to a person", async () => {
@@ -259,6 +270,12 @@ describe("an approved credit memo comes off what is paid on its invoice", () => 
     const r = await runMatchStage(creditId);
 
     expect(r.detail.creditMemoNetAmount).toBe(-500);
-    expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.stringContaining("which was rejected, so nothing was ever owed on it") }]);
+    expect(r.findings).toEqual([{
+      code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.stringContaining("which was rejected, so nothing was ever owed on it"),
+      shown: expect.objectContaining({
+        title: "Credit against an invoice that was rejected",
+        points: expect.arrayContaining([expect.objectContaining({ value: "Rejected: nothing was ever owed on it", wrong: true })]),
+      }),
+    }]);
   });
 });
