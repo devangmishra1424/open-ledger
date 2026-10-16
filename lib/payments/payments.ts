@@ -97,16 +97,16 @@ export async function settleApprovedBill(billId: string): Promise<Settlement> {
   return { kind: "paid", payment: await triggerPayment(billId, owed), amount: owed, credited };
 }
 
-/** One sentence for the trail when settling was not simply "paid in full"; null when it was. */
+/** One sentence for the trail when settling was not simply "paid in full"; null when it was. No "Label:" opening: the trail shows those as headings. */
 export function settlementNote(s: Settlement, currency: string): string | null {
   switch (s.kind) {
     case "credit_memo":
-      return "This is a credit memo: posting it lowered what is owed to the vendor. Nothing is paid.";
+      return "A credit memo is never paid. Posting it lowered what is owed to the vendor.";
     case "covered_by_credit":
       return `Credit memos of ${money(s.credited, currency)} posted against this invoice cover all of it. Nothing is paid.`;
     case "paid":
       return s.credited > 0
-        ? `Paid ${money(s.amount, currency)}: the total less ${money(s.credited, currency)} of credit memos posted against it.`
+        ? `Paid ${money(s.amount, currency)}, the total less ${money(s.credited, currency)} of credit memos posted against it.`
         : null;
   }
 }

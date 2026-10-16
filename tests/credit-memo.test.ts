@@ -154,7 +154,7 @@ describe("a credit memo is never paid", () => {
     expect(settled.nodeId).toBe("audit");
     expect(settled.parentDecisionId).toBe(human.id);
     expect(settled.actionTaken).toBe("no_payment");
-    expect(settled.claims?.[0].text).toMatch(/credit memo.*Nothing is paid/);
+    expect(settled.claims?.[0].text).toBe("A credit memo is never paid. Posting it lowered what is owed to the vendor.");
   });
 
   it("approving it twice (a double-click) still pays nothing", async () => {
@@ -183,7 +183,7 @@ describe("a credit memo is never paid", () => {
     const audit = await runAuditStage(creditId, policy);
 
     expect(audit.actionTaken).toBe("auto_approve");
-    expect(audit.claims?.[0].text).toMatch(/credit memo.*Nothing is paid/);
+    expect(audit.claims?.[0].text).toBe("A credit memo is never paid. Posting it lowered what is owed to the vendor.");
     expect(await paymentRowCount()).toBe(before);
     expect(await paymentsFor(creditId)).toHaveLength(0);
     expect(await postingLines(creditId)).toEqual([["2000", 1500, 0], ["6000", 0, 1500]]);
@@ -205,7 +205,7 @@ describe("an approved credit memo comes off what is paid on its invoice", () => 
     expect(await statusOf(invoiceId)).toBe("paid");
     const trail = await getDecisionsForInvoice(invoiceId);
     expect(trail[trail.length - 1].actionTaken).toBe("paid_less_credit");
-    expect(trail[trail.length - 1].claims?.[0].text).toBe("Paid USD 1,000.00: the total less USD 200.00 of credit memos posted against it.");
+    expect(trail[trail.length - 1].claims?.[0].text).toBe("Paid USD 1,000.00, the total less USD 200.00 of credit memos posted against it.");
   });
 
   it("when credits cover the whole invoice, approving it pays nothing", async () => {
