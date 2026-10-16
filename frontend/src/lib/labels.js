@@ -19,7 +19,7 @@ const ACTION_WORDS = {
   block: 'Blocked',
   block_fraud_flag: 'Blocked: fraud flag',
   escalate_l1: 'Sent to a reviewer',
-  escalate_l2: 'Sent to a senior reviewer',
+  escalate_l2: 'Sent to a reviewer (level 2)',
   auto_approve: 'Approved automatically',
   auto_reject: 'Rejected automatically',
   error: 'Failed',
@@ -36,10 +36,15 @@ export function normalizeAction(action) {
   return action ? action.trim().toLowerCase().replace(/[-\u2010-\u2015\s]+/g, '_') : action;
 }
 
+/** Text that is none of the codes above, such as an AI recommendation written as advice. */
+const FREE_TEXT = 'Free-text advice, not one of the system’s routes';
+
 export function actionWords(action) {
   if (!action) return 'No action recorded';
   const key = normalizeAction(action);
-  return ACTION_WORDS[key] ?? key.replace(/_/g, ' ');
+  // Older AI records hold advice ("Escalate to the fraud team…") where a route belongs. It is not
+  // something the system did or can do, so it is not shown as if it were an outcome.
+  return ACTION_WORDS[key] ?? FREE_TEXT;
 }
 
 /** The headline result of one recorded step, worded for what that kind of step does. */
@@ -50,8 +55,11 @@ export function outcomeWords(decision) {
   if (decision.nodeId === 'audit' && ['block', 'block_fraud_flag', 'escalate_l1', 'escalate_l2'].includes(a)) return 'Not posted: held for a person';
   if (decision.nodeId === 'audit' && a === 'auto_reject') return 'Not posted: rejected';
   if (decision.nodeId === 'policy') return `Decided: ${actionWords(a).toLowerCase()}`;
-  if (decision.nodeId === 'investigate') return `Recommended: ${actionWords(a).toLowerCase()}`;
-  if (decision.nodeId === 'verify') return a === 'disagreement' ? 'Disagreed with the first AI' : `Agreed: ${actionWords(a).toLowerCase()}`;
+  if (decision.nodeId === 'investigate') return ACTION_WORDS[a] ? `Recommended: ${actionWords(a).toLowerCase()}` : `Recommended in free text, not one of the system’s routes`;
+  if (decision.nodeId === 'verify') {
+    if (a === 'disagreement') return 'Disagreed with the first AI';
+    return ACTION_WORDS[a] ? `Agreed: ${actionWords(a).toLowerCase()}` : 'Agreed with the first AI';
+  }
   return actionWords(a);
 }
 

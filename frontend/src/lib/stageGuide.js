@@ -46,7 +46,7 @@ export const STAGE_GUIDE = {
     kind: 'ai',
     what: 'A different AI model, from another model family, checks the first AI’s conclusion independently.',
     why: 'Two different models rarely make the same mistake. If they disagree, the stricter view wins.',
-    when: 'Only on serious cases: when the outcome would be a senior review or a block.',
+    when: 'Only on serious cases: when the outcome would be a level 2 review or a block.',
   },
   policy: {
     name: 'Approval rules',

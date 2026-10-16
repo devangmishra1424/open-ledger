@@ -62,7 +62,7 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
   const priorCount = await countReconsiderations(input.originalDecisionId);
   if (priorCount >= MAX_RECONSIDERATIONS) {
     return {
-      error: "This has been reconsidered 3 times already — escalating to a senior reviewer instead of re-running the agent again.",
+      error: "The AI has re-reviewed this 3 times already, so it is not run again. A person decides it.",
       action: "escalate_senior",
     };
   }

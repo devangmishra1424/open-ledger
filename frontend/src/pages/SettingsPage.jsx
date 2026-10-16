@@ -74,7 +74,7 @@ export default function SettingsPage() {
               : <span style={{ color: 'var(--vb-danger)' }}>Not configured: documents the template cannot read, and every AI step, will fail</span>}</dd>
             <dt>Reads documents</dt><dd><span className="vb-mono">{system.llm.models.extractor}</span> <div className="vb-dim vb-small">Only when the fixed template parser cannot read a document. Its reading is checked: lines must add up to the totals.</div></dd>
             <dt>Investigates exceptions</dt><dd><span className="vb-mono">{system.llm.models.investigator}</span> <div className="vb-dim vb-small">Looks up vendor history, duplicates and past corrections with real tools, and recommends. It can only make an outcome stricter.</div></dd>
-            <dt>Double-checks</dt><dd><span className="vb-mono">{system.llm.models.verifier}</span> <div className="vb-dim vb-small">A different model family on purpose, so the two rarely make the same mistake. Runs only on serious cases (a senior review or a block); if it disagrees, the stricter view wins.</div></dd>
+            <dt>Double-checks</dt><dd><span className="vb-mono">{system.llm.models.verifier}</span> <div className="vb-dim vb-small">A different model family on purpose, so the two rarely make the same mistake. Runs only on serious cases (a level 2 review or a block); if it disagrees, the stricter view wins.</div></dd>
             <dt>Payments</dt><dd><strong>{system.paymentRail.mode === 'simulated' ? 'Simulated' : system.paymentRail.mode}</strong>. Payments are recorded and posted to the ledger; no money moves.</dd>
             <dt>Vendor callbacks</dt><dd>Made by a person. No automated call is placed; the person records the answer and a second person signs off.</dd>
             <dt>Sign-in</dt>

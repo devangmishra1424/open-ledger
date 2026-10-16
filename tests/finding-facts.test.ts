@@ -31,7 +31,7 @@ describe("finding facts", () => {
     expect(s).toContain("refers to no purchase order");
     expect(s).toContain("At USD 2,149.20 it falls in the USD 1,000.01 to 10,000 band");
     expect(s).toContain("vendor trust tier: new");
-    expect(s.endsWith("This invoice was sent to a senior reviewer.")).toBe(true);
+    expect(s.endsWith("This invoice was sent to a reviewer at level 2.")).toBe(true);
     const printed = facts.nonPoFact({ amount: 50, currency: "USD", printedPoReference: "PO-77", trustTier: "trusted", action: "auto_approve" });
     expect(printed).toContain("prints purchase order PO-77, but no such order is on file");
     expect(printed).toContain("up to USD 100 band");
@@ -51,7 +51,7 @@ describe("finding facts", () => {
     expect(alone.endsWith("This invoice was blocked.")).toBe(true);
     const cumulative = facts.blanketValueFact({ poNumber: "PO-1", ceiling: 10000, prior: 9500, current: 1000, currency: "USD", action: evaluateBlanketExceeded(0.05) });
     expect(cumulative).toContain("Earlier cleared invoices on it total USD 9,500.00; with this one (USD 1,000.00)");
-    expect(cumulative.endsWith("This invoice was sent to a senior reviewer.")).toBe(true);
+    expect(cumulative.endsWith("This invoice was sent to a reviewer at level 2.")).toBe(true);
   });
 
   it("quantity: ordered, received in good condition, billed before and now, and the excess's value", () => {
@@ -71,7 +71,7 @@ describe("finding facts", () => {
 
   it("credit memo: whether it fits inside the open invoice", () => {
     expect(facts.creditMemoFact({ credit: 2000, currency: "USD", relatedNumber: "INV-2024-0847", relatedStatus: "paid", openAmount: 0, net: -2000, action: "escalate_l1" }))
-      .toContain("against invoice INV-2024-0847, which is already paid, so nothing is left open to net it against. USD 2,000.00 of the credit has nothing to net against");
+      .toContain("against invoice INV-2024-0847, which is already paid, so nothing is left open on it. USD 2,000.00 of the credit is more than is open on that invoice, so a person decides it");
     expect(facts.creditMemoFact({ credit: 200, currency: "USD", relatedNumber: "INV-1", relatedStatus: "posted", openAmount: 1000, net: 800, action: "auto_approve" }))
       .toContain("which has USD 1,000.00 still open. It fits inside the open amount (leaving USD 800.00)");
   });

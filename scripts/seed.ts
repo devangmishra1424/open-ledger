@@ -259,12 +259,12 @@ async function seedPbcRequests(): Promise<void> {
   console.log("Seeding PBC (Provided-By-Client) audit requests...");
   await sql`
     INSERT INTO pbc_requests (id, item_type, description, due_date, owner_name, status, linked_invoice_ids, created_at) VALUES
-      (${randomUUID()}, 'invoice_bundle', 'Q3 Cloud Infrastructure & Capital Asset Vendor Invoices Sample',
+      (${randomUUID()}, 'invoice_bundle', 'Sample of Q3 cloud infrastructure invoices: show how each was approved',
         ${daysAgo(-14)}, 'External Auditor (E. Vance)', 'submitted', ${cloudBundle.join(",")}, ${daysAgo(5)}),
-      (${randomUUID()}, 'tie_out_check', 'Vendor Wire Route Alterations & Anti-Fraud Whitelist Audit',
-        ${daysAgo(-7)}, 'SOX Compliance Team', 'open', ${fraudBundle.join(",")}, ${daysAgo(2)}),
-      (${randomUUID()}, 'ap_aging', 'High-Value Disbursements & Blanket PO Overage Review',
-        ${daysAgo(-10)}, 'Internal Audit Committee', 'assembled', ${highValueBundle.join(",")}, ${daysAgo(3)})
+      (${randomUUID()}, 'invoice_bundle', 'Invoices from a vendor whose bank details changed: show the callback and sign-off',
+        ${daysAgo(-7)}, 'Internal Audit', 'open', ${fraudBundle.join(",")}, ${daysAgo(2)}),
+      (${randomUUID()}, 'invoice_bundle', 'High-value invoices and a blanket order over its ceiling: show why each was held',
+        ${daysAgo(-10)}, 'Internal Audit', 'assembled', ${highValueBundle.join(",")}, ${daysAgo(3)})
   `;
   console.log("PBC seed complete.");
 }

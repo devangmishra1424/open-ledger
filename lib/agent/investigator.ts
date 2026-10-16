@@ -55,7 +55,7 @@ export async function investigate(invoiceId: string, matchResult: unknown, human
  * The tool schema constrains recommended_action to the six actions, but a provider may not enforce
  * an enum, so the value is checked here too. Spelling noise ("Escalate-L2") is stored as the action
  * it names. Anything else (prose) is kept word for word rather than dropped or guessed at: policy
- * then holds the invoice for a person, who can read it. A missing or non-string value is a malformed
+ * then holds the invoice for a person. A missing or non-string value is a malformed
  * submission and fails the stage, which runInvestigateStage records as an agent error (a block).
  */
 function readRecommendedAction(invoiceId: string, value: unknown): string {

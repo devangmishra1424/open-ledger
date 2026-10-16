@@ -97,7 +97,8 @@ describe("runPipeline: a prose recommendation is never silently dropped", () => 
     expect(decisions.find((d) => d.nodeId === "investigate")?.actionTaken).toBe(FRAUD_PROSE); // what the model said, on the record
     const policy = decisions.find((d) => d.nodeId === "policy")!;
     expect(policy).toMatchObject({ actionTaken: "escalate_l1", reasonCode: "INVESTIGATOR_HOLD" });
-    expect(policy.claims?.[0].text).toContain(`"${FRAUD_PROSE}"`);
+    expect(policy.claims?.[0].text).toMatch(/not one of the actions the system can apply: it was written as free-text advice/);
+    expect(policy.claims?.[0].text).not.toContain("fraud review team"); // advice the system cannot carry out is not repeated
 
     expect((await sql`SELECT status FROM vendor_bills WHERE id = ${billId}`)[0].status).toBe("exception");
     expect(await sql`SELECT 1 FROM journal_entries WHERE source_type = 'vendor_bill' AND source_id = ${billId}`).toHaveLength(0);

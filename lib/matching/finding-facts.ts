@@ -14,7 +14,7 @@ import type { Action } from "@/lib/matching/decision-matrix";
 const ROUTE: Record<Action, string> = {
   auto_approve: "approved automatically",
   escalate_l1: "sent to a reviewer",
-  escalate_l2: "sent to a senior reviewer",
+  escalate_l2: "sent to a reviewer at level 2",
   block: "blocked",
   auto_reject: "rejected automatically",
   block_fraud_flag: "blocked as possible fraud",
@@ -28,7 +28,7 @@ const pct = (x: number) => `${(x * 100).toLocaleString("en-US", { maximumFractio
 const qty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 const quote = (s: string) => `"${s}"`;
 
-/** "This invoice was sent to a senior reviewer." — the engine's actual outcome for this finding. */
+/** "This invoice was sent to a reviewer at level 2." — the engine's actual outcome for this finding. */
 const outcome = (action: Action) => `This invoice was ${ROUTE[action]}.`;
 
 export function priceVarianceFact(p: {
@@ -56,7 +56,7 @@ export function unmatchedLinesFact(p: {
 }): string {
   const list = p.lines.map((l) => `${quote(l.description)} (${qty(l.qty)} x ${money(l.unitPrice, p.currency)} = ${money(l.amount, p.currency)})`).join("; ");
   return `${p.lines.length === 1 ? "One invoice line is" : `${p.lines.length} invoice lines are`} not on purchase order ${p.poNumber} at all: ${list}. ` +
-    `${money(p.total, p.currency)} is billed for things nobody ordered. Such lines are never approved automatically: up to ${p.currency} 1,000 a reviewer decides, up to ${p.currency} 10,000 a senior reviewer, above that it is blocked. ${outcome(p.action)}`;
+    `${money(p.total, p.currency)} is billed for things nobody ordered. Such lines are never approved automatically: up to ${p.currency} 1,000 a reviewer decides, up to ${p.currency} 10,000 a reviewer at level 2, above that it is blocked. ${outcome(p.action)}`;
 }
 
 export function uomMismatchFact(p: {
@@ -64,7 +64,7 @@ export function uomMismatchFact(p: {
 }): string {
   return `Invoice line ${quote(p.invoiceDescription)} is billed per ${p.invoiceUom}; it looks like PO line ${p.poLineNumber} ${quote(p.poDescription)}, which is ordered per ${p.poUom}, and no conversion between the two is on file for this vendor. ` +
     (p.plausible
-      ? `The two units measure the same kind of thing, so a person can confirm the conversion. ${outcome(p.action)}`
+      ? `The two units measure the same kind of thing, so a reviewer decides whether they match. ${outcome(p.action)}`
       : `The two units do not measure the same kind of thing, so the quantities cannot be compared. ${outcome(p.action)}`);
 }
 
@@ -80,13 +80,13 @@ export function blanketValueFact(p: { poNumber: string; ceiling: number; prior: 
   const over = total - p.ceiling;
   const before = p.prior > 0 ? `Earlier cleared invoices on it total ${money(p.prior, p.currency)}; with this one (${money(p.current, p.currency)})` : `This invoice alone (${money(p.current, p.currency)})`;
   return `Blanket order ${p.poNumber} may be billed up to ${money(p.ceiling, p.currency)} in total. ${before} the order reaches ${money(total, p.currency)}, ${money(over, p.currency)} (${pct(over / p.ceiling)}) over the ceiling. ` +
-    `Up to 10% over, a senior reviewer decides; more than 10% is blocked. ${outcome(p.action)}`;
+    `Up to 10% over, a reviewer decides at level 2; more than 10% is blocked. ${outcome(p.action)}`;
 }
 
 export function blanketQtyFact(p: { poNumber: string; ceiling: number; prior: number; current: number; action: Action }): string {
   const total = p.prior + p.current;
   return `Blanket order ${p.poNumber} may be billed for at most ${qty(p.ceiling)} units in total. ${qty(p.prior)} were billed before and ${qty(p.current)} on this invoice, ${qty(total)} in all: ${qty(total - p.ceiling)} (${pct((total - p.ceiling) / p.ceiling)}) over. ` +
-    `Up to 10% over, a senior reviewer decides; more than 10% is blocked. ${outcome(p.action)}`;
+    `Up to 10% over, a reviewer decides at level 2; more than 10% is blocked. ${outcome(p.action)}`;
 }
 
 export function beforeReceiptFact(p: { poNumber: string; invoiceDate: string; earliestReceipt: string | null; gapDays?: number; action: Action }): string {
@@ -103,7 +103,7 @@ export function currencyFact(p: { billCurrency: string; poCurrency: string; poNu
     return `The invoice is in ${p.billCurrency} but purchase order ${p.poNumber} was placed in ${p.poCurrency}. This system does not convert between currencies, so the amounts cannot be compared. ${outcome(p.action)}`;
   }
   return `Invoice and purchase order ${p.poNumber} are both in ${p.billCurrency}, but the invoice uses an exchange rate of ${p.billRate} against the order's ${p.poRate} (${pct(p.ratePct)} apart). ` +
-    `More than 1% apart goes to a senior reviewer, otherwise to a reviewer. ${outcome(p.action)}`;
+    `More than 1% apart goes to a reviewer at level 2, otherwise to a reviewer. ${outcome(p.action)}`;
 }
 
 export function nonPoFact(p: { amount: number; currency: string; printedPoReference: string | null; trustTier: string; action: Action }): string {
@@ -115,7 +115,7 @@ export function nonPoFact(p: { amount: number; currency: string; printedPoRefere
     : p.amount <= 10000 ? `${p.currency} 1,000.01 to 10,000`
     : `over ${p.currency} 10,000`;
   return `${why} At ${money(p.amount, p.currency)} it falls in the ${band} band for non-PO spend (vendor trust tier: ${p.trustTier}). ` +
-    `Only up to ${p.currency} 100 from a trusted vendor is approved on its own; up to 1,000 a reviewer decides, up to 10,000 a senior reviewer, above that it is blocked. ${outcome(p.action)}`;
+    `Only up to ${p.currency} 100 from a trusted vendor is approved on its own; up to 1,000 a reviewer decides, up to 10,000 a reviewer at level 2, above that it is blocked. ${outcome(p.action)}`;
 }
 
 export function noPoFact(p: { poReference: string; poStatus: string; action: Action }): string {
@@ -127,11 +127,11 @@ export function creditMemoFact(p: {
   credit: number; currency: string; relatedNumber: string | null; relatedStatus: string; openAmount: number; net: number; action: Action;
 }): string {
   const target = p.relatedNumber ? `invoice ${p.relatedNumber}` : "the related invoice";
-  const open = p.relatedStatus === "paid" ? `which is already paid, so nothing is left open to net it against` : `which has ${money(p.openAmount, p.currency)} still open`;
+  const open = p.relatedStatus === "paid" ? `which is already paid, so nothing is left open on it` : `which has ${money(p.openAmount, p.currency)} still open`;
   return `This is a credit of ${money(p.credit, p.currency)} against ${target}, ${open}. ` +
     (p.net >= 0
       ? `It fits inside the open amount (leaving ${money(p.net, p.currency)}). ${outcome(p.action)}`
-      : `${money(-p.net, p.currency)} of the credit has nothing to net against, so a person decides where it goes. ${outcome(p.action)}`);
+      : `${money(-p.net, p.currency)} of the credit is more than is open on that invoice, so a person decides it. ${outcome(p.action)}`);
 }
 
 export function bankChangeFact(p: { status: string; action: Action }): string {

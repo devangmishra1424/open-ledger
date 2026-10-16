@@ -97,26 +97,24 @@ describe("the Investigator's recommendation can only tighten the outcome", () =>
   // Regression: the live demo invoice NW-H22257. Text that is not an action used to be ignored, so a
   // clean match came out auto_approve and only the Settings confidence limit happened to stop it.
   const fraudProse = "Escalate to fraud review team for manual verification and hold payment pending resolution.";
-  it("a prose recommendation is not dropped: a clean match is held for a person, and the text is on the record", () => {
+  it("a prose recommendation is not dropped: a clean match is held for a person, and the hold is on the record", () => {
     const r = computePolicyAction(clean, undefined, fraudProse);
     expect(r).toMatchObject({ action: "escalate_l1", heldByInvestigator: true });
-    expect(r.claims[0].text).toContain(`"${fraudProse}"`);
-    expect(r.claims[0].text).toMatch(/not one of the actions.*held for a person \(escalate_l1, stricter than the rules' auto_approve\)/);
+    expect(r.claims[0].text).toMatch(/not one of the actions.*free-text advice.*held for a person \(escalate_l1, stricter than the rules' auto_approve\)/);
+  });
+  it("the advice itself is not repeated in the policy record: it names steps the system cannot carry out", () => {
+    const r = computePolicyAction(clean, undefined, fraudProse);
+    expect(r.claims[0].text).not.toContain("fraud review team");
   });
   it("prose that sounds like an approval is not guessed at either: it is held, never read as auto_approve", () => {
     expect(computePolicyAction(clean, undefined, "Approve the invoice for payment.")).toMatchObject({ action: "escalate_l1", heldByInvestigator: true });
     expect(computePolicyAction(clean, undefined, "hold for review")).toMatchObject({ action: "escalate_l1", heldByInvestigator: true });
     expect(computePolicyAction(clean, undefined, "")).toMatchObject({ action: "escalate_l1", heldByInvestigator: true });
   });
-  it("prose cannot loosen a stricter rule outcome, and is still recorded for the reviewer", () => {
+  it("prose cannot loosen a stricter rule outcome, and is still recorded as not applied", () => {
     const r = computePolicyAction(blockedQty, undefined, "Approve the invoice for payment.");
     expect(r).toMatchObject({ action: "block", heldByInvestigator: false });
-    expect(r.claims[0].text).toMatch(/"Approve the invoice for payment\."\. The rules' block is already at least as strict/);
-  });
-  it("a very long recommendation is quoted on one line and cut short, not copied whole into the claim", () => {
-    const r = computePolicyAction(clean, undefined, `Hold it.\n${"x".repeat(1000)}`);
-    expect(r.claims[0].text).toContain(`"Hold it. ${"x".repeat(191)}…"`);
-    expect(r.claims[0].text).not.toContain("x".repeat(192));
+    expect(r.claims[0].text).toMatch(/free-text advice\. The rules' block is already at least as strict/);
   });
   it("evaluatePolicy holds a clean match with prose as INVESTIGATOR_HOLD however generous the Settings limits", async () => {
     await putSettings(new Request("http://t/x", { method: "PUT", body: JSON.stringify({ maxAutoPaymentAmount: 1e9, autoApprovalConfidence: 0 }) }), undefined as never);

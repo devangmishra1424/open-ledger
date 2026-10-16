@@ -30,15 +30,17 @@ const CHAIN = [
 
 const STEPS = [
   ['i', 'Read', 'A template parser reads the invoice first; a model only when the layout is new. Anything read with less than 85% confidence goes to a person, never through.'],
-  ['ii', 'Match', 'Rules compare it line by line with the purchase order and with what was actually received: price, quantity, receipt date, currency, tax, unit of measure, lines nobody ordered. Fifteen exception rules, all in one table.'],
-  ['iii', 'Review', 'Two AI reviewers from different model families look for what rules cannot see, like a near-duplicate or an odd vendor history. They can only make a decision stricter, never approve one.'],
+  ['ii', 'Match', 'Rules compare it line by line with the purchase order and with what was actually received: price, quantity, receipt date, currency, unit of measure, lines nobody ordered, blanket-order ceilings and bank-detail changes. Every exception and its route sit in one table.'],
+  ['iii', 'Review', 'An AI reviewer looks for what rules cannot see, like a near-duplicate or an odd vendor history; on serious cases a second one, from a different model family, checks it. AI can only make a decision stricter, never approve one.'],
   ['iv', 'Record', 'A person decides anything unusual. Every step, human or machine, is written to a hash-chained trail where changing one record breaks every link after it.'],
 ];
 
 const LIMITS = [
   'Payments are simulated. Approved bills post to a real double-entry ledger, but no money moves.',
   'The tolerances come from a written matching spec, not from your company’s own policy. They are one table to change.',
-  'Text PDFs only. A scanned invoice is refused with a reason, not guessed at.',
+  'Scans and photos are read by OCR, and every line must add up before an invoice is saved; a field the reader is unsure of is marked for a person to check, not guessed.',
+  'No reviewer roles yet: any reviewer can decide any held invoice. "Level 2" marks the larger or riskier cases; it does not route them to someone else.',
+  'Tax is not checked line by line, and a credit memo is checked against its invoice but not applied to a payment.',
   'The audit trail is tamper-evident, not tamper-proof: it shows that a record changed, not who changed it.',
 ];
 

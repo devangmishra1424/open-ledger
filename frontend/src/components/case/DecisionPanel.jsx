@@ -91,7 +91,7 @@ export default function DecisionPanel({ invoice }) {
           <label className="vb-field">
             <span>{form === 'contest' ? 'What should it reconsider? (required)' : 'Note (optional)'}</span>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={form === 'contest' ? 1000 : 2000}
-              placeholder={form === 'contest' ? 'e.g. The vendor confirmed the new unit price in writing on 3 Oct.' : form === 'reject' ? 'Why are you rejecting it?' : 'e.g. Price confirmed with the vendor.'} />
+              placeholder={form === 'contest' ? 'e.g. The new unit price was agreed on 3 Oct.' : form === 'reject' ? 'Why are you rejecting it?' : 'e.g. The new price was agreed before ordering.'} />
             {form === 'contest' && <span className="vb-field-hint">At least 10 characters.</span>}
           </label>
           <div className="vb-action-form-actions">

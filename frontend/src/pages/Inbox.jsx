@@ -12,7 +12,7 @@ const TABS = [
   { key: 'needs_attention', label: 'Needs attention', test: (i) => i.state === 'needs_attention', help: 'Held by a rule or the AI. Nothing here is paid until a person approves it.' },
   { key: 'processing', label: 'Processing', test: (i) => i.state === 'processing', help: 'The automatic checks are still running; this takes a few seconds.' },
   { key: 'done', label: 'Done', test: (i) => i.state === 'approved' || i.state === 'paid', help: 'Approved and posted to the ledger, either automatically (a clean match) or by a person.' },
-  { key: 'rejected', label: 'Rejected', test: (i) => i.state === 'rejected', help: 'Voided by a person or by the rules (for example a duplicate). Never posted or paid.' },
+  { key: 'rejected', label: 'Rejected', test: (i) => i.state === 'rejected', help: 'Rejected by a person: voided, never posted or paid. (A repeated invoice number is refused when it is entered, so it never reaches the queue.)' },
   { key: 'all', label: 'All', test: () => true, help: 'Every invoice, newest first.' },
 ];
 

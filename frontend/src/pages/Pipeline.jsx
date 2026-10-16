@@ -7,7 +7,7 @@ import { STAGE_GUIDE, KIND_LABEL } from '../lib/stageGuide';
 function reading(a) {
   if (a.totalProcessed === 0) {
     return a.id === 'verify'
-      ? 'Has not run yet: it only runs on serious cases (a senior review or a block), so a quiet count here is normal.'
+      ? 'Has not run yet: it only runs on serious cases (a level 2 review or a block), so a quiet count here is normal.'
       : 'Has not run yet.';
   }
   const parts = [`Ran ${a.totalProcessed} time${a.totalProcessed === 1 ? '' : 's'}.`];

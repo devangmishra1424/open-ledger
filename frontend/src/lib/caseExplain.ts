@@ -71,15 +71,15 @@ const SEVERITY: Record<string, number> = { auto_approve: 0, escalate_l1: 1, esca
 const ROUTES: Record<string, Route> = {
   auto_approve: { label: 'Approved automatically', meaning: 'Every check passed, so no person was needed.', tone: 'good' },
   escalate_l1: { label: 'Reviewer', meaning: 'Routed to a reviewer: a person approves, rejects or challenges it. Nothing is paid until then.', tone: 'warn' },
-  escalate_l2: { label: 'Senior reviewer', meaning: 'Routed to a senior reviewer, the level for larger or riskier cases. Nothing is paid until a person decides.', tone: 'warn' },
-  block: { label: 'Blocked', meaning: 'Blocked: payment is frozen. A person has to clear the problem before anything is paid.', tone: 'bad' },
+  escalate_l2: { label: 'Reviewer, level 2', meaning: 'Routed to a reviewer at level 2, the level the rules give larger or riskier cases. There are no reviewer roles yet, so any reviewer can decide it. Nothing is paid until a person decides.', tone: 'warn' },
+  block: { label: 'Blocked', meaning: 'Blocked: nothing is paid unless a person approves it.', tone: 'bad' },
   block_fraud_flag: { label: 'Fraud hold', meaning: 'Held as possible payment fraud: nothing is paid to this vendor until the bank change is verified by phone and signed off by a second person.', tone: 'bad' },
   auto_reject: { label: 'Rejected automatically', meaning: 'Rejected by the rules without a person: it will not be posted or paid.', tone: 'bad' },
 };
 
 /** An AI reviewer's recommended action, as the end of "recommended ...". */
 const RECOMMENDS: Record<string, string> = {
-  auto_approve: 'approving it automatically', escalate_l1: 'sending it to a reviewer', escalate_l2: 'sending it to a senior reviewer',
+  auto_approve: 'approving it automatically', escalate_l1: 'sending it to a reviewer', escalate_l2: 'sending it to a reviewer at level 2',
   block: 'blocking it', auto_reject: 'rejecting it', block_fraud_flag: 'holding it as possible fraud',
 };
 
@@ -140,7 +140,7 @@ function derivedFacts(code: string, inv: CaseLike): string[] {
       const billed = tw?.unmatchedInvoiceLines ?? [];
       const open = (tw?.lines ?? []).filter((l) => !l.invoice);
       if (billed.length === 0 || open.length === 0) return [];
-      return [`Invoice line "${billed[0].description}" is billed per ${billed[0].uom}, while the order line it looks like, "${open[0].description}", is per ${open[0].uom}, and no conversion between the two is on file for this vendor. The quantities cannot be compared until someone confirms the conversion.`];
+      return [`Invoice line "${billed[0].description}" is billed per ${billed[0].uom}, while the order line it looks like, "${open[0].description}", is per ${open[0].uom}, and no conversion between the two is on file for this vendor, so the quantities cannot be compared automatically.`];
     }
     case 'EXC-BLANKET_EXCEEDED':
       return tw?.ceiling != null
@@ -152,7 +152,7 @@ function derivedFacts(code: string, inv: CaseLike): string[] {
         : 'The invoice refers to no purchase order, so there is no agreed price, quantity or delivery to compare it with.';
       const band = inv.amount <= 100 ? 'up to $100: approved on its own only for a trusted vendor'
         : inv.amount <= 1000 ? '$100.01 to $1,000: a reviewer decides'
-        : inv.amount <= 10000 ? '$1,000.01 to $10,000: a senior reviewer decides'
+        : inv.amount <= 10000 ? '$1,000.01 to $10,000: a reviewer decides, at level 2'
         : 'over $10,000: blocked';
       return [`${why} At ${money(inv.amount, inv.currency)} it falls in the non-PO band ${band}.`];
     }
@@ -163,7 +163,7 @@ function derivedFacts(code: string, inv: CaseLike): string[] {
         ? [`The invoice is in ${inv.currency} but purchase order ${tw.poNumber} is in ${tw.currency}. This system does not convert between currencies.`]
         : [];
     case 'EXC-CREDIT_MEMO':
-      return [`This is a credit of ${money(inv.amount, inv.currency)} from ${inv.vendor}: money they owe you. It has to be netted against an open invoice from them, and there was not enough left open on the related invoice to absorb it automatically.`];
+      return [`This is a credit of ${money(inv.amount, inv.currency)} from ${inv.vendor}: money they owe you. It is larger than what is still open on the invoice it relates to, so a person decides it.`];
     default:
       return [];
   }
@@ -194,16 +194,24 @@ function aiStory(inv: CaseLike, matchAction: string | null, policyAction: string
   const inv1 = last(inv.decisions, (d) => d.nodeId === 'investigate');
   const ver = last(inv.decisions, (d) => d.nodeId === 'verify');
   if (!inv1 && !ver) {
-    out.push(inv.state === 'processing' ? 'The AI steps have not run yet.' : 'No AI looked at this invoice: a rule settled it first. Rules always run before any AI, and some findings (a bank change, a duplicate, an unreadable document, a missing order) stop the line on their own.');
+    out.push(inv.state === 'processing' ? 'The AI steps have not run yet.' : 'No AI looked at this invoice: a rule settled it first. Rules always run before any AI, and some findings (a bank change, an unreadable document, a missing order) stop the line on their own.');
     return out;
   }
   if (inv1) {
     if (norm(inv1.actionTaken) === 'error') out.push(`The AI reviewer could not finish: ${inv1.claims[0] ?? 'the step failed'}`);
     else {
-      const rec = RECOMMENDS[norm(inv1.actionTaken)] ?? `"${(inv1.actionTaken ?? '').replace(/\.$/, '')}"`;
+      const rec = RECOMMENDS[norm(inv1.actionTaken)] ?? 'in free text instead of one of the system\'s routes';
       out.push(`The AI reviewer${inv1.model ? ` (${inv1.model})` : ''} looked up the vendor's history, duplicates and past corrections, and recommended ${rec}${inv1.confidence != null ? `, reporting itself ${inv1.confidence}% sure` : ''}.`);
-      // A recommendation written as prose is not one of the routes the policy step can apply (decision-matrix parseRecommendedAction).
-      if (!RECOMMENDS[norm(inv1.actionTaken)]) out.push('That recommendation was written as free text rather than one of the system\'s routes, so it is shown here for the reviewer but could not change the route by itself.');
+      // Free text is not a route the policy step can apply. Since the tool schema constrained it, policy
+      // holds such an invoice for a person and says so in its record; before that, the text was not
+      // applied at all (older demo records). The text itself is not repeated: it is not something the
+      // system did or can do.
+      if (!RECOMMENDS[norm(inv1.actionTaken)]) {
+        const policy = last(inv.decisions, (d) => d.nodeId === 'policy');
+        out.push(policy?.claims.some((c) => c.startsWith('The Investigator\'s recommendation is not one of the actions'))
+          ? 'Free text is not a route the system can apply, so the policy step held the invoice for a person rather than guess what it meant.'
+          : 'Free text is not a route the system can apply, so it did not change the route: the outcome is the rules\' own.');
+      }
     }
   }
   if (ver) {
@@ -231,7 +239,7 @@ function choiceWords(inv: CaseLike): CaseExplanation['choices'] {
       ? 'Unlocks only after the bank change is verified by phone and a second person signs off (steps above).'
       : `Posts ${amount} to the ledger as owed to ${inv.vendor}, then pays it (simulated: no money moves). Your name goes on the record.`),
     reject: why('reject') ?? `Voids this invoice: ${amount} is never posted or paid. Use it for a duplicate, an overcharge you will not accept, or a bill nobody ordered.`,
-    contest: why('contest') ?? 'Sends it back to the AI with your note, e.g. "the vendor confirmed the new price in writing". The AI re-reviews with it, but can only make the outcome stricter: it cannot approve what the rules flagged.',
+    contest: why('contest') ?? 'Sends it back to the AI with your note, e.g. "the new price was agreed on 3 October". The AI re-reviews with it, but can only make the outcome stricter: it cannot approve what the rules flagged.',
   };
 }
 
@@ -280,7 +288,7 @@ export function explainCase(inv: CaseLike): CaseExplanation {
   return { route, found: [...new Set(found)], ai: aiStory(inv, match?.actionTaken ?? null, policy?.actionTaken ?? null), choices: choiceWords(inv) };
 }
 
-/** The route an invoice in the queue is waiting on, for a chip on its row ("Blocked", "Senior reviewer"). */
+/** The route an invoice in the queue is waiting on, for a chip on its row ("Blocked", "Reviewer, level 2"). */
 export function queueRoute(inv: Pick<CaseLike, 'state' | 'decisions' | 'bankChange'>): Route | null {
   if (inv.state !== 'needs_attention') return null;
   if (inv.bankChange) return ROUTES.block_fraud_flag;

@@ -14,7 +14,7 @@ function nextStep(invoice, guide) {
       start_callback: 'Phone the vendor on a number from your own records (not one from the invoice), then record what they said, using the steps on the right.',
       record_outcome: 'Record whether the vendor confirmed the change when you called them (right).',
       second_signoff: 'A second person, not the one who phoned, signs off on the callback (right). Then the invoice can be approved.',
-      blocked: 'The vendor did not confirm the change, so payment stays blocked. Reject the invoice, or start a new callback if the details are corrected.',
+      blocked: 'The vendor did not confirm the change, so the vendor is flagged and payment stays blocked. Reject the invoice.',
     }[invoice.bankChange.step];
   }
   if (invoice.reason?.code === 'EXC-BEFORE_RCV') return 'Record the delivery on the Orders page; the invoice is checked again on its own. Or decide it yourself now.';

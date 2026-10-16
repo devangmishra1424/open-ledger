@@ -76,11 +76,27 @@ describe("explainCase", () => {
       ],
     }));
     expect(x.found[0]).toBe("Investigator confidence 78% is below the auto-approval threshold of 90%. The invoice itself matched its purchase order and delivery cleanly.");
-    expect(x.ai[0]).toContain('recommended "Escalate to AP reviewer for manual approval due to new vendor risk", reporting itself 78% sure');
+    expect(x.ai[0]).toContain("recommended in free text instead of one of the system's routes, reporting itself 78% sure");
+    // The advice itself names a step the system does not have, so it is not repeated as if it were one.
+    expect(x.ai.join(" ")).not.toContain("Escalate to AP reviewer");
     expect(x.ai).toContain("The rules alone would have approved it. It was held only because of a limit on the Settings page.");
-    // The recommendation was prose, not a route the policy step can apply: said plainly, because it did not change anything.
-    expect(x.ai[1]).toMatch(/written as free text rather than one of the system.s routes, so it is shown here for the reviewer but could not change the route/);
+    // An older record: the prose was not applied at all, and that is said plainly.
+    expect(x.ai[1]).toBe("Free text is not a route the system can apply, so it did not change the route: the outcome is the rules' own.");
     expect(x.route?.label).toBe("Reviewer");
+  });
+
+  it("a newer record, where policy held a free-text recommendation for a person, says so", () => {
+    const x = explainCase(base({
+      vendor: "Northwind Parts Ltd.", amount: 2311.2,
+      reason: { code: "INVESTIGATOR_HOLD", name: "Held by AI Reviewer", description: "..." },
+      decisions: [
+        d("match", "auto_approve", { reasonCode: "CLEAN_MATCH" }),
+        d("investigate", "Escalate to fraud review team and hold payment.", { model: "openai/gpt-oss-120b", confidence: 99 }),
+        d("policy", "escalate_l1", { reasonCode: "INVESTIGATOR_HOLD", claims: ["The Investigator's recommendation is not one of the actions the system can apply: it was written as free-text advice. It is not guessed at: the invoice is held for a person (escalate_l1, stricter than the rules' auto_approve)."] }),
+      ],
+    }));
+    expect(x.ai[1]).toBe("Free text is not a route the system can apply, so the policy step held the invoice for a person rather than guess what it meant.");
+    expect([...x.ai, ...x.found].join(" ")).not.toContain("fraud review team");
   });
 
   it("a bank change: which accounts, which step it is at, and approve explains what unlocks it", () => {
@@ -132,7 +148,9 @@ describe("explainCase", () => {
 
 describe("routes", () => {
   it("reads the engine's actions and models' spellings, and nothing else", () => {
-    expect(routeFor("escalate_l2")?.label).toBe("Senior reviewer");
+    expect(routeFor("escalate_l2")?.label).toBe("Reviewer, level 2");
+    // There are no reviewer roles, so level 2 must not read as a different person.
+    expect(routeFor("escalate_l2")?.meaning).toMatch(/no reviewer roles yet, so any reviewer can decide it/);
     expect(routeFor("Auto-Approve")?.label).toBe("Approved automatically");
     expect(routeFor("Escalate to AP reviewer for manual approval")).toBeNull();
   });

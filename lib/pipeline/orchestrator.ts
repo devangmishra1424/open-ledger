@@ -374,14 +374,6 @@ export function tightenedByInvestigator(engineAction: Action, recommendation?: s
   return moreRestrictive(engineAction, proposed);
 }
 
-/** Long enough for a one-sentence recommendation; a claim is not the place for a whole essay. */
-const MAX_QUOTED_RECOMMENDATION = 200;
-
-function quoteRecommendation(text: string): string {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > MAX_QUOTED_RECOMMENDATION ? `${oneLine.slice(0, MAX_QUOTED_RECOMMENDATION)}…` : oneLine;
-}
-
 /**
  * The policy rule, pure: the deterministic combined decision, tightened (never loosened) by the
  * Investigator's recommendation and by a Verifier that disagrees. Shared by the policy stage and by
@@ -402,13 +394,15 @@ export function computePolicyAction(
   const tightened = tightenedByInvestigator(action, investigatorRecommendation);
   const heldByInvestigator = tightened !== action;
   if (isUnreadableRecommendation(investigatorRecommendation)) {
-    // Recorded even when the rules are already stricter, so the trail shows the advice was read and
-    // not applied as an action, instead of it vanishing.
-    const said = `The Investigator's recommendation is not one of the actions the system can apply: "${quoteRecommendation(investigatorRecommendation)}".`;
+    // Recorded even when the rules are already stricter, so the trail shows the recommendation was
+    // read and not applied, instead of it vanishing. The text itself is not repeated here: it is
+    // advice the system cannot carry out ("send it to the fraud team"), and it stays on the
+    // Investigator's own record.
+    const said = "The Investigator's recommendation is not one of the actions the system can apply: it was written as free-text advice.";
     claims.push({
       text: heldByInvestigator
-        ? `${said} It is not guessed at: the invoice is held for a person (${tightened}, stricter than the rules' ${action}), who can read it.`
-        : `${said} The rules' ${action} is already at least as strict as holding it for a person, so it stands; the text is kept here for the reviewer.`,
+        ? `${said} It is not guessed at: the invoice is held for a person (${tightened}, stricter than the rules' ${action}).`
+        : `${said} The rules' ${action} is already at least as strict as holding it for a person, so it stands.`,
       tag: "grounded",
     });
   } else if (heldByInvestigator) {

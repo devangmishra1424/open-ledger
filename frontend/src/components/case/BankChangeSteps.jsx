@@ -40,7 +40,7 @@ export default function BankChangeSteps({ invoice }) {
   if (bc.step === 'blocked') {
     return (
       <Banner kind="error">
-        <strong>The vendor did not confirm the change.</strong> The vendor is flagged and its invoices stay blocked. Reject this invoice, or contact your treasury team.
+        <strong>The vendor did not confirm the change.</strong> The vendor is flagged and its invoices stay blocked. Reject this invoice.
       </Banner>
     );
   }
