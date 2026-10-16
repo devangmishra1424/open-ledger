@@ -8,9 +8,9 @@ import { formatMoney } from '../lib/labels';
 
 function receiptState(po) {
   const received = po.lines.reduce((s, l) => s + l.received, 0);
-  if (po.receivedInFull) return { label: 'Received in full', cls: 'vb-chip-approved' };
-  if (received > 0) return { label: 'Partly received', cls: 'vb-chip-needs_attention' };
-  return { label: 'Nothing received', cls: 'vb-chip-neutral' };
+  if (po.receivedInFull) return { label: 'Received in full', cls: 'vb-chip-approved', title: 'Every line has arrived in good condition, so an invoice for the whole order can match.' };
+  if (received > 0) return { label: 'Partly received', cls: 'vb-chip-needs_attention', title: 'Some of the order has arrived. Billing for more than has arrived is flagged as a quantity variance.' };
+  return { label: 'Nothing received', cls: 'vb-chip-neutral', title: 'Nothing has arrived yet. An invoice against this order is held as billed before receipt until a receipt is recorded.' };
 }
 
 /**
@@ -34,9 +34,9 @@ export default function PurchaseOrders() {
     <>
       <div className="vb-inline" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
         <p className="vb-muted vb-small" style={{ margin: 0, maxWidth: 640 }}>
-          An invoice is checked against a <b>purchase order</b> (what was ordered) and a <b>goods receipt</b> (what actually arrived). In a real company these come from procurement and the warehouse; here you can add them yourself, then add the invoice and watch the three be compared.
+          An invoice is checked against a <b>purchase order</b> (what was ordered, at what price) and a <b>goods receipt</b> (what actually arrived, in good condition). In a real company these come from procurement and the warehouse; here you can add them yourself, then add an invoice that quotes the PO number and watch the three be compared. <b>Recording a receipt re-checks any invoice already waiting on that order.</b>
         </p>
-        <button type="button" className="vb-btn vb-btn-primary" onClick={() => setAdding(true)}><Plus size={16} /> Add PO &amp; receipt</button>
+        <button type="button" className="vb-btn vb-btn-primary" onClick={() => setAdding(true)} title="Create a purchase order, and optionally what was received against it, so the next invoice you add has something to be matched against."><Plus size={16} /> Add PO &amp; receipt</button>
       </div>
 
       {error && <Banner kind="error">Could not load purchase orders: {error.message}</Banner>}
@@ -58,12 +58,13 @@ export default function PurchaseOrders() {
                   <div className="vb-dim vb-small">Ordered {po.orderDate} &middot; {formatMoney(po.total, po.currency)} &middot; {po.invoiceCount === 0 ? 'no invoices yet' : `${po.invoiceCount} invoice${po.invoiceCount === 1 ? '' : 's'}`}</div>
                 </div>
                 <div className="vb-inline">
-                  <span className={`vb-chip ${st.cls}`}>{st.label}</span>
-                  <button type="button" className="vb-btn vb-btn-sm" onClick={() => setReceiving(po)} disabled={po.status === 'closed'}>Record a receipt</button>
+                  <span className={`vb-chip ${st.cls}`} title={st.title}>{st.label}</span>
+                  <button type="button" className="vb-btn vb-btn-sm" onClick={() => setReceiving(po)} disabled={po.status === 'closed'}
+                    title={po.status === 'closed' ? 'This order is closed: nothing more can be received or billed against it.' : 'Record goods that arrived against this order, as the warehouse would. Any invoice waiting on this order is checked again on its own.'}>Record a receipt</button>
                 </div>
               </div>
               <table className="vb-table" style={{ marginTop: 10 }}>
-                <thead><tr><th>Line</th><th className="num">Ordered</th><th className="num">Received</th><th className="num">Unit price</th></tr></thead>
+                <thead><tr><th>Line</th><th className="num">Ordered</th><th className="num" title="Accepted into the warehouse in good condition; damaged or rejected goods do not count">Received</th><th className="num" title="The agreed price an invoice line is compared with (2% difference is tolerated)">Unit price</th></tr></thead>
                 <tbody>
                   {po.lines.map((l) => (
                     <tr key={l.lineNumber}>

@@ -273,7 +273,7 @@ export default function AuditTrail() {
           </p>
           <p className="vb-dim vb-audit-integrity-note">Tamper-evident, not tamper-proof: it shows that a record changed, not who changed it.</p>
         </div>
-        <button type="button" className="vb-btn vb-btn-sm" onClick={verifyNow} disabled={verifying}>
+        <button type="button" className="vb-btn vb-btn-sm" onClick={verifyNow} disabled={verifying} title="Re-hashes every recorded decision from the first one and checks each link. If any past record was edited, it shows exactly where.">
           <RefreshCw size={14} className={verifying ? 'vb-audit-spin' : undefined} /> {verifying ? 'Verifying…' : 'Verify again'}
         </button>
       </section>
@@ -285,10 +285,11 @@ export default function AuditTrail() {
           <div className="vb-audit-list-head">
             <h2 id="vb-audit-list-title">Auditor requests</h2>
             <span className="vb-dim vb-small">{requests ? `${openCount} open of ${requests.length}` : ''}</span>
-            <button type="button" className={`vb-btn vb-btn-sm${showNew ? '' : ' vb-btn-primary'}`} onClick={openNewForm} aria-expanded={showNew}>
+            <button type="button" className={`vb-btn vb-btn-sm${showNew ? '' : ' vb-btn-primary'}`} onClick={openNewForm} aria-expanded={showNew} title="Record what an auditor asked for and link the invoices it covers; they get each invoice with its full, verifiable trail.">
               {showNew ? <X size={15} /> : <Plus size={15} />} {showNew ? 'Cancel' : 'New request'}
             </button>
           </div>
+          <p className="vb-dim vb-small vb-audit-explain">When an auditor asks for evidence (&ldquo;show me how these invoices were approved&rdquo;), record it here and link the invoices. Each one is handed over with its complete, tamper-evident decision trail, and questions are answered only from those trails.</p>
 
           {showNew && (
             <form className="vb-card vb-audit-new" onSubmit={handleCreate}>
@@ -365,13 +366,13 @@ export default function AuditTrail() {
               <div className="vb-audit-actions">
                 <input type="file" ref={fileInputRef} hidden onChange={handleFile} />
                 {selected.status !== 'closed' && (
-                  <button type="button" className="vb-btn vb-btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                  <button type="button" className="vb-btn vb-btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading} title="Attach a supporting file (up to 5 MB) the auditor asked for, such as a contract or a bank letter.">
                     <Paperclip size={14} /> {uploading ? 'Uploading…' : 'Attach a file'}
                   </button>
                 )}
                 {selected.status === 'closed' && <span className="vb-dim vb-small">Closed: the evidence has been handed over, so nothing more can be attached.</span>}
                 {selected.status !== 'closed' && !confirmingClose && (
-                  <button type="button" className="vb-btn vb-btn-sm" onClick={() => setConfirmingClose(true)}>Close request</button>
+                  <button type="button" className="vb-btn vb-btn-sm" onClick={() => setConfirmingClose(true)} title="Marks the request answered. Each linked invoice's trail records that its evidence was handed over.">Close request</button>
                 )}
                 {selected.status !== 'closed' && confirmingClose && (
                   <span className="vb-inline vb-audit-confirm">

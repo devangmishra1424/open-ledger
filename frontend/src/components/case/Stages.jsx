@@ -8,6 +8,7 @@ import { ListenButton } from './AskVoice';
 import { useSpeech } from '../../lib/useSpeech';
 import { buildSpokenAnswer } from '../../lib/speech';
 import { actionWords, actorWords, groundingNote, normalizeAction, outcomeWords, shortHash, timeAgo, STAGE_HELP } from '../../lib/labels';
+import { STAGE_GUIDE, KIND_LABEL, GATE_WORDS } from '../../lib/stageGuide';
 
 const BAD = new Set(['error', 'payment_failed', 'disagreement']);
 const WARN = new Set(['escalate_l1', 'escalate_l2', 'block', 'block_fraud_flag', 'auto_reject', 'human_rejected', 'human_contested']);
@@ -16,6 +17,23 @@ const tone = (raw) => { const a = normalizeAction(raw); return BAD.has(a) ? 'bad
 
 /** An engine finding written as "EXC-PRICE_VAR: escalate_l1" is shown as a labelled row rather than prose. */
 const FINDING = /^(EXC-[A-Z_]+|R99_AGENT_ERROR|CLEAN_MATCH|POLICY_LIMIT|INVESTIGATOR_HOLD):\s*([a-z_0-9]+)$/;
+
+/** "duplicate: passed" -> a checklist row in plain words. */
+const GATE = /^([a-z_]+): (passed|failed - (.+))$/;
+
+function Gates({ claims }) {
+  const rows = claims.map((c) => GATE.exec(c)).filter(Boolean);
+  return (
+    <ul className="vb-gates">
+      {rows.map((m) => (
+        <li key={m[1]} className={m[2] === 'passed' ? 'is-ok' : 'is-bad'}>
+          <span aria-hidden="true">{m[2] === 'passed' ? '✓' : '✕'}</span> {GATE_WORDS[m[1]] ?? m[1].replace(/_/g, ' ')}
+          {m[3] && <span className="vb-dim">: {m[3]}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function Claim({ text, reasonNames }) {
   const m = text.match(FINDING);
@@ -57,14 +75,21 @@ export default function Stages({ invoice }) {
         const human = d.nodeId === 'human_review';
         const t = tone(d.actionTaken);
         const a = answers[d.id];
+        const g = STAGE_GUIDE[d.nodeId];
+        const kind = g ? KIND_LABEL[g.kind] : null;
+        const gateClaims = d.nodeId === 'validate' ? d.claims.filter((c) => GATE.test(c)) : [];
+        const otherClaims = d.claims.filter((c) => !gateClaims.includes(c));
         return (
           <li key={d.id} className={`vb-stage vb-stage-${t}`}>
             <span className="vb-stage-n" aria-hidden="true">{i + 1}</span>
             <div className="vb-stage-body">
               <header className="vb-stage-head">
                 <div>
-                  <h4>{d.label}</h4>
-                  <div className="vb-dim vb-small">{STAGE_HELP[d.nodeId] ?? ''}</div>
+                  <h4>
+                    {g?.name ?? d.label}
+                    {kind && <span className={`vb-kind vb-kind-${g.kind}`} title={kind.title}>{kind.label}</span>}
+                  </h4>
+                  <div className="vb-dim vb-small vb-stage-what">{g?.what ?? STAGE_HELP[d.nodeId] ?? ''}</div>
                 </div>
                 <span className={`vb-outcome vb-outcome-${t}`}>{outcomeWords(d)}</span>
               </header>
@@ -83,7 +108,8 @@ export default function Stages({ invoice }) {
 
               {d.claims.length > 0 && (
                 <div className="vb-stage-claims">
-                  {d.claims.map((c, k) => <Claim key={k} text={c} reasonNames={reasonNames} />)}
+                  {gateClaims.length > 0 && <Gates claims={gateClaims} />}
+                  {otherClaims.map((c, k) => <Claim key={k} text={c} reasonNames={reasonNames} />)}
                 </div>
               )}
 
@@ -100,12 +126,14 @@ export default function Stages({ invoice }) {
 
               <footer className="vb-stage-foot">
                 {!human && (
-                  <button type="button" className="vb-btn vb-btn-sm" onClick={() => ask(d)} disabled={explaining === d.id}>
+                  <button type="button" className="vb-btn vb-btn-sm" onClick={() => ask(d)} disabled={explaining === d.id}
+                    title="An AI explains this step in plain words, using only this invoice's recorded decisions, and says which records it relied on.">
                     {explaining === d.id ? <Spinner label="Asking…" /> : 'Why did it conclude this?'}
                   </button>
                 )}
                 <details className="vb-tech">
-                  <summary>Technical details</summary>
+                  <summary>About this step</summary>
+                  {g && <dl><dt>Why it is there</dt><dd>{g.why}</dd><dt>When it runs</dt><dd>{g.when}</dd></dl>}
                   <dl>
                     <dt>Record</dt><dd className="vb-mono">{d.id}</dd>
                     <dt>Hash</dt><dd className="vb-mono">{d.hash}</dd>

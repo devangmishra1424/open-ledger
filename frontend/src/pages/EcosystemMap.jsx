@@ -64,7 +64,7 @@ export default function EcosystemMap() {
     <div className="vb-net">
       {error && <Banner kind="error">Could not load the network: {error.message}</Banner>}
       <p className="vb-muted vb-small vb-net-intro">
-        Real vendors from your ledger, feeding the pipeline. Approved invoices go to the payment rail, and every decision is written to the decision ledger.
+        How money flows: vendors send invoices into the pipeline in the middle; only approved invoices go on to the payment rail, and every decision, approved or not, is written to the decision ledger. Click any circle to see what it is and what it means for the queue.
         {' '}<b>{vendorCount}</b> vendor{vendorCount === 1 ? '' : 's'}{flaggedCount > 0 && <>, <span className="vb-net-flagged">{flaggedCount} flagged</span></>}.
       </p>
 
@@ -136,7 +136,7 @@ export default function EcosystemMap() {
               <h2>{active.label}</h2>
               <p className="vb-muted">{active.details}</p>
               {active.type === 'Vendor' && (
-                <p className="vb-dim vb-small">Select another node on the map to compare.</p>
+                <p className="vb-dim vb-small">A red circle is a flagged vendor. Select another circle to compare.</p>
               )}
             </>
           ) : (

@@ -43,28 +43,30 @@ const ACCOUNTS: Array<[string, string, string, string, string, boolean]> = [
   ["7210", "7210", "Unrealized FX Gain/Loss", "expense", "debit", false],
 ];
 
-// --- reason_codes: the 12 EXC-* codes from docs/ap-three-way-match-spec.md, verbatim names,
+// --- reason_codes: the 12 EXC-* codes from docs/ap-three-way-match-spec.md (names verbatim except
+// "Credit Memo" and "Partial Shipment": the spec's netting and partial-payment wording describes steps
+// this system does not take; descriptions say what the engine actually checks, migration 008),
 // plus EXC-13/EXC-14 (ALGORITHMS.md §7), plus EXC-UNMATCHED_LINE, plus CLEAN_MATCH, POLICY_LIMIT,
 // INVESTIGATOR_HOLD and R99_AGENT_ERROR (ENGINE.md §5). ---
 const REASON_CODES: Array<[string, string, string]> = [
-  ["CLEAN_MATCH", "Clean Match", "3-way match within tolerance, no exception fired — required non-null reason code on every Tier 0 auto-approval."],
+  ["CLEAN_MATCH", "Clean Match", "Three-way match within tolerance: no exception was found."],
   ["EXC-NO_PO", "Missing Purchase Order", "Invoice has no valid PO reference, or the referenced PO is not open/approved."],
   ["EXC-BEFORE_RCV", "Invoice Before Receipt", "Invoice received before the goods receipt is posted for the referenced PO."],
   ["EXC-PRICE_VAR", "Price Variance", "Invoice unit price varies from the PO unit price beyond tolerance."],
   ["EXC-QTY_VAR", "Quantity Variance", "Invoiced quantity varies from received quantity beyond tolerance."],
-  ["EXC-DUPLICATE", "Duplicate Invoice", "Exact or near-duplicate (embedding similarity) of a previously seen invoice."],
-  ["EXC-NON_PO", "Non-PO Invoice", "Invoice has no PO reference and is not eligible for 3-way match; routed for GL coding instead."],
-  ["EXC-CREDIT_MEMO", "Credit Memo Netting", "A credit memo must be netted against an open or future invoice from the same vendor."],
-  ["EXC-PARTIAL", "Partial Payment or Partial Shipment", "Invoice covers less than the full PO due to a partial shipment, or is an explicit partial payment."],
+  ["EXC-DUPLICATE", "Duplicate Invoice", "Same vendor and invoice number as an invoice already on file."],
+  ["EXC-NON_PO", "Non-PO Invoice", "Invoice has no PO reference, so there is nothing to three-way match it against; a person decides it."],
+  ["EXC-CREDIT_MEMO", "Credit Memo", "A credit memo larger than what is still open on the invoice it relates to."],
+  ["EXC-PARTIAL", "Partial Shipment", "Invoice covers less than the full PO, for example after a partial shipment."],
   ["EXC-CURRENCY", "Currency Mismatch", "Invoice currency does not match the PO/receipt currency, or is an unsupported currency."],
-  ["EXC-TAX_VAR", "Tax Mismatch", "Invoice tax rate or amount does not match the expected rate for the jurisdiction."],
+  ["EXC-TAX_VAR", "Tax Mismatch", "Tax on a line does not match the rate of that line's tax code."],
   ["EXC-LAYOUT", "Unreadable Invoice Layout", "Invoice could not be parsed with sufficient confidence to proceed."],
   ["EXC-FRAUD_BANK", "Vendor Bank Detail Change", "Vendor's bank account changed recently — routed to the gated vendor bank-change review workflow, never auto-approved."],
   ["EXC-BLANKET_EXCEEDED", "Blanket PO Ceiling Exceeded", "Cumulative invoiced amount against a blanket PO exceeds its negotiated ceiling."],
   ["EXC-UOM_MISMATCH", "Unit-of-Measure Mismatch", "Invoice and PO line disagree on unit of measure with no conversion factor on file."],
   ["EXC-UNMATCHED_LINE", "Line Not on Purchase Order", "One or more invoice lines match no line on the referenced purchase order, for example an added fee or an item that was never ordered."],
   ["POLICY_LIMIT", "Auto-Approval Limit", "A clean match was held for a person because it exceeds the Settings amount limit or the Investigator's confidence is below the Settings threshold."],
-  ["INVESTIGATOR_HOLD", "Held by AI Reviewer", "The rules found a clean match, but the Investigator recommended a stricter outcome. An AI opinion can only tighten a decision, never loosen it, so a person reviews this invoice."],
+  ["INVESTIGATOR_HOLD", "Held by AI Reviewer", "The rules found a clean match, but the Investigator recommended a stricter outcome, or wrote free text instead of one of the system's routes. An AI opinion can only tighten a decision, never loosen it, so a person reviews this invoice."],
   ["R99_AGENT_ERROR", "Agent Error", "A pipeline stage failed after its bounded retry — surfaced for human attention, never silently dropped."],
 ];
 

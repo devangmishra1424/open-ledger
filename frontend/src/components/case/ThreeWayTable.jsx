@@ -9,8 +9,8 @@ function flagText(flag, line) {
     case 'price_over': return { bad: true, text: `Price ${num(line.priceVariancePct * 100, 1)}% above the PO (allowed: ${num(line.tolerancePct * 100, 1)}%)` };
     case 'price_under': return { bad: false, text: `Price ${num(Math.abs(line.priceVariancePct) * 100, 1)}% below the PO` };
     case 'qty_over_received': return { bad: true, text: `Billing for ${num(line.qtyVsReceived)} more than was received` };
-    case 'qty_over_ordered': return { bad: true, text: `Billing for more than was ordered` };
-    case 'not_received': return { bad: true, text: 'Nothing received yet' };
+    case 'qty_over_ordered': return { bad: true, text: `Billing for ${num(line.invoice.qty - line.qtyOrdered)} more than was ordered (${num(line.qtyOrdered)})` };
+    case 'not_received': return { bad: true, text: 'Nothing received yet: billed before delivery' };
     case 'not_invoiced': return { bad: false, text: 'Not on this invoice (a partial invoice is normal)' };
     default: return { bad: false, text: flag };
   }
@@ -24,7 +24,7 @@ export default function ThreeWayTable({ threeWay, invoiceCurrency }) {
   if (!threeWay) {
     return (
       <div className="vb-callout">
-        <strong>No purchase order on this invoice.</strong> Without one there is nothing to compare the bill against: no agreed price, no agreed quantity, no delivery record. That is why it needs a person.
+        <strong>No purchase order on this invoice.</strong> Without one there is nothing to compare the bill against: no agreed price, no agreed quantity, no delivery record. So its price and quantity cannot be checked automatically; a person confirms the spend was authorised.
       </div>
     );
   }

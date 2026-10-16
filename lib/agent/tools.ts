@@ -100,7 +100,7 @@ export const SUBMIT_INVESTIGATION = tool(
     confidence: { type: "number" },
     rationale: {
       type: "string",
-      description: "Must cite specific tool results, e.g. 'per check_duplicate, 0.97 similarity to INV-2288'. Any advice in words (who should look at it, what to check, 'hold payment') goes here, not in recommended_action.",
+      description: "Must cite specific tool results, e.g. 'per check_duplicate, 0.97 similarity to INV-2288'. Say what the results show and why they support recommended_action; do not suggest steps outside this system (contacting the vendor, requesting documents, sending it to a team).",
     },
     // An enum, not free text: a prose recommendation ("Escalate to the fraud team and hold payment")
     // matches no action, so policy could not apply it. investigate() still checks the value, since a
@@ -108,7 +108,7 @@ export const SUBMIT_INVESTIGATION = tool(
     recommended_action: {
       type: "string",
       enum: [...ALL_ACTIONS],
-      description: "Exactly one of these values, nothing else: auto_approve (pay it), escalate_l1 (a reviewer checks it), escalate_l2 (a senior reviewer checks it), block (freeze payment until resolved), block_fraud_flag (suspected fraud), auto_reject (reject it; applied as block, so a person makes the final call). It can only make the rules' outcome stricter, never looser; anything stricter than auto_approve sends the invoice to a person.",
+      description: "Exactly one of these values, nothing else: auto_approve (pay it), escalate_l1 (a reviewer checks it), escalate_l2 (a reviewer checks it, marked level 2: larger or riskier), block (freeze payment until resolved), block_fraud_flag (suspected fraud), auto_reject (reject it; applied as block, so a person makes the final call). It can only make the rules' outcome stricter, never looser; anything stricter than auto_approve sends the invoice to a person.",
     },
   },
   ["exception_types", "confidence", "rationale", "recommended_action"],
@@ -121,7 +121,7 @@ export const SUBMIT_VERIFICATION = tool(
     agrees: { type: "boolean", description: "Whether you agree with the Investigator's conclusion" },
     exception_types: { type: "array", items: { type: "string" } },
     confidence: { type: "number" },
-    notes: { type: "string", description: "Required if agrees=false: state specifically what you assessed differently and why" },
+    notes: { type: "string", description: "Required if agrees=false: state specifically what you assessed differently and why. Findings only: do not suggest steps outside this system (contacting the vendor, requesting documents, sending it to a team)." },
   },
   ["agrees", "exception_types", "confidence", "notes"],
 );

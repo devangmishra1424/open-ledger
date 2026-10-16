@@ -9,6 +9,7 @@ import {
   evaluateCurrency, evaluateBlanketExceeded, evaluateTaxVariance, evaluateCreditMemo, evaluateUomMismatch,
   evaluateFraudBank, evaluateUnmatchedLine, combineExceptions, type ExceptionFinding, type CombinedDecision,
 } from "@/lib/matching/decision-matrix";
+import * as facts from "@/lib/matching/finding-facts";
 
 /**
  * The "match" pipeline stage (ENGINE.md §2.3) — Layer 1, deterministic, no LLM. Assembles
@@ -43,9 +44,27 @@ export interface MatchStageResult {
   combined: CombinedDecision;
   /** Plain, LLM-readable summary — this is what gets serialized as investigate()'s initialInput. */
   detail: Record<string, unknown>;
+  /** For a clean match only: what was compared and found to agree, recorded as the match step's claim. */
+  cleanFact?: string;
+}
+
+/** Pushes a finding with its action decided once, so the fact sentence quotes the action the engine really chose. */
+function addFinding(findings: ExceptionFinding[], code: ExceptionFinding["code"], action: ExceptionFinding["action"], fact: (a: ExceptionFinding["action"]) => string) {
+  findings.push({ code, action, fact: fact(action) });
 }
 
 export async function runMatchStage(vendorBillId: string): Promise<MatchStageResult> {
+  const result = await matchInvoice(vendorBillId);
+  // The AI reviewers read `detail`, and their prompt says it carries every tolerance fact. Without
+  // the rules' own findings they read lineMatch (which pairs lines, not whether a pair passed) and
+  // called a 15% overcharge "a perfect line match", or said "no exceptions apply" on a flagged one.
+  result.detail.ruleFindings = result.findings.map((f) => ({ code: f.code, route: f.action, fact: f.fact ?? null }));
+  result.detail.rulesOutcome = result.combined.overallAction;
+  if (result.cleanFact) result.detail.cleanMatch = result.cleanFact;
+  return result;
+}
+
+async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
   const sql = getSql();
 
   const billRows = await sql`SELECT * FROM vendor_bills WHERE id = ${vendorBillId}`;
@@ -80,7 +99,7 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
       await getOrCreateBankChangeReview({ vendorId: bill.vendor_id, newBankLast4: vendor.bank_account_last4, sourceInvoiceId: bill.id });
     }
     detail.bankChangeGateStatus = bankGate.status;
-    findings.push({ code: "EXC-FRAUD_BANK", action: evaluateFraudBank() });
+    addFinding(findings, "EXC-FRAUD_BANK", evaluateFraudBank(), (action) => facts.bankChangeFact({ status: bankGate.status, action }));
     return { findings, combined: combineExceptions(findings), detail };
   }
 
@@ -100,7 +119,7 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
       detail.creditMemoNote = "no related_invoice_id set — cannot compute netting";
       return { findings, combined: combineExceptions(findings), detail };
     }
-    const relatedRows = await sql`SELECT total_amount, status FROM vendor_bills WHERE id = ${bill.related_invoice_id}`;
+    const relatedRows = await sql`SELECT total_amount, status, invoice_number FROM vendor_bills WHERE id = ${bill.related_invoice_id}`;
     const related = relatedRows[0];
     if (!related) {
       detail.creditMemoNote = `related_invoice_id '${bill.related_invoice_id}' does not exist`;
@@ -114,7 +133,10 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     const remainingOpenAmount = related.status === "paid" ? 0 : related.total_amount;
     const netAmount = remainingOpenAmount - bill.total_amount;
     detail.creditMemoNetAmount = netAmount;
-    findings.push({ code: "EXC-CREDIT_MEMO", action: evaluateCreditMemo(netAmount) });
+    addFinding(findings, "EXC-CREDIT_MEMO", evaluateCreditMemo(netAmount), (action) => facts.creditMemoFact({
+      credit: bill.total_amount, currency: bill.currency, relatedNumber: related.invoice_number ?? null, relatedStatus: related.status,
+      openAmount: remainingOpenAmount, net: netAmount, action,
+    }));
     return { findings, combined: combineExceptions(findings), detail };
   }
 
@@ -125,7 +147,9 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     // for when a reference EXISTS but is invalid — a data-integrity problem, not a business-
     // as-usual non-PO purchase).
     const vendorWhitelisted = vendor.trust_tier === "trusted";
-    findings.push({ code: "EXC-NON_PO", action: evaluateNonPo(bill.total_amount, vendorWhitelisted) });
+    addFinding(findings, "EXC-NON_PO", evaluateNonPo(bill.total_amount, vendorWhitelisted), (action) => facts.nonPoFact({
+      amount: bill.total_amount, currency: bill.currency, printedPoReference: bill.po_reference ?? null, trustTier: vendor.trust_tier, action,
+    }));
     detail.poReference = null;
     return { findings, combined: combineExceptions(findings), detail };
   }
@@ -133,9 +157,9 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
   const poRows = await sql`SELECT * FROM purchase_orders WHERE id = ${bill.po_id}`;
   const po = poRows[0];
   if (!po || po.status === "closed") {
-    findings.push({ code: "EXC-NO_PO", action: evaluateNoPo() });
     detail.poReference = po?.po_number ?? bill.po_id;
     detail.poStatus = po?.status ?? "not_found";
+    addFinding(findings, "EXC-NO_PO", evaluateNoPo(), (action) => facts.noPoFact({ poReference: po?.po_number ?? bill.po_reference ?? "it refers to", poStatus: String(detail.poStatus), action }));
     return { findings, combined: combineExceptions(findings), detail };
   }
 
@@ -152,10 +176,14 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
   // supported list at all" case earlier in the pipeline.
   if (bill.currency !== po.currency) {
     const rateVariancePct = Math.abs(bill.exchange_rate - po.exchange_rate) / (po.exchange_rate || 1);
-    findings.push({ code: "EXC-CURRENCY", action: evaluateCurrency(true, rateVariancePct, bill.total_amount * rateVariancePct) });
+    addFinding(findings, "EXC-CURRENCY", evaluateCurrency(true, rateVariancePct, bill.total_amount * rateVariancePct), (action) => facts.currencyFact({
+      billCurrency: bill.currency, poCurrency: po.currency, poNumber: po.po_number, billRate: bill.exchange_rate, poRate: po.exchange_rate, ratePct: rateVariancePct, action,
+    }));
   } else if (bill.exchange_rate !== po.exchange_rate) {
     const rateVariancePct = Math.abs(bill.exchange_rate - po.exchange_rate) / po.exchange_rate;
-    findings.push({ code: "EXC-CURRENCY", action: evaluateCurrency(false, rateVariancePct, bill.total_amount * rateVariancePct) });
+    addFinding(findings, "EXC-CURRENCY", evaluateCurrency(false, rateVariancePct, bill.total_amount * rateVariancePct), (action) => facts.currencyFact({
+      billCurrency: bill.currency, poCurrency: po.currency, poNumber: po.po_number, billRate: bill.exchange_rate, poRate: po.exchange_rate, ratePct: rateVariancePct, action,
+    }));
   }
 
   // EXC-BLANKET_EXCEEDED (ALGORITHMS.md §7): a PO-header-level ceiling, not per-line — checked
@@ -173,7 +201,9 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
       const cumulativeValue = Number(priorValueRows[0]?.prior ?? 0) + bill.total_amount;
       if (cumulativeValue > po.max_value_ceiling) {
         const overagePct = (cumulativeValue - po.max_value_ceiling) / po.max_value_ceiling;
-        findings.push({ code: "EXC-BLANKET_EXCEEDED", action: evaluateBlanketExceeded(overagePct) });
+        addFinding(findings, "EXC-BLANKET_EXCEEDED", evaluateBlanketExceeded(overagePct), (action) => facts.blanketValueFact({
+          poNumber: po.po_number, ceiling: Number(po.max_value_ceiling), prior: Number(priorValueRows[0]?.prior ?? 0), current: bill.total_amount, currency: bill.currency, action,
+        }));
       }
     }
     if (po.max_qty_ceiling != null) {
@@ -188,7 +218,9 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
       const cumulativeQty = Number(priorQtyRows[0]?.prior ?? 0) + currentInvoiceQty;
       if (cumulativeQty > po.max_qty_ceiling) {
         const overagePct = (cumulativeQty - po.max_qty_ceiling) / po.max_qty_ceiling;
-        findings.push({ code: "EXC-BLANKET_EXCEEDED", action: evaluateBlanketExceeded(overagePct) });
+        addFinding(findings, "EXC-BLANKET_EXCEEDED", evaluateBlanketExceeded(overagePct), (action) => facts.blanketQtyFact({
+          poNumber: po.po_number, ceiling: Number(po.max_qty_ceiling), prior: Number(priorQtyRows[0]?.prior ?? 0), current: currentInvoiceQty, action,
+        }));
       }
     }
     detail.blanketPo = { maxValueCeiling: po.max_value_ceiling, maxQtyCeiling: po.max_qty_ceiling };
@@ -200,13 +232,17 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
   const receiptRows = await sql`SELECT MIN(receipt_date) as earliest FROM goods_receipts WHERE po_id = ${po.id}`;
   const earliestReceiptDate: string | null = receiptRows[0]?.earliest ?? null;
   if (!earliestReceiptDate) {
-    findings.push({ code: "EXC-BEFORE_RCV", action: evaluateBeforeReceipt(false, 0, bill.total_amount) });
+    addFinding(findings, "EXC-BEFORE_RCV", evaluateBeforeReceipt(false, 0, bill.total_amount), (action) => facts.beforeReceiptFact({
+      poNumber: po.po_number, invoiceDate: String(bill.invoice_date), earliestReceipt: null, action,
+    }));
     detail.goodsReceiptStatus = "none_yet";
   } else {
     const gap = classifyDateGap(bill.invoice_date, earliestReceiptDate);
     const invoiceIsBeforeReceipt = new Date(bill.invoice_date).getTime() < new Date(earliestReceiptDate).getTime();
     if (invoiceIsBeforeReceipt && gap.gapDays > 7) {
-      findings.push({ code: "EXC-BEFORE_RCV", action: evaluateBeforeReceipt(true, gap.gapDays, bill.total_amount) });
+      addFinding(findings, "EXC-BEFORE_RCV", evaluateBeforeReceipt(true, gap.gapDays, bill.total_amount), (action) => facts.beforeReceiptFact({
+        poNumber: po.po_number, invoiceDate: String(bill.invoice_date), earliestReceipt: String(earliestReceiptDate), gapDays: gap.gapDays, action,
+      }));
     }
     detail.earliestReceiptDate = earliestReceiptDate;
   }
@@ -287,7 +323,10 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
 
     const perPoUnit = unitsPerPoUnit(line.uom, poLine.uom);
     if (perPoUnit === null) {
-      findings.push({ code: "EXC-UOM_MISMATCH", action: evaluateUomMismatch(isPlausibleUomConversion(line.uom, poLine.uom)) });
+      const plausible = isPlausibleUomConversion(line.uom, poLine.uom);
+      addFinding(findings, "EXC-UOM_MISMATCH", evaluateUomMismatch(plausible), (action) => facts.uomMismatchFact({
+        invoiceDescription: line.description, invoiceUom: line.uom, poLineNumber: poLine.lineNumber, poDescription: poLine.description, poUom: poLine.uom, plausible, action,
+      }));
       continue;
     }
     // A conversion ON FILE resolves the unit difference (spec: "system re-runs the match with it
@@ -318,7 +357,9 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     .filter((l) => l.amount >= 0.005);
   if (orphanLines.length > 0) {
     const unmatchedAmount = orphanLines.reduce((s, l) => s + l.amount, 0);
-    findings.push({ code: "EXC-UNMATCHED_LINE", action: evaluateUnmatchedLine(unmatchedAmount) });
+    addFinding(findings, "EXC-UNMATCHED_LINE", evaluateUnmatchedLine(unmatchedAmount), (action) => facts.unmatchedLinesFact({
+      poNumber: po.po_number, lines: orphanLines, total: unmatchedAmount, currency: bill.currency, action,
+    }));
     detail.lineMatch = { ...(detail.lineMatch as Record<string, unknown>), linesNotOnPo: orphanLines, amountNotOnPo: unmatchedAmount };
   }
 
@@ -338,7 +379,10 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     const lineAmountImpact = classifyLineAmountVariance(l.unitPrice * l.qty, poLine.unitPrice * l.qty).varianceAbs;
 
     if (priceVariance.zone !== "green") {
-      findings.push({ code: "EXC-PRICE_VAR", action: evaluatePriceVariance(priceVariance.variancePct, lineAmountImpact) });
+      addFinding(findings, "EXC-PRICE_VAR", evaluatePriceVariance(priceVariance.variancePct, lineAmountImpact), (action) => facts.priceVarianceFact({
+        lineNumber: poLine.lineNumber, description: poLine.description, uom: poLine.uom, billedPrice: l.unitPrice, poPrice: poLine.unitPrice,
+        billedQty: l.qty, variancePct: priceVariance.variancePct, impact: lineAmountImpact, currency: bill.currency, action,
+      }));
     }
 
     // EXC-TAX_VAR: needs this line's ACTUAL tax (only present when the extraction/intake step
@@ -356,7 +400,9 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
         if (taxZone.zone !== "green") {
           const expectedTaxAmount = lineAmount * expectedRate;
           const amountDiff = Math.abs(rawLine.tax_amount - expectedTaxAmount);
-          findings.push({ code: "EXC-TAX_VAR", action: evaluateTaxVariance(taxZone.varianceAbs, amountDiff) });
+          addFinding(findings, "EXC-TAX_VAR", evaluateTaxVariance(taxZone.varianceAbs, amountDiff), (action) => facts.taxVarianceFact({
+            description: rawLine.description, charged: rawLine.tax_amount, actualRate, expectedRate, expectedTax: expectedTaxAmount, currency: bill.currency, action,
+          }));
         }
       }
     }
@@ -392,9 +438,15 @@ export async function runMatchStage(vendorBillId: string): Promise<MatchStageRes
     if (fulfillment.excessQty > 0) {
       const variancePct = acceptedQty === 0 ? 1 : fulfillment.excessQty / acceptedQty;
       const excessAmountImpact = fulfillment.excessQty * poLine.unitPrice;
-      findings.push({ code: "EXC-QTY_VAR", action: evaluateQuantityVariance(variancePct, fulfillment.excessQty, excessAmountImpact) });
+      addFinding(findings, "EXC-QTY_VAR", evaluateQuantityVariance(variancePct, fulfillment.excessQty, excessAmountImpact), (action) => facts.quantityVarianceFact({
+        lineNumber: poLine.lineNumber, description: poLine.description, uom: poLine.uom, ordered: poLine.qtyOrdered, acceptedReceived: acceptedQty,
+        billedBefore: qtyInvoicedPrior, billedNow: l.qty, excess: fulfillment.excessQty, impact: excessAmountImpact, currency: bill.currency, action,
+      }));
     }
   }
 
-  return { findings, combined: combineExceptions(findings), detail };
+  const cleanFact = findings.length === 0 && linesToCheck.length > 0
+    ? facts.cleanMatchFact({ poNumber: po.po_number, matchedLines: linesToCheck.length, currency: bill.currency, invoiced: billLineRows.reduce((s: number, r: any) => s + Number(r.qty_invoiced) * Number(r.unit_price), 0) })
+    : undefined;
+  return { findings, combined: combineExceptions(findings), detail, cleanFact };
 }

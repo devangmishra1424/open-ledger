@@ -46,15 +46,15 @@ export default function Shell() {
       <nav className="vb-side" aria-label="Main">
         <div className="vb-brand"><span className="vb-brand-mark" aria-hidden="true">V</span><span className="vb-brand-name">VeriBook</span></div>
         <div className="vb-nav">
-          <NavLink to="/app" end title="Inbox" className={({ isActive }) => `vb-nav-link ${isActive || location.pathname.startsWith('/app/invoice') ? 'active' : ''}`}>
+          <NavLink to="/app" end title="Inbox: every invoice, and the ones waiting on a person" className={({ isActive }) => `vb-nav-link ${isActive || location.pathname.startsWith('/app/invoice') ? 'active' : ''}`}>
             <InboxIcon size={18} /> <span className="vb-nav-label">Inbox</span>
             {counts.needs_attention > 0 && <span className="vb-nav-count" aria-label={`${counts.needs_attention} need attention`}>{counts.needs_attention}</span>}
           </NavLink>
-          <NavLink to="/app/orders" title="Orders" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ClipboardList size={18} /> <span className="vb-nav-label">Orders</span></NavLink>
-          <NavLink to="/app/audit" title="Audit" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ShieldCheck size={18} /> <span className="vb-nav-label">Audit</span></NavLink>
-          <NavLink to="/app/pipeline" title="Pipeline" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Activity size={18} /> <span className="vb-nav-label">Pipeline</span></NavLink>
-          <NavLink to="/app/network" title="Network" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Network size={18} /> <span className="vb-nav-label">Network</span></NavLink>
-          <NavLink to="/app/settings" title="Settings" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><SlidersHorizontal size={18} /> <span className="vb-nav-label">Settings</span></NavLink>
+          <NavLink to="/app/orders" title="Orders: the purchase orders and deliveries invoices are matched against" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ClipboardList size={18} /> <span className="vb-nav-label">Orders</span></NavLink>
+          <NavLink to="/app/audit" title="Audit: auditor evidence requests, and proof the decision trail is untouched" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ShieldCheck size={18} /> <span className="vb-nav-label">Audit</span></NavLink>
+          <NavLink to="/app/pipeline" title="Pipeline: the seven automatic steps and how each is performing" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Activity size={18} /> <span className="vb-nav-label">Pipeline</span></NavLink>
+          <NavLink to="/app/network" title="Network: how vendors, the pipeline, payments and the ledger connect" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Network size={18} /> <span className="vb-nav-label">Network</span></NavLink>
+          <NavLink to="/app/settings" title="Settings: the auto-approval limits, and how this system is configured" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><SlidersHorizontal size={18} /> <span className="vb-nav-label">Settings</span></NavLink>
         </div>
         <div className="vb-side-spacer" />
         <div className="vb-side-foot">
@@ -64,10 +64,10 @@ export default function Shell() {
               <div style={{ color: 'var(--vb-text)', fontWeight: 600 }}>{name || 'No name set'}</div>
               {locked
                 ? <button type="button" className="vb-link-btn" onClick={logout}><LogOut size={12} aria-hidden="true" /> Sign out</button>
-                : <button type="button" className="vb-link-btn" onClick={openNameDialog}>{name ? 'Change name' : 'Set your name'}</button>}
+                : <button type="button" className="vb-link-btn" onClick={openNameDialog} title="Your name is recorded on every decision you make. Sign-in is off in this demo, so the name is self-declared.">{name ? 'Change name' : 'Set your name'}</button>}
             </div>
           </div>
-          <div className="vb-chain" title={chain ? `${chain.checked} decisions checked` : 'Could not check'}>
+          <div className="vb-chain" title={chain ? `All ${chain.checked} recorded decisions were re-hashed from the first and every link still matches, so no past decision has been edited. Rechecked every minute.` : 'Could not check the decision trail'}>
             <span className={`vb-dot ${chain ? (chain.valid ? 'vb-dot-ok' : 'vb-dot-bad') : ''}`} />
             {chain ? (chain.valid ? 'Audit trail intact' : 'Audit trail altered!') : 'Audit trail: unknown'}
           </div>
@@ -82,7 +82,7 @@ export default function Shell() {
           </div>
           <div className="vb-top-spacer" />
           {error && <span className="vb-chip vb-chip-rejected" role="status">Offline: {error.message}</span>}
-          <button type="button" className="vb-btn vb-btn-primary" onClick={() => setAdding(true)}><Plus size={16} /> Add invoice</button>
+          <button type="button" className="vb-btn vb-btn-primary" onClick={() => setAdding(true)} title="Upload a PDF or image, paste text, or use a sample. It is read, then checked against its purchase order in a few seconds."><Plus size={16} /> Add invoice</button>
         </header>
         <main className="vb-content">
           <Outlet context={{ system, openAddInvoice: () => setAdding(true) }} />

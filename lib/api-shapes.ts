@@ -190,6 +190,20 @@ function lastOf<T>(items: T[], pred: (t: T) => boolean): T | undefined {
   return undefined;
 }
 
+const FINDING_LINE = /^(EXC-[A-Z_]+|R99_AGENT_ERROR|CLEAN_MATCH|POLICY_LIMIT|INVESTIGATOR_HOLD):\s*[a-z_0-9]+$/;
+
+/**
+ * The specific facts the match step recorded for one finding (the claim right after "CODE: action"),
+ * e.g. which line was over its PO price and by how much. Null for records written before facts were
+ * recorded, which then fall back to the reason's general description.
+ */
+export function findingFact(match: DecisionInput | undefined, code: string): string | null {
+  const claims = match?.claims ?? [];
+  const i = claims.findIndex((c) => c.startsWith(`${code}:`) && FINDING_LINE.test(c));
+  const next = i >= 0 ? claims[i + 1] : undefined;
+  return next && !FINDING_LINE.test(next) ? next : null;
+}
+
 /** Pure: which product-level state an invoice is in. `paymentFailed` = it posted but the payment did not go out. */
 export function deriveState(status: BillStatus, paymentFailed: boolean): CaseState {
   switch (status) {
@@ -282,8 +296,18 @@ export function toFrontendInvoice(params: {
         detail = (clip(failureText ? readableAgentFailure(failureText, failure?.model) : undefined, 260) ?? "A step failed.") + " A person has to decide, or you can retry the AI review.";
       } else {
         headline = reason ? reason.name : "Needs a decision";
-        // A policy claim is the specific fact (e.g. which limit was breached); the reason's description is the general rule.
-        detail = clip(policy?.claims?.[0]) ?? reason?.description ?? clip(audit?.claims?.[0]);
+        // The most specific line first: the limit that was hit, or what the engine found on this invoice
+        // (which line, by how much); the reason's description is only the general rule.
+        const policyClaims = policy?.claims ?? [];
+        const verifierDisagreed = policyClaims.some((c) => c.startsWith("Verifier disagreed"));
+        if (reason?.code === "POLICY_LIMIT") detail = clip(policyClaims[policyClaims.length - 1], 260);
+        else if (reason?.code === "INVESTIGATOR_HOLD") detail = clip(policyClaims[0], 260);
+        else {
+          const fact = reason ? findingFact(lastOf(machine, (d) => d.nodeId === "match"), reason.code) : null;
+          detail = clip(fact, 260)
+            ?? (verifierDisagreed && reason ? `${reason.description} A second AI check also disagreed with the first, so the stricter outcome stands.` : null)
+            ?? clip(policyClaims[0]) ?? reason?.description ?? clip(audit?.claims?.[0]);
+        }
       }
       break;
     case "approved":
@@ -297,7 +321,9 @@ export function toFrontendInvoice(params: {
     case "rejected":
       decidedBy = lastHumanReject ? lastHumanReject.reviewer : "system";
       headline = lastHumanReject ? `Rejected by ${lastHumanReject.reviewer}` : (reason ? `Rejected automatically: ${reason.name}` : "Rejected automatically");
-      detail = lastHumanReject?.note ?? reason?.description ?? null;
+      detail = lastHumanReject?.note
+        ?? clip(reason ? findingFact(lastOf(machine, (d) => d.nodeId === "match"), reason.code) : null, 260)
+        ?? reason?.description ?? null;
       break;
   }
 

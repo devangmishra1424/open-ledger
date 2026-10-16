@@ -86,7 +86,7 @@ function NameDialog({ initial, onConfirm, onCancel }) {
         onSubmit={(e) => { e.preventDefault(); onConfirm(value); }}
       >
         <h2 id="vb-name-title">Who is making this decision?</h2>
-        <p className="vb-muted">Your name is recorded next to the decision in the audit trail. There is no login yet, so type the name you want on the record.</p>
+        <p className="vb-muted">Your name is recorded next to the decision in the audit trail. Sign-in is switched off on this server, so type the name you want on the record.</p>
         <label className="vb-field">
           <span>Your name</span>
           <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} maxLength={80} placeholder="e.g. Priya Shah" />

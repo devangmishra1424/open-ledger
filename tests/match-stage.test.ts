@@ -90,12 +90,13 @@ describe("runMatchStage", () => {
     const r = await runMatchStage(billId);
     expect(r.findings).toEqual([]);
     expect(r.combined.overallAction).toBe("auto_approve");
+    expect(r.cleanFact).toBe(`All 1 invoice line matched lines on purchase order ${PREFIX}-PO-CLEAN: every price is within 2% of the order, nothing is billed beyond what was received in good condition, and no line is outside the order. USD 1,000.00 billed with no exception found.`);
   });
 
   it("no PO reference at all fires EXC-NON_PO using the dollar-threshold table", async () => {
     const billId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-INV-NONPO", totalAmount: 500 });
     const r = await runMatchStage(billId);
-    expect(r.findings).toEqual([{ code: "EXC-NON_PO", action: expect.any(String) }]);
+    expect(r.findings).toEqual([{ code: "EXC-NON_PO", action: expect.any(String), fact: expect.stringContaining("refers to no purchase order") }]);
     expect(r.combined.dominantException).toBe("EXC-NON_PO");
   });
 
@@ -109,7 +110,7 @@ describe("runMatchStage", () => {
     const { poId } = await makePoWithLine({ poNumber: PREFIX + "-PO-CLOSED", status: "closed", unitPrice: 10, qtyOrdered: 100 });
     const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-INV-CLOSEDPO", totalAmount: 1000 });
     const r = await runMatchStage(billId);
-    expect(r.findings).toEqual([{ code: "EXC-NO_PO", action: "escalate_l2" }]);
+    expect(r.findings).toEqual([{ code: "EXC-NO_PO", action: "escalate_l2", fact: expect.stringContaining("which is closed") }]);
   });
 
   // Not tested: an invalid/nonexistent po_id on vendor_bills. vendor_bills.po_id is a real FK
@@ -150,7 +151,15 @@ describe("runMatchStage", () => {
     const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-INV-PRICEVAR", totalAmount: 1100 });
     await addBillLine(billId, { qty: 100, unitPrice: 11 }); // 10% over PO's $10 unit price
     const r = await runMatchStage(billId);
-    expect(r.findings.some((f) => f.code === "EXC-PRICE_VAR")).toBe(true);
+    const price = r.findings.find((f) => f.code === "EXC-PRICE_VAR");
+    expect(price?.action).toBe("block");
+    // The recorded fact names the real numbers, and the route the engine actually chose.
+    expect(price?.fact).toMatch(/^PO line 1 ".+": billed USD 11\.00 per .+ against the order's USD 10\.00, 10% above it \(2% is tolerated\)\. At the billed quantity of 100 that is USD 100\.00 more than agreed\./);
+    expect(price?.fact).toMatch(/This invoice was blocked\.$/);
+    // What the AI reviewers are handed carries the rules' findings, so they cannot read the line
+    // pairing alone and call a 10% overcharge "a perfect line match".
+    expect(r.detail.ruleFindings).toEqual([{ code: "EXC-PRICE_VAR", route: "block", fact: price?.fact }]);
+    expect(r.detail.rulesOutcome).toBe("block");
   });
 
   it("invoicing more than the GRN's accepted quantity fires EXC-QTY_VAR, even though it matches the PO's ordered quantity", async () => {
@@ -310,7 +319,7 @@ describe("runMatchStage", () => {
 
       const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-1", totalAmount: 1500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
       const r = await runMatchStage(creditId);
-      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1" }]);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.any(String) }]);
       expect(r.detail.creditMemoNetAmount).toBe(-1500);
     });
 
@@ -320,7 +329,7 @@ describe("runMatchStage", () => {
 
       const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-2", totalAmount: 1500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
       const r = await runMatchStage(creditId);
-      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "auto_approve" }]);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "auto_approve", fact: expect.stringContaining("It fits inside the open amount") }]);
       expect(r.detail.creditMemoNetAmount).toBe(8500);
     });
 
@@ -340,7 +349,7 @@ describe("runMatchStage", () => {
       const creditId = await makeBill({ poId, invoiceNumber: PREFIX + "-CM-4", totalAmount: 500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
       await addBillLine(creditId, { qty: 999, unitPrice: 10 }); // would be a wild EXC-QTY_VAR if 3-way matching ran
       const r = await runMatchStage(creditId);
-      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1" }]);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.any(String) }]);
     });
   });
 
@@ -447,7 +456,7 @@ describe("runMatchStage", () => {
       await addBillLine(billId, { description: "Expedite fee", qty: 1, unitPrice: 900 });
 
       const r = await runMatchStage(billId);
-      expect(r.findings).toEqual([{ code: "EXC-UNMATCHED_LINE", action: "escalate_l1" }]);
+      expect(r.findings).toEqual([{ code: "EXC-UNMATCHED_LINE", action: "escalate_l1", fact: expect.stringMatching(/^One invoice line is not on purchase order .+ at all: .+This invoice was sent to a reviewer\.$/) }]);
       expect(r.combined.overallAction).toBe("escalate_l1");
       expect(r.combined.dominantException).toBe("EXC-UNMATCHED_LINE");
       expect(r.detail.lineMatch).toMatchObject({
@@ -508,7 +517,7 @@ describe("runMatchStage", () => {
       const billId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-FRAUDBANK-1", totalAmount: 500, vendorId: bankVendorId });
 
       const r = await runMatchStage(billId);
-      expect(r.findings).toEqual([{ code: "EXC-FRAUD_BANK", action: "block_fraud_flag" }]);
+      expect(r.findings).toEqual([{ code: "EXC-FRAUD_BANK", action: "block_fraud_flag", fact: expect.stringContaining("nothing is paid to this vendor") }]);
       expect(r.detail.bankChangeGateStatus).toBe("flagged");
 
       const reviewRows = await sql`SELECT * FROM vendor_bank_change_reviews WHERE vendor_id = ${bankVendorId}`;

@@ -5,150 +5,145 @@
  *
  * Wording follows the matching spec (docs/ap-three-way-match-spec.md) and what the engine actually
  * does (lib/matching/decision-matrix.ts). Nothing here is company policy.
+ *
+ * Every "check" and "usually" names only something a person can do or see inside VeriBook (the
+ * tables and the original document on this page, the Orders page, Settings, and the Approve /
+ * Reject / Challenge / Check it again actions), never a step VeriBook has no screen for. "Level 2"
+ * is the route's own name: there are no reviewer roles, so any reviewer can decide either level.
  */
 
 export const REASON_GUIDE = {
   'EXC-NO_PO': {
-    means: 'The invoice points at a purchase order that does not exist, is not open, or is not approved for this vendor.',
-    why: 'Without an approved purchase order there is no agreed price or quantity to check the bill against.',
+    means: 'The invoice names a purchase order that is not on file for this vendor, or one that is closed.',
+    why: 'Without an open purchase order there is no agreed price or quantity to check the bill against.',
     check: [
-      'Is the PO number a typo, or missing from the invoice?',
-      'Was this spend approved some other way (a contract, an email)?',
-      'Does the vendor’s order exist under a different number?',
+      'Open the original under Source document: is the PO number printed correctly?',
+      'Is the order on the Orders page under a slightly different number?',
     ],
-    usually: 'Ask the vendor for the right PO, or approve it as an unplanned (non-PO) purchase if it was legitimately authorised.',
-    engine: 'Always goes to a senior reviewer.',
+    usually: 'If the order exists, add it on Orders or link it with "Check it again", and the whole match runs again. Otherwise approve it as spend authorised without an order, or reject it.',
+    engine: 'Always held for a person at level 2.',
   },
   'EXC-NON_PO': {
-    means: 'The invoice has no purchase order. It cannot be three-way matched, so it is routed for a person to confirm and code it.',
+    means: 'The invoice has no purchase order, so there is nothing to three-way match it against and a person decides it.',
     why: 'No purchase order means nobody has yet confirmed the price, the quantity, or that it was ordered.',
     check: [
-      'Who asked for this, and was it budgeted?',
-      'Which expense account should it be coded to?',
-      'Is the vendor one you expect to bill without a PO (rent, utilities, subscriptions)?',
+      'Read the billed lines and the original under Source document.',
+      'Is there an order on the Orders page that this invoice should have quoted?',
     ],
-    usually: 'Approve with the right coding if the spend was authorised; otherwise reject.',
-    engine: 'Always reviewed by a person; the one exception is a small invoice (up to $100) from a whitelisted vendor. Over $1,000 goes to a senior reviewer, and over $10,000 is blocked.',
+    usually: 'If an order exists, link it with "Check it again" and the match runs. Otherwise approve it if the spend was authorised, or reject it.',
+    engine: 'Always held for a person, except a small invoice (up to $100) from a trusted vendor. Over $1,000 it is held at level 2, and over $10,000 it is blocked.',
   },
   'EXC-BEFORE_RCV': {
     means: 'The invoice arrived before the goods or services were recorded as received.',
     why: 'Paying before delivery risks paying for something that never arrives.',
     check: [
-      'Has the delivery actually happened but not been recorded yet?',
-      'Does the vendor invoice in advance by agreement?',
+      'Look at the Received column in the table below.',
+      'On the Orders page, is a delivery against this order recorded yet?',
     ],
-    usually: 'Wait for the receiving record, then re-check. Pay in advance only if that was agreed.',
-    engine: 'With no receipt on file it is blocked; with a receipt it goes to a reviewer.',
+    usually: 'Record the delivery on the Orders page when it arrives: the invoice is checked again on its own. Or decide it now: approve to pay in advance, or reject.',
+    engine: 'With no receipt on file it is blocked; with a receipt a person decides (level 2 above $1,000, blocked above $10,000).',
   },
   'EXC-PRICE_VAR': {
     means: 'A unit price on the invoice differs from the purchase-order price by more than the allowed tolerance (2% on the line).',
     why: 'Overbilling most often shows up as price drift. Small drift is normal and tolerated; larger drift needs an explanation.',
     check: [
-      'Was a price change agreed in writing?',
-      'Is it a currency or unit-of-measure issue rather than a real price change?',
       'Compare the Ordered and Invoiced columns in the table below.',
+      'Is it a unit-of-measure difference rather than a real price change?',
     ],
-    usually: 'Approve if the new price was agreed; otherwise reject, or ask the vendor for a credit note.',
+    usually: 'Approve if the new price was agreed, otherwise reject. If you have a reason the AI should weigh, challenge it with that note.',
     engine: 'A difference of 5% or more, or more than $500, is blocked; a smaller one goes to a reviewer.',
   },
   'EXC-QTY_VAR': {
-    means: 'The quantity invoiced differs from the quantity received.',
+    means: 'The quantity invoiced is more than the quantity received.',
     why: 'Billing for more than was delivered means paying for goods you do not have.',
     check: [
       'Compare Received and Invoiced in the table below. Damaged or rejected deliveries are not counted as received.',
-      'Is the rest of the delivery still on its way?',
+      'On the Orders page, is a later delivery against this order still to be recorded?',
     ],
-    usually: 'Pay what was received and ask for a corrected invoice, or approve once the remaining delivery is recorded.',
+    usually: 'If the rest has arrived, record it on Orders: the invoice is checked again on its own. Otherwise reject it, or approve it if you accept paying for the full quantity.',
     engine: 'More than 5% over, or more than 2 units, is blocked; a smaller difference goes to a reviewer.',
   },
   'EXC-DUPLICATE': {
-    means: 'This looks like an invoice you have already received: the same number, or a near-identical number, amount and date.',
+    means: 'An invoice with the same vendor and invoice number is already on file.',
     why: 'Paying the same invoice twice is one of the most common accounts-payable losses.',
     check: [
-      'Open the earlier invoice and compare number, date and amount.',
-      'Is this a genuine second bill for a repeat order?',
+      'Search the inbox for the invoice number and compare the date and amount.',
     ],
     usually: 'Reject the duplicate.',
-    engine: 'Rejected automatically, every time. It is checked before any matching.',
+    engine: 'Saving the same invoice number twice from one vendor is refused when it is entered, so a repeat never reaches matching.',
   },
   'EXC-CREDIT_MEMO': {
-    means: 'This is a credit memo: money the vendor owes you, which has to be netted against an open or future invoice from the same vendor.',
-    why: 'A credit that is not applied is money left on the table, and applying it to the wrong invoice hides the real balance.',
+    means: 'This is a credit memo: money the vendor owes you, measured against what is still open on the invoice it relates to.',
+    why: 'A credit larger than what is left open on the related invoice cannot simply be taken off it.',
     check: [
-      'Which invoice does it relate to?',
-      'Does the credit amount match what the vendor agreed?',
+      'Which invoice does it relate to, and how much of that invoice is still open?',
+      'Does the credit amount match the original invoice it corrects?',
     ],
-    usually: 'Apply it against the related invoice and approve.',
-    engine: 'Approved automatically when the credit fits inside the invoice it nets against; a credit larger than that goes to a reviewer.',
+    usually: 'Reject it if the credit is wrong. VeriBook checks a credit against the related invoice but does not yet apply credits to payments: approving one posts it the same way as an invoice.',
+    engine: 'Routed as approved when the credit fits inside what is open on the related invoice; a larger credit goes to a reviewer.',
   },
   'EXC-PARTIAL': {
-    means: 'The invoice covers only part of the purchase order: a partial shipment, or an explicit partial payment.',
-    why: 'A partial bill is normal, but the rest of the order needs tracking so it is neither forgotten nor billed twice.',
+    means: 'The invoice covers only part of the purchase order, for example a partial shipment.',
+    why: 'A partial bill is normal; what matters is that each line bills no more than arrived.',
     check: [
-      'How much of the order is still to come?',
-      'Is this marked as the final delivery?',
+      'How much of the order is still to come (Ordered against Received in the table below)?',
     ],
-    usually: 'Approve the part that was delivered.',
+    usually: 'Approve it: it bills only what it covers.',
     engine: 'Partial billing is expected, so on its own it is approved automatically. It reaches you only alongside another finding.',
   },
   'EXC-CURRENCY': {
-    means: 'The invoice currency differs from the purchase order or the receipt, or is a currency this system cannot handle.',
-    why: 'Amounts in different currencies cannot be compared directly, and this system does not convert.',
+    means: 'The invoice currency differs from the purchase order, or is a currency this system cannot handle.',
+    why: 'Amounts in different currencies cannot be compared directly, and this system does not convert between them.',
     check: [
-      'Was the order placed in a different currency from the one billed?',
-      'What exchange rate applies, and who agreed it?',
+      'Compare the invoice currency with the order currency shown on this page.',
     ],
-    usually: 'Ask the vendor to reissue in the order currency, or have finance handle the conversion.',
-    engine: 'An unsupported currency is blocked; otherwise a reviewer decides, and a senior reviewer if the exchange rate differs by more than 1%.',
+    usually: 'Approve only if the amount is right in the billed currency; otherwise reject it.',
+    engine: 'An unsupported currency is blocked; otherwise a reviewer decides, at level 2 if the exchange rate differs by more than 1%.',
   },
   'EXC-TAX_VAR': {
-    means: 'The tax charged does not match the expected rate for this jurisdiction.',
+    means: 'The tax charged on a line does not match the rate of the tax code on that line.',
     why: 'Wrong tax is either an overpayment or a compliance problem.',
     check: [
-      'Is the vendor charging the right rate for the place and the goods?',
-      'Is the vendor tax-exempt or a reseller?',
+      'Compare the tax on the invoice (Source document) with the expected rate stated above.',
     ],
-    usually: 'Ask the vendor to correct the tax, or approve if the different rate is right.',
+    usually: 'Approve if the charged rate is right, otherwise reject.',
     engine: 'A rate difference over 2%, or more than $100 of tax, is blocked; a smaller one goes to a reviewer.',
   },
   'EXC-LAYOUT': {
     means: 'The document could not be read with enough confidence (below 85%).',
     why: 'A misread amount would be paid as it was misread.',
     check: [
-      'Compare the fields in the table below with the original document.',
-      'Look at the “Uncertain” notes in the extraction step.',
+      'Compare the billed lines and totals on this page with the original under Source document.',
+      'Look at the “Uncertain” notes in the reading step.',
     ],
-    usually: 'Ask for a cleaner copy, or correct and re-submit it.',
-    engine: 'Always blocked: a document that cannot be read cannot be processed.',
+    usually: 'Approve if every field matches the original; otherwise reject it.',
+    engine: 'Always blocked: nothing read with low confidence is paid without a person.',
   },
   'EXC-FRAUD_BANK': {
     means: 'The vendor’s bank account details changed recently.',
     why: 'Redirecting payments to a new account is the most common way payment fraud works. A real vendor will not mind a phone call.',
     check: [
-      'Phone the vendor on a number from your own records, not from the invoice or the change request.',
-      'Ask them to confirm they asked for the change.',
+      'Phone the vendor on a number from your own records, not from the invoice or the change request, and record what they said (steps on the right).',
     ],
     usually: 'After a confirmed call and a second person’s sign-off, approve. If they do not confirm, the vendor is flagged and the invoice stays blocked.',
-    engine: 'Outranks every other reason and is never auto-approved, whatever the amount. Nothing is paid until the check is complete.',
+    engine: 'Outranks every other reason and is never auto-approved, whatever the amount. Approval stays locked until the callback is confirmed and signed off.',
   },
   'EXC-BLANKET_EXCEEDED': {
     means: 'Total billed against a blanket purchase order is above its agreed ceiling.',
     why: 'A blanket order lets a vendor bill repeatedly up to a limit; going over means spend nobody approved.',
     check: [
-      'How much has already been billed against this order?',
-      'Was the ceiling raised and not updated?',
+      'How much has already been billed against this order (the Orders page lists its invoices)?',
     ],
-    usually: 'Approve only with the extension authorised, otherwise reject the excess.',
-    engine: 'Over the ceiling by up to 10%: a senior reviewer decides. By more than 10%: blocked.',
+    usually: 'Approve it if the higher spend was authorised, otherwise reject it.',
+    engine: 'Over the ceiling by up to 10%: held at level 2. By more than 10%: blocked.',
   },
   'EXC-UOM_MISMATCH': {
-    means: 'The invoice and the purchase order disagree on the unit of measure (for example boxes against single items) and there is no conversion on file.',
+    means: 'The invoice and the purchase order disagree on the unit of measure (for example boxes against single items) and no conversion is on file for this vendor.',
     why: 'The numbers look wrong or right by accident: ten boxes of twelve is not ten items.',
     check: [
-      'What unit does the vendor mean on the invoice?',
-      'Is there a known conversion (12 per box)?',
+      'Compare the units in the table below with the original under Source document.',
     ],
-    usually: 'Confirm the conversion, record it, then approve.',
+    usually: 'Approve it if you have confirmed the quantities match, otherwise reject it.',
     engine: 'A line with a different unit is never matched automatically. If a conversion looks plausible a reviewer decides; if not, it is blocked.',
   },
   'EXC-UNMATCHED_LINE': {
@@ -156,20 +151,19 @@ export const REASON_GUIDE = {
     why: 'The purchase order is what was agreed. A line outside it is spend nobody approved, even when every other line matches perfectly.',
     check: [
       'Read the extra lines listed in the matching table below.',
-      'Was the charge agreed separately (an email, a contract clause)?',
       'Is it a line the vendor described differently from the purchase order?',
     ],
-    usually: 'Approve if the charge was agreed, otherwise ask the vendor for a corrected invoice without it.',
-    engine: 'Never approved automatically. Up to $1,000 a reviewer decides; up to $10,000 a senior reviewer; above that it is blocked.',
+    usually: 'Approve if the charge was agreed, otherwise reject it.',
+    engine: 'Never approved automatically. Up to $1,000 a reviewer decides; up to $10,000 it is held at level 2; above that it is blocked.',
   },
   INVESTIGATOR_HOLD: {
-    means: 'Every rule passed, but the AI reviewer recommended a stricter outcome, so the invoice was held for a person.',
+    means: 'Every rule passed, but the AI reviewer held the invoice for a person: it recommended a stricter outcome, or wrote advice instead of one of the system’s routes.',
     why: 'The AI can only make a decision stricter, never looser. When it raises a concern the rules did not, a person looks before any money moves.',
     check: [
       'Read the AI reviewer’s reasoning in the trail below.',
       'Check the specific concern it names against the invoice and the purchase order.',
     ],
-    usually: 'Approve if the concern does not hold up; reject or contest it if it does.',
+    usually: 'Approve if the concern does not hold up; reject it if it does, or challenge it with a note for the AI.',
     engine: 'Only ever turns an automatic approval into a review. It never approves or rejects anything on its own.',
   },
   R99_AGENT_ERROR: {
@@ -177,18 +171,17 @@ export const REASON_GUIDE = {
     why: 'The system holds it rather than guessing. The invoice itself may be perfectly fine.',
     check: [
       'Read the reason in the trail below (a provider limit, a timeout, an unreadable response).',
-      'Try Retry AI review once the cause has passed.',
     ],
-    usually: 'Retry the automated review, or decide it yourself.',
+    usually: 'Use Retry AI review once the cause has passed, or decide it yourself.',
     engine: 'Always held for a person.',
   },
   POLICY_LIMIT: {
     means: 'This invoice matched cleanly but was held because of a limit set on the Settings page: its amount, or how sure the AI reviewer was.',
-    why: 'You asked for a person to look at anything above that line.',
+    why: 'The limit asks for a person to look at anything above that line.',
     check: [
       'The specific limit that was hit is stated above.',
     ],
-    usually: 'Approve if you are comfortable, or change the limit in Settings for the future.',
+    usually: 'Approve if you are comfortable, or change the limit in Settings for invoices checked from now on.',
     engine: 'Only ever turns an automatic approval into a review. It never approves anything.',
   },
 };
@@ -197,7 +190,7 @@ export const REASON_GUIDE = {
 export const AUTO_APPROVED_GUIDE = {
   means: 'Every automatic check passed, so no person was needed.',
   checks: [
-    'The vendor is in good standing and this is not a duplicate.',
+    'The vendor is not flagged and the invoice number is not already on file.',
     'The invoice was read with enough confidence (85% or more).',
     'Each line matched a purchase-order line, with price and quantity inside tolerance.',
     'What is billed does not exceed what was received.',
