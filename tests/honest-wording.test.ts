@@ -97,6 +97,8 @@ describe("a credit memo is never described as paid", () => {
   it("the trail's last step and the headline, once a credit is approved", () => {
     expect(outcomeWords({ nodeId: "audit", actionTaken: "auto_approve" }, { invoiceType: "credit_memo" })).toBe("Credit posted to the ledger; nothing paid");
     expect(outcomeWords({ nodeId: "audit", actionTaken: "no_payment" })).toBe("Posted to the ledger; nothing paid");
+    expect(outcomeWords({ nodeId: "audit", actionTaken: "paid_less_credit" })).toBe("Paid, less the vendor’s credit");
+    // Only an approval paid in full is recorded as auto_approve (credit changes it: tests/credit-applications.test.ts).
     expect(outcomeWords({ nodeId: "audit", actionTaken: "auto_approve" })).toBe("Posted to the ledger and paid");
 
     const bill = { id: "cm1", invoice_number: "INV-2024-0847-CM", status: "posted", total_amount: 2000, currency: "USD", invoice_type: "credit_memo",

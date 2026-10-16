@@ -8,6 +8,9 @@ import { postBillApproval } from "@/lib/ledger/journal";
 import { triggerPayment, settleApprovedBill } from "@/lib/payments/payments";
 import { approveInvoice, rejectInvoice } from "@/lib/ledger/human-review";
 import { runAuditStage } from "@/lib/pipeline/orchestrator";
+import { getFrontendInvoice } from "@/lib/api-shapes";
+import { GET as activityFeed } from "@/app/api/activity/route";
+import { outcomeWords } from "../frontend/src/lib/labels";
 
 /**
  * An approved credit memo is never paid. Its credit comes off what is owed on the vendor's invoices:
@@ -255,6 +258,66 @@ describe("a credit memo's leftover comes off the vendor's later invoices", () =>
     expect(await creditsOn(invoice.billId)).toEqual([[credit.billId, 250]]);
     expect(await paidOn(invoice.billId)).toEqual([750]);
     expect(await usedOf(later.billId)).toBe(0);
+  });
+});
+
+describe("the pipeline approving an invoice: the trail says what credit did to the payment", () => {
+  /** The policy step approving a bill on its own, as the audit stage receives it. */
+  async function autoApproved(billId: string) {
+    const now = new Date().toISOString();
+    return writeDecision({
+      invoiceId: billId, nodeId: "policy", agentId: "deterministic-policy-engine", startedAt: now, endedAt: now,
+      actionTaken: "auto_approve", reasonCode: "CLEAN_MATCH", idempotencyKey: `policy-auto:${billId}`,
+    });
+  }
+  /** The audit step as the case page shows it (its headline on the trail, and the case headline) and the activity feed's type for it. */
+  async function onScreen(billId: string, auditId: string) {
+    const view = (await getFrontendInvoice(billId))!;
+    const audit = view.decisions.find((d) => d.id === auditId)!;
+    const feed: Array<{ id: string; type: string }> = await (await activityFeed()).json();
+    return { step: outcomeWords(audit, view), headline: view.summary.headline, activity: feed.find((r) => r.id === auditId)?.type };
+  }
+  const SAYS_PAID = /(?<!nothing |nothing is |never )(pays?|paid)/i;
+
+  it("credit covers all of it: the record says nothing was paid, and so does the trail", async () => {
+    const vendorId = await makeVendor();
+    const credit = await leftoverCredit(vendorId, 1500);
+    const invoice = await makeBill(vendorId, { amount: 1000, status: "processing" });
+
+    const audit = await runAuditStage(invoice.billId, await autoApproved(invoice.billId));
+
+    expect(audit.actionTaken).toBe("no_payment");
+    expect(audit.claims?.[0].text).toBe(`USD 1,000.00 of the vendor's approved credit, from credit memo ${credit.number}, covers all of this invoice. Nothing is paid.`);
+    expect(await paidOn(invoice.billId)).toEqual([]);
+    expect(await statusOf(invoice.billId)).toBe("posted");
+    const shown = await onScreen(invoice.billId, audit.id);
+    expect(shown).toEqual({ step: "Posted to the ledger; nothing paid", headline: "Auto-approved: clean three-way match, posted to the ledger", activity: "SEAL_COMMITTED" });
+    expect([shown.step, shown.headline].filter((t) => SAYS_PAID.test(t))).toEqual([]);
+  });
+
+  it("credit covers part of it: the record and the trail say it was paid less the credit", async () => {
+    const vendorId = await makeVendor();
+    await leftoverCredit(vendorId, 250);
+    const invoice = await makeBill(vendorId, { amount: 1000, status: "processing" });
+
+    const audit = await runAuditStage(invoice.billId, await autoApproved(invoice.billId));
+
+    expect(audit.actionTaken).toBe("paid_less_credit");
+    expect(await paidOn(invoice.billId)).toEqual([750]);
+    expect(await onScreen(invoice.billId, audit.id)).toEqual({ step: "Paid, less the vendor’s credit", headline: "Auto-approved: clean three-way match, paid", activity: "SEAL_COMMITTED" });
+  });
+
+  it("credit the invoice cannot use (another currency) changes nothing: auto_approve, paid in full", async () => {
+    const vendorId = await makeVendor();
+    await leftoverCredit(vendorId, 300, { currency: "EUR" });
+    const invoice = await makeBill(vendorId, { amount: 1000, status: "processing" });
+
+    const audit = await runAuditStage(invoice.billId, await autoApproved(invoice.billId));
+
+    expect(audit.actionTaken).toBe("auto_approve");
+    expect(audit.claims).toBeUndefined();
+    expect(await paidOn(invoice.billId)).toEqual([1000]);
+    expect(await onScreen(invoice.billId, audit.id)).toEqual({ step: "Posted to the ledger and paid", headline: "Auto-approved: clean three-way match, paid", activity: "SEAL_COMMITTED" });
   });
 });
 

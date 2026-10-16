@@ -1,12 +1,15 @@
 import { getSql } from "@/db/client";
 import { nodeLabel } from "@/lib/api-shapes";
 
+/** Audit records that say the invoice was posted to the ledger: paid, or settled by the vendor's credit (in whole or in part). */
+const POSTED = new Set(["auto_approve", "no_payment", "paid_less_credit"]);
+
 /** GET /api/activity — recent pipeline decisions as a flat activity feed, most recent first. */
 function activityType(nodeId: string, actionTaken: string | null, reasonCode: string | null): string {
   if (nodeId === "extract") return "INVOICE_INGESTED";
   if (nodeId === "human_review") return "HUMAN_DECISION";
   if (nodeId === "audit_assemble") return "EVIDENCE_PROVIDED";
-  if (nodeId === "audit" && actionTaken === "auto_approve") return "SEAL_COMMITTED";
+  if (nodeId === "audit" && POSTED.has(actionTaken ?? "")) return "SEAL_COMMITTED";
   if (reasonCode && reasonCode !== "CLEAN_MATCH") return "DISCREPANCY_FLAGGED";
   return "AGENT_DECISION";
 }
