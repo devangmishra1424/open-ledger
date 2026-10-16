@@ -39,6 +39,10 @@ jobs:
       # Document reading: the field rules scored on the saved real reader output for 39 invoices (scans, photos, Word,
       # Excel). Fails on any wrong field that was not flagged for a person, or if accuracy drops below the floor.
       - run: npx tsx eval/documents/run.ts --no-llm --cached-only --min-correct 340
+      # The hosted build (frontend, then Next), as Vercel runs it: with no database secret, which the build must not need.
+      - run: npm run build
+        env:
+          DATABASE_URL: ""
 
   frontend:
     runs-on: ubuntu-latest
