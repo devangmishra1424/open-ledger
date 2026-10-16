@@ -74,6 +74,9 @@ describe("finding facts", () => {
       .toContain("against invoice INV-2024-0847, which is already paid, so nothing is left open on it. USD 2,000.00 of the credit is more than is open on that invoice, so a person decides it");
     expect(facts.creditMemoFact({ credit: 200, currency: "USD", relatedNumber: "INV-1", relatedStatus: "posted", openAmount: 1000, net: 800, action: "auto_approve" }))
       .toContain("which has USD 1,000.00 still open. It fits inside the open amount (leaving USD 800.00)");
+    expect(facts.creditMemoFact({ credit: 500, currency: "USD", relatedNumber: "INV-2", relatedStatus: "void", openAmount: 0, net: -500, action: "escalate_l1" }))
+      .toBe("This is a credit of USD 500.00 against invoice INV-2, which was rejected, so nothing was ever owed on it. " +
+        "Approving the credit would lower what you owe the vendor for money that was never owed, so a person decides it. This invoice was sent to a reviewer.");
   });
 
   it("a clean match says what was compared and found to agree", () => {

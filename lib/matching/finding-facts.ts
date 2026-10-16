@@ -129,6 +129,10 @@ export function creditMemoFact(p: {
   credit: number; currency: string; relatedNumber: string | null; relatedStatus: string; openAmount: number; net: number; action: Action;
 }): string {
   const target = p.relatedNumber ? `invoice ${p.relatedNumber}` : "the related invoice";
+  if (p.relatedStatus === "void") {
+    return `This is a credit of ${money(p.credit, p.currency)} against ${target}, which was rejected, so nothing was ever owed on it. ` +
+      `Approving the credit would lower what you owe the vendor for money that was never owed, so a person decides it. ${outcome(p.action)}`;
+  }
   const open = p.relatedStatus === "paid" ? `which is already paid, so nothing is left open on it` : `which has ${money(p.openAmount, p.currency)} still open`;
   return `This is a credit of ${money(p.credit, p.currency)} against ${target}, ${open}. ` +
     (p.net >= 0

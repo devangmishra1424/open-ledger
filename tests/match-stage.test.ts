@@ -333,6 +333,20 @@ describe("runMatchStage", () => {
       expect(r.detail.creditMemoNetAmount).toBe(8500);
     });
 
+    it("a credit against a rejected (void) invoice goes to a person, though it is smaller than that invoice's total", async () => {
+      const originalId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-ORIGINAL-VOID", totalAmount: 10000 });
+      await sql`UPDATE vendor_bills SET status = 'void' WHERE id = ${originalId}`;
+
+      const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-VOID", totalAmount: 1500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
+      const r = await runMatchStage(creditId);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.stringContaining("which was rejected, so nothing was ever owed on it") }]);
+      expect(r.detail.creditMemoNetAmount).toBe(-1500);
+
+      // Even a credit of 0 (net 0, which fits anywhere else) is a person's call.
+      const zeroId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-VOID-0", totalAmount: 0, invoiceType: "credit_memo", relatedInvoiceId: originalId });
+      expect((await runMatchStage(zeroId)).findings.map((f) => f.action)).toEqual(["escalate_l1"]);
+    });
+
     it("skips the check (no fabricated finding) when related_invoice_id isn't set", async () => {
       const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-3", totalAmount: 1500, invoiceType: "credit_memo" });
       const r = await runMatchStage(creditId);
