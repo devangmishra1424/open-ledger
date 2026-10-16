@@ -481,6 +481,9 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
   const startedAt = new Date().toISOString();
   const idempotencyKey = idemKey(vendorBillId, "audit", recon ? `:${recon.attemptTag}` : "");
   const settlementClaims: Claim[] = [];
+  // What the record says was done. An approval the vendor's credit changed says so, as a person's
+  // approval does (human-review.ts): no_payment, or paid_less_credit. auto_approve would read "paid".
+  let actionTaken: string = action;
 
   if (action === "auto_approve") {
     // postBillApproval (lib/ledger/journal.ts, delivered by the AO worker — see the task
@@ -512,6 +515,9 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
       const billRows = await sql`SELECT currency FROM vendor_bills WHERE id = ${vendorBillId}`;
       const note = settlementNote(settlement, billRows[0]?.currency ?? "USD");
       if (note) settlementClaims.push({ text: note, tag: "grounded" });
+      // A credit memo keeps auto_approve: the trail reads its invoice type and says nothing is paid.
+      if (settlement.kind === "covered_by_credit") actionTaken = "no_payment";
+      else if (settlement.kind === "paid" && settlement.credited > 0) actionTaken = "paid_less_credit";
     } catch (e) {
       const d = await writeDecision({
         invoiceId: vendorBillId, nodeId: "audit", agentId: "deterministic-policy-engine",
@@ -548,7 +554,7 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
   const d = await writeDecision({
     invoiceId: vendorBillId, nodeId: "audit", agentId: "deterministic-policy-engine",
     parentDecisionId: policyDecision.id, startedAt, endedAt: new Date().toISOString(),
-    actionTaken: action, reasonCode: policyDecision.reasonCode,
+    actionTaken, reasonCode: policyDecision.reasonCode,
     claims: settlementClaims.length > 0 ? settlementClaims : undefined,
     idempotencyKey,
   });
