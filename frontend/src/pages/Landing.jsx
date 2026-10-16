@@ -40,7 +40,8 @@ const LIMITS = [
   'The tolerances come from a written matching spec, not from your company’s own policy. They are one table to change.',
   'Scans and photos are read by OCR, and every line must add up before an invoice is saved; a field the reader is unsure of is marked for a person to check, not guessed.',
   'No reviewer roles yet: any reviewer can decide any held invoice. "Level 2" marks the larger or riskier cases; it does not route them to someone else.',
-  'Tax is not checked line by line, and a credit memo is checked against its invoice but not applied to a payment.',
+  'Tax is not checked line by line.',
+  'An approved credit memo lowers what you owe the vendor and is never paid out. It comes off the payment of its own invoice only while that invoice is unpaid; otherwise it stays on the ledger as money the vendor owes you, and is not used against their later invoices.',
   'The audit trail is tamper-evident, not tamper-proof: it shows that a record changed, not who changed it.',
 ];
 

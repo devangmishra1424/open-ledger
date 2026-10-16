@@ -5,7 +5,7 @@ import { handle, optionalString, readJsonBody, reviewerName } from "@/lib/http";
 /**
  * POST /api/invoices/:id/approve — a human approves an invoice that is waiting on a person.
  * Body: { reviewerName, reason? }. Posts it to the ledger, records who approved it in the hash
- * chain, and pays it. 409 if its state doesn't allow approval (already rejected, bank-detail
+ * chain, and pays what is owed on it — nothing for a credit memo (`noPayment`). 409 if its state doesn't allow approval (already rejected, bank-detail
  * change not yet verified, still processing); approving an already-approved invoice is a no-op.
  */
 export const POST = handle("POST /api/invoices/:id/approve", async (req, { params }: { params: Promise<{ id: string }> }) => {
@@ -18,6 +18,7 @@ export const POST = handle("POST /api/invoices/:id/approve", async (req, { param
     alreadyDone: outcome.alreadyDone,
     payment: outcome.payment ? { reference: outcome.payment.reference, simulated: outcome.payment.simulated } : undefined,
     paymentError: outcome.paymentError,
+    noPayment: outcome.noPayment,
     invoice,
   });
 });

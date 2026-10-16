@@ -12,7 +12,7 @@ import { STAGE_GUIDE, KIND_LABEL, GATE_WORDS } from '../../lib/stageGuide';
 
 const BAD = new Set(['error', 'payment_failed', 'disagreement']);
 const WARN = new Set(['escalate_l1', 'escalate_l2', 'block', 'block_fraud_flag', 'auto_reject', 'human_rejected', 'human_contested']);
-const GOOD = new Set(['pass', 'parsed', 'extracted', 'auto_approve', 'human_approved']);
+const GOOD = new Set(['pass', 'parsed', 'extracted', 'auto_approve', 'human_approved', 'no_payment', 'paid_less_credit']);
 const tone = (raw) => { const a = normalizeAction(raw); return BAD.has(a) ? 'bad' : WARN.has(a) ? 'warn' : GOOD.has(a) ? 'good' : 'neutral'; };
 
 /** An engine finding written as "EXC-PRICE_VAR: escalate_l1" is shown as a labelled row rather than prose. */
@@ -91,7 +91,7 @@ export default function Stages({ invoice }) {
                   </h4>
                   <div className="vb-dim vb-small vb-stage-what">{g?.what ?? STAGE_HELP[d.nodeId] ?? ''}</div>
                 </div>
-                <span className={`vb-outcome vb-outcome-${t}`}>{outcomeWords(d)}</span>
+                <span className={`vb-outcome vb-outcome-${t}`}>{outcomeWords(d, invoice)}</span>
               </header>
 
               <div className="vb-stage-meta">

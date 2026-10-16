@@ -44,6 +44,8 @@ export interface CaseLike {
   bankChange?: { step: string; oldBankLast4: string | null; newBankLast4: string | null } | null;
   actions?: Record<'approve' | 'reject' | 'contest', { allowed: boolean; reason?: string }>;
   summary?: { decidedBy: string | null };
+  /** A credit memo lowers what is owed to the vendor and is never paid. */
+  invoiceType?: 'standard' | 'credit_memo';
 }
 
 export interface Route {
@@ -234,11 +236,16 @@ function choiceWords(inv: CaseLike): CaseExplanation['choices'] {
   const a = inv.actions;
   const amount = money(inv.amount, inv.currency);
   const why = (k: 'approve' | 'reject' | 'contest') => (a && !a[k].allowed && a[k].reason ? `Not available now: ${a[k].reason}.` : null);
+  const credit = inv.invoiceType === 'credit_memo';
   return {
     approve: why('approve') ?? (inv.bankChange
       ? 'Unlocks only after the bank change is verified by phone and a second person signs off (steps above).'
-      : `Posts ${amount} to the ledger as owed to ${inv.vendor}, then pays it (simulated: no money moves). Your name goes on the record.`),
-    reject: why('reject') ?? `Voids this invoice: ${amount} is never posted or paid. Use it for an overcharge you will not accept, or a bill nobody ordered.`,
+      : credit
+        ? `Posts this credit of ${amount} to the ledger: it lowers what you owe ${inv.vendor}. Nothing is paid. Your name goes on the record.`
+        : `Posts ${amount} to the ledger as owed to ${inv.vendor}, then pays it (simulated: no money moves). Your name goes on the record.`),
+    reject: why('reject') ?? (credit
+      ? `Voids this credit: ${amount} is never posted. Use it if the credit is wrong.`
+      : `Voids this invoice: ${amount} is never posted or paid. Use it for an overcharge you will not accept, or a bill nobody ordered.`),
     contest: why('contest') ?? 'Sends it back to the AI with your note, e.g. "the new price was agreed on 3 October". The AI re-reviews with it, but can only make the outcome stricter: it cannot approve what the rules flagged.',
   };
 }

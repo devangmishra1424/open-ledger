@@ -41,6 +41,8 @@ export default function DecisionPanel({ invoice }) {
     (res) => {
       if (res.alreadyDone) toast.info('This invoice was already approved.');
       else if (res.paymentError) toast.error(`Approved and posted to the ledger, but the payment did not go out: ${res.paymentError}`);
+      else if (res.noPayment === 'credit_memo') toast.success(`Approved. The credit is posted to the ledger and lowers what you owe ${invoice.vendor}; nothing is paid.`);
+      else if (res.noPayment === 'covered_by_credit') toast.success('Approved and posted to the ledger. Credits already approved against it cover all of it, so nothing is paid.');
       else toast.success('Approved, posted to the ledger and paid (simulated rail: no money moved).');
     },
   );
@@ -85,7 +87,9 @@ export default function DecisionPanel({ invoice }) {
 
       {form && (
         <div className="vb-action-form">
-          {form === 'approve' && <p className="vb-muted vb-small" style={{ margin: 0 }}>Approving posts <b>{formatMoney(invoice.amount, invoice.currency)}</b> to the ledger and pays it (simulated rail). Your name goes on the record.</p>}
+          {form === 'approve' && (invoice.invoiceType === 'credit_memo'
+            ? <p className="vb-muted vb-small" style={{ margin: 0 }}>Approving posts this credit of <b>{formatMoney(invoice.amount, invoice.currency)}</b> to the ledger: it lowers what you owe {invoice.vendor}. Nothing is paid. Your name goes on the record.</p>
+            : <p className="vb-muted vb-small" style={{ margin: 0 }}>Approving posts <b>{formatMoney(invoice.amount, invoice.currency)}</b> to the ledger and pays it (simulated rail). Your name goes on the record.</p>)}
           {form === 'contest' && <p className="vb-muted vb-small" style={{ margin: 0 }}>Ask the AI to look again. Tell it what it may have missed; it answers exactly what you ask. It can only make the outcome stricter, never approve something the rules flagged.</p>}
           {form === 'reject' && <p className="vb-muted vb-small" style={{ margin: 0 }}>Rejecting marks it void. It will not be posted or paid. Your name goes on the record.</p>}
           <label className="vb-field">

@@ -8,7 +8,7 @@ export interface DecisionWords {
 export const STAGE_HELP: Record<string, string>;
 export function normalizeAction(action: string | null | undefined): string | null | undefined;
 export function actionWords(action: string | null | undefined): string;
-export function outcomeWords(decision: DecisionWords): string;
+export function outcomeWords(decision: DecisionWords, invoice?: { invoiceType?: string }): string;
 export function actorWords(decision: DecisionWords): string;
 export const STATE_LABEL: Record<string, string>;
 export function formatMoney(amount: number, currency?: string): string;

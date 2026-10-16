@@ -10,7 +10,7 @@ import { extract, type ExtractionResult } from "@/lib/agent/extractor";
 import { modelFor } from "@/lib/agent/llm";
 import { getPolicyLimits, guardrailBreach } from "@/lib/settings";
 import { postBillApproval } from "@/lib/ledger/journal";
-import { triggerPayment } from "@/lib/payments/payments";
+import { settleApprovedBill, settlementNote } from "@/lib/payments/payments";
 import { notifyReviewer } from "@/lib/telegram";
 import { hashJson } from "@/lib/agent/hash";
 import { publishPipelineEvent } from "@/lib/pipeline/events";
@@ -480,6 +480,7 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
   const action = policyDecision.actionTaken as Action;
   const startedAt = new Date().toISOString();
   const idempotencyKey = idemKey(vendorBillId, "audit", recon ? `:${recon.attemptTag}` : "");
+  const settlementClaims: Claim[] = [];
 
   if (action === "auto_approve") {
     // postBillApproval (lib/ledger/journal.ts, delivered by the AO worker — see the task
@@ -505,11 +506,12 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
     // The bill is now POSTED. Paying it is a separate step with its own failure mode: if the
     // payment rail fails, the ledger entry is still correct and the bill must stay 'posted'
     // (unpaid) with the failure on the record, not be flipped to 'exception' as if posting broke.
+    // A credit memo is never paid: settleApprovedBill returns without paying anything.
     try {
-      const billRows = await sql`SELECT total_amount FROM vendor_bills WHERE id = ${vendorBillId}`;
-      if (billRows.length > 0) {
-        await triggerPayment(vendorBillId, billRows[0].total_amount);
-      }
+      const settlement = await settleApprovedBill(vendorBillId);
+      const billRows = await sql`SELECT currency FROM vendor_bills WHERE id = ${vendorBillId}`;
+      const note = settlementNote(settlement, billRows[0]?.currency ?? "USD");
+      if (note) settlementClaims.push({ text: note, tag: "grounded" });
     } catch (e) {
       const d = await writeDecision({
         invoiceId: vendorBillId, nodeId: "audit", agentId: "deterministic-policy-engine",
@@ -547,6 +549,7 @@ export async function runAuditStage(vendorBillId: string, policyDecision: Decisi
     invoiceId: vendorBillId, nodeId: "audit", agentId: "deterministic-policy-engine",
     parentDecisionId: policyDecision.id, startedAt, endedAt: new Date().toISOString(),
     actionTaken: action, reasonCode: policyDecision.reasonCode,
+    claims: settlementClaims.length > 0 ? settlementClaims : undefined,
     idempotencyKey,
   });
   await publish(d);
