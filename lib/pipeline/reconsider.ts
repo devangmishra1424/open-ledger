@@ -105,9 +105,11 @@ export async function reconsider(input: ReconsiderInput): Promise<ReconsiderOutc
     return { newDecision, cascaded: false, supersededDecisionIds: [] };
   }
 
-  // What the model recommends is free text, and it must not be able to move money. Two rules,
-  // applied by the same function the normal pipeline uses (tightenedByInvestigator):
-  //  1. Only a recognised Action counts (anything else is ignored, not cast).
+  // What the model recommends must not be able to move money. Two rules, applied by the same
+  // function the normal pipeline uses (tightenedByInvestigator):
+  //  1. Only a recognised Action is applied as one. Anything else (an old free-text record, written
+  //     before the tool schema constrained it) is never cast or guessed at: it holds the invoice
+  //     for a person.
   //  2. It can only TIGHTEN what the deterministic rules decided (moreRestrictive), never loosen
   //     it — so "auto_approve" is reachable only for a clean deterministic match. Before this,
   //     a contested invoice whose re-review said "auto_approve" was cascaded straight into

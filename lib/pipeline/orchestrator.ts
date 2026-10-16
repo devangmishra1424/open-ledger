@@ -341,18 +341,39 @@ export async function runVerifyStage(vendorBillId: string, matchDetail: unknown,
 
 // --- policy ---
 
+/** What a recommendation that is not one of the actions becomes: a person reviews the invoice. */
+const UNREADABLE_RECOMMENDATION_HOLD: Action = "escalate_l1";
+
+/** True when there is a recommendation (an Investigator ran) but it is not one of the actions. */
+function isUnreadableRecommendation(recommendation?: string | null): recommendation is string {
+  return recommendation != null && parseRecommendedAction(recommendation) === undefined;
+}
+
 /**
  * The Investigator's recommendation, applied the only way an AI opinion may be applied here: it can
- * make the deterministic outcome stricter, never looser. A recommendation that isn't a recognised
- * action is ignored. Used by the pipeline (whether a second opinion is needed) and by reconsideration.
+ * make the deterministic outcome stricter, never looser. `recommendation` is null/undefined only when
+ * no Investigator ran. One that is not a recognised action (prose such as "Escalate to fraud review
+ * and hold payment", from an old record or a provider that let a value outside the tool's enum
+ * through) is neither ignored nor guessed at: the invoice is held for a person, who can read it.
+ * Used by the pipeline (whether a second opinion is needed) and by reconsideration.
  */
 export function tightenedByInvestigator(engineAction: Action, recommendation?: string | null): Action {
+  if (recommendation == null) return engineAction;
   const parsed = parseRecommendedAction(recommendation);
+  if (!parsed) return moreRestrictive(engineAction, UNREADABLE_RECOMMENDATION_HOLD);
   // An AI may hold an invoice, but it may not void one on its own: auto_reject ends the invoice
   // (status 'void'), so an AI "reject" becomes a block, which is equally strict and leaves the
   // final call to a person. The rules' own auto_reject (a duplicate) is unaffected.
-  const proposed: Action | undefined = parsed === "auto_reject" ? "block" : parsed;
-  return proposed ? moreRestrictive(engineAction, proposed) : engineAction;
+  const proposed: Action = parsed === "auto_reject" ? "block" : parsed;
+  return moreRestrictive(engineAction, proposed);
+}
+
+/** Long enough for a one-sentence recommendation; a claim is not the place for a whole essay. */
+const MAX_QUOTED_RECOMMENDATION = 200;
+
+function quoteRecommendation(text: string): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > MAX_QUOTED_RECOMMENDATION ? `${oneLine.slice(0, MAX_QUOTED_RECOMMENDATION)}…` : oneLine;
 }
 
 /**
@@ -374,10 +395,20 @@ export function computePolicyAction(
   const claims: Claim[] = [];
   const tightened = tightenedByInvestigator(action, investigatorRecommendation);
   const heldByInvestigator = tightened !== action;
-  if (heldByInvestigator) {
+  if (isUnreadableRecommendation(investigatorRecommendation)) {
+    // Recorded even when the rules are already stricter, so the trail shows the advice was read and
+    // not applied as an action, instead of it vanishing.
+    const said = `The Investigator's recommendation is not one of the actions the system can apply: "${quoteRecommendation(investigatorRecommendation)}".`;
+    claims.push({
+      text: heldByInvestigator
+        ? `${said} It is not guessed at: the invoice is held for a person (${tightened}, stricter than the rules' ${action}), who can read it.`
+        : `${said} The rules' ${action} is already at least as strict as holding it for a person, so it stands; the text is kept here for the reviewer.`,
+      tag: "grounded",
+    });
+  } else if (heldByInvestigator) {
     claims.push({ text: `The Investigator recommended ${tightened}, stricter than the rules' ${action}. An AI opinion can only tighten a decision, so ${tightened} stands.`, tag: "grounded" });
-    action = tightened;
   }
+  action = tightened;
   if (verifySubmission && verifySubmission.agrees === false) {
     // ENGINE.md §2.5: disagreement between Investigator and Verifier forces escalation
     // rather than trusting either alone — "more restrictive wins" against a floor of L2.
@@ -418,7 +449,7 @@ export async function runPolicyStage(params: {
   verifySubmission?: VerificationSubmission;
   /** The Investigator's reported confidence (0-1), for the Settings confidence guardrail. */
   investigatorConfidence?: number;
-  /** The Investigator's recommended action (free text); it can only tighten the outcome. */
+  /** The Investigator's recommended action; it can only tighten the outcome, and text that is not an action holds the invoice for a person. */
   investigatorRecommendation?: string | null;
   /** Set when the stop is NOT a finding about the invoice but a failure of the system itself (R99_AGENT_ERROR). */
   reasonCodeOverride?: string;

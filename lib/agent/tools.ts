@@ -1,6 +1,6 @@
 import type OpenAI from "openai";
 import { getSql } from "@/db/client";
-import { DOLLAR_THRESHOLD_TABLE, PRECEDENCE_RANK } from "@/lib/matching/decision-matrix";
+import { ALL_ACTIONS, DOLLAR_THRESHOLD_TABLE, PRECEDENCE_RANK } from "@/lib/matching/decision-matrix";
 import { getEmbedding, cosineSimilarity } from "@/lib/embeddings";
 import type { PurchaseOrder, PurchaseOrderLine, GoodsReceipt, Vendor, VendorCorrection } from "@/lib/types";
 
@@ -98,10 +98,17 @@ export const SUBMIT_INVESTIGATION = tool(
   {
     exception_types: { type: "array", items: { type: "string" } },
     confidence: { type: "number" },
-    rationale: { type: "string", description: "Must cite specific tool results, e.g. 'per check_duplicate, 0.97 similarity to INV-2288'" },
+    rationale: {
+      type: "string",
+      description: "Must cite specific tool results, e.g. 'per check_duplicate, 0.97 similarity to INV-2288'. Any advice in words (who should look at it, what to check, 'hold payment') goes here, not in recommended_action.",
+    },
+    // An enum, not free text: a prose recommendation ("Escalate to the fraud team and hold payment")
+    // matches no action, so policy could not apply it. investigate() still checks the value, since a
+    // provider may not enforce the enum, and policy holds anything unreadable for a person.
     recommended_action: {
       type: "string",
-      description: "One of: auto_approve, escalate_l1, escalate_l2, block, block_fraud_flag. It can only make the rules' outcome stricter, never looser; anything stricter than auto_approve sends the invoice to a person.",
+      enum: [...ALL_ACTIONS],
+      description: "Exactly one of these values, nothing else: auto_approve (pay it), escalate_l1 (a reviewer checks it), escalate_l2 (a senior reviewer checks it), block (freeze payment until resolved), block_fraud_flag (suspected fraud), auto_reject (reject it; applied as block, so a person makes the final call). It can only make the rules' outcome stricter, never looser; anything stricter than auto_approve sends the invoice to a person.",
     },
   },
   ["exception_types", "confidence", "rationale", "recommended_action"],

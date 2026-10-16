@@ -61,8 +61,9 @@ async function noPoBillWithInvestigation() {
 /**
  * A clean three-way match (the rules alone would auto-approve) that the Investigator held for a
  * person: investigate says escalate_l2, the Verifier agreed, policy escalated (INVESTIGATOR_HOLD).
+ * `onFile` replaces what the Investigator said and what policy concluded, for an older record.
  */
-async function cleanBillHeldByInvestigator() {
+async function cleanBillHeldByInvestigator(onFile = { investigatorSaid: "escalate_l2", policyAction: "escalate_l2", policyReason: "INVESTIGATOR_HOLD" }) {
   const vendorId = randomUUID(), poId = randomUUID(), poLineId = randomUUID(), receiptId = randomUUID(), billId = randomUUID();
   await sql`INSERT INTO vendors (id, name, trust_tier) VALUES (${vendorId}, ${"RS Clean " + vendorId.slice(0, 6)}, 'trusted')`;
   await sql`INSERT INTO purchase_orders (id, po_number, vendor_id, order_date, status) VALUES (${poId}, ${"RS-PO-" + poId.slice(0, 6)}, ${vendorId}, '2026-09-01', 'open')`;
@@ -75,9 +76,9 @@ async function cleanBillHeldByInvestigator() {
   expect((await runMatchStage(billId)).combined.overallAction).toBe("auto_approve");
 
   const now = new Date().toISOString();
-  const investigate = await writeDecision({ invoiceId: billId, nodeId: "investigate", agentId: "stub-model", model: "stub-model", startedAt: now, endedAt: now, confidence: 0.95, actionTaken: "escalate_l2", idempotencyKey: `inv:${billId}` });
-  const verify = await writeDecision({ invoiceId: billId, nodeId: "verify", agentId: "stub-verifier", model: "stub-verifier", parentDecisionId: investigate.id, startedAt: now, endedAt: now, confidence: 0.9, actionTaken: "escalate_l2", idempotencyKey: `ver:${billId}` });
-  await writeDecision({ invoiceId: billId, nodeId: "policy", agentId: "deterministic-policy-engine", parentDecisionId: verify.id, startedAt: now, endedAt: now, actionTaken: "escalate_l2", reasonCode: "INVESTIGATOR_HOLD", idempotencyKey: `pol:${billId}` });
+  const investigate = await writeDecision({ invoiceId: billId, nodeId: "investigate", agentId: "stub-model", model: "stub-model", startedAt: now, endedAt: now, confidence: 0.95, actionTaken: onFile.investigatorSaid, idempotencyKey: `inv:${billId}` });
+  const verify = await writeDecision({ invoiceId: billId, nodeId: "verify", agentId: "stub-verifier", model: "stub-verifier", parentDecisionId: investigate.id, startedAt: now, endedAt: now, confidence: 0.9, actionTaken: onFile.investigatorSaid, idempotencyKey: `ver:${billId}` });
+  await writeDecision({ invoiceId: billId, nodeId: "policy", agentId: "deterministic-policy-engine", parentDecisionId: verify.id, startedAt: now, endedAt: now, actionTaken: onFile.policyAction, reasonCode: onFile.policyReason, idempotencyKey: `pol:${billId}` });
   return { billId, verify };
 }
 
@@ -91,6 +92,25 @@ describe("reconsideration cannot be talked into moving money", () => {
     if ("action" in result) throw new Error("unexpected escalate_senior");
 
     expect(result.cascaded).toBe(false);
+    expect((await sql`SELECT status FROM vendor_bills WHERE id = ${billId}`)[0].status).toBe("exception");
+    expect(await sql`SELECT 1 FROM journal_entries WHERE source_type = 'vendor_bill' AND source_id = ${billId}`).toHaveLength(0);
+    expect(await sql`SELECT 1 FROM payment_applications WHERE vendor_bill_id = ${billId}`).toHaveLength(0);
+  });
+
+  it("an old free-text Investigator record is read without crashing, and on re-review it holds the invoice instead of being ignored", async () => {
+    // Written before submit_investigation's enum: the advice matched no action, so policy ignored it
+    // and concluded CLEAN_MATCH. (The helper sets the bill's status to 'exception'; only the
+    // decisions matter here.)
+    const prose = "Escalate to fraud review team for manual verification and hold payment pending resolution.";
+    const { billId, verify } = await cleanBillHeldByInvestigator({ investigatorSaid: prose, policyAction: "auto_approve", policyReason: "CLEAN_MATCH" });
+
+    const result = await reconsider({ originalDecisionId: verify.id, question: "Please double-check this", actor: "Sam" });
+    if ("action" in result) throw new Error("unexpected escalate_senior");
+
+    expect(result.cascaded).toBe(true);
+    const policy = (await getDecisionsForInvoice(billId)).filter((d) => !d.supersededById && d.nodeId === "policy").at(-1)!;
+    expect(policy).toMatchObject({ actionTaken: "escalate_l1", reasonCode: "INVESTIGATOR_HOLD" });
+    expect(policy.claims?.[0].text).toContain(`"${prose}"`);
     expect((await sql`SELECT status FROM vendor_bills WHERE id = ${billId}`)[0].status).toBe("exception");
     expect(await sql`SELECT 1 FROM journal_entries WHERE source_type = 'vendor_bill' AND source_id = ${billId}`).toHaveLength(0);
     expect(await sql`SELECT 1 FROM payment_applications WHERE vendor_bill_id = ${billId}`).toHaveLength(0);
