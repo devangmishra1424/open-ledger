@@ -487,3 +487,30 @@ body { background: var(--vb-bg); }
 .vb-orient-picks ul { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 @media (max-width: 1100px) { .vb-orient-picks ul { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .vb-orient-picks ul { grid-template-columns: minmax(0, 1fr); } }
+
+/* What does not match: each figure with who says it (invoice, purchase order, delivery, your records), the wrong ones marked. */
+.vb-wrong { background: rgba(255, 123, 123, 0.16); color: #ffc2c2; padding: 0 4px; border-radius: 4px; font-weight: 700; }
+.vb-ww-wrap { display: flex; flex-direction: column; gap: 8px; }
+.vb-ww-head { font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--vb-dim); margin: 4px 0 0; font-weight: 700; }
+.vb-ww { display: flex; flex-direction: column; gap: 10px; }
+.vb-ww-item { border: 1px solid var(--vb-border-soft); border-left: 3px solid var(--vb-danger); border-radius: var(--vb-radius-sm); background: var(--vb-panel-2); padding: 12px 14px; }
+.vb-ww-item h4 { margin: 0 0 10px; font-size: 15px; color: var(--vb-text); }
+.vb-ww-points { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.vb-ww-pt { display: grid; grid-template-columns: 116px minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 13.5px; line-height: 1.45; }
+.vb-ww-says { justify-self: start; font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; color: var(--vb-dim); border: 1px solid var(--vb-border); border-radius: 5px; padding: 1px 6px; white-space: nowrap; }
+.vb-ww-says-invoice { color: var(--vb-attention); border-color: rgba(255, 207, 64, 0.35); }
+.vb-ww-says-order { color: var(--vb-info); border-color: rgba(143, 180, 255, 0.4); }
+.vb-ww-says-receipt { color: var(--vb-accent); border-color: rgba(167, 201, 87, 0.4); }
+.vb-ww-says-difference { color: var(--vb-danger); border-color: rgba(255, 123, 123, 0.45); }
+.vb-ww-label { color: var(--vb-muted); overflow-wrap: anywhere; }
+.vb-ww-value { color: var(--vb-text); font-family: var(--vb-mono); font-size: 13px; overflow-wrap: anywhere; }
+.vb-ww-pt.is-gap .vb-ww-label { color: var(--vb-text); font-weight: 600; }
+.vb-ww-rule { margin: 10px 0 0; font-size: 13px; color: var(--vb-muted); line-height: 1.5; }
+.vb-ww-rule b { color: var(--vb-text); font-weight: 600; }
+.vb-ww-text { margin: 0; font-size: 14px; line-height: 1.6; color: var(--vb-text); }
+.vb-ww-note { margin: 8px 0 0; font-size: 12px; color: var(--vb-dim); }
+.vb-verdict-grid.is-single { grid-template-columns: minmax(0, 1fr); }
+.vb-row-figures { display: flex; flex-wrap: wrap; gap: 1px 14px; max-height: 2.9em; overflow: hidden; }
+.vb-row-fig { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vb-row-more { color: var(--vb-dim); font-weight: 400; font-size: 12.5px; }
+@media (max-width: 720px) { .vb-ww-pt { grid-template-columns: minmax(0, 1fr); gap: 2px; } }

@@ -159,20 +159,26 @@ const round2 = (n) => Math.round(n * 100) / 100;
  *  date is also written out in words, which cannot be read the wrong way round. */
 const inWords = (iso) => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '');
 
-function initialForm(s) {
+function initialForm(s, books = {}) {
+  // A credit note is often printed with minus signs; it is entered as the amounts it credits.
+  const credit = Boolean(books.creditNote?.detected);
+  const amt = (v) => (credit && typeof v === 'number' ? Math.abs(v) : v);
   return {
+    creditMemo: credit,
+    creditMemoFor: books.creditNote?.creditedInvoice?.number ?? '',
+    bankLast4: books.bank?.onInvoice ?? '',
     vendorName: s.vendor_name ?? '',
     invoiceNumber: s.invoice_number ?? '',
     invoiceDate: s.invoice_date ?? '',
     dueDate: s.due_date ?? '',
     poNumber: s.po_reference ?? '',
     currency: s.currency ?? '',
-    lines: (s.line_items?.length ? s.line_items : [{ description: '', quantity: 1, unit_price: '' }]).map((l) => ({ description: l.description, quantity: String(l.quantity), unitPrice: String(l.unit_price) })),
-    charges: (s.other_charges ?? []).map((c) => ({ label: c.label, amount: String(c.amount) })),
-    taxLines: (s.tax_lines?.length ? s.tax_lines : s.tax ? [{ label: 'Tax', amount: s.tax }] : []).map((t) => ({ label: t.label, amount: String(t.amount) })),
+    lines: (s.line_items?.length ? s.line_items : [{ description: '', quantity: 1, unit_price: '' }]).map((l) => ({ description: l.description, quantity: String(amt(l.quantity)), unitPrice: String(amt(l.unit_price)) })),
+    charges: (s.other_charges ?? []).map((c) => ({ label: c.label, amount: String(amt(c.amount)) })),
+    taxLines: (s.tax_lines?.length ? s.tax_lines : s.tax ? [{ label: 'Tax', amount: s.tax }] : []).map((t) => ({ label: t.label, amount: String(amt(t.amount)) })),
     discount: s.discount ? String(s.discount) : '',
     roundOff: s.round_off ? String(s.round_off) : '',
-    total: s.total != null ? String(s.total) : '',
+    total: s.total != null ? String(amt(s.total)) : '',
   };
 }
 
@@ -198,7 +204,7 @@ function Review({ result, onBack, onSaved }) {
   const x = result.extraction;
   const s = x.submission;
   const { withReviewer } = useReviewer();
-  const [form, setForm] = useState(() => initialForm(s));
+  const [form, setForm] = useState(() => initialForm(s, result.books ?? {}));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const flags = useMemo(() => flagsFor(s.uncertain_fields ?? []), [s]);
@@ -218,7 +224,9 @@ function Review({ result, onBack, onSaved }) {
   const already = result.alreadyUploaded;
   const blockSave = Boolean(already?.invoiceId);
   const linesValid = form.lines.length > 0 && form.lines.every((l) => l.description.trim() && num(l.quantity) > 0 && num(l.unitPrice) >= 0);
-  const ready = form.vendorName.trim() && form.invoiceNumber.trim() && /^\d{4}-\d{2}-\d{2}$/.test(form.invoiceDate) && /^[A-Za-z]{3}$/.test(form.currency) && linesValid && addsUp && !blockSave;
+  const bankOk = form.bankLast4 === '' || /^\d{4}$/.test(form.bankLast4);
+  const creditOk = !form.creditMemo || form.creditMemoFor.trim() !== '';
+  const ready = form.vendorName.trim() && form.invoiceNumber.trim() && /^\d{4}-\d{2}-\d{2}$/.test(form.invoiceDate) && /^[A-Za-z]{3}$/.test(form.currency) && linesValid && addsUp && !blockSave && bankOk && creditOk;
 
   const save = () => withReviewer(async (name) => {
     setBusy(true);
@@ -231,6 +239,8 @@ function Review({ result, onBack, onSaved }) {
         charges: form.charges.filter((c) => c.label.trim() || c.amount !== '').map((c) => ({ label: c.label.trim() || 'Charge', amount: num(c.amount) })),
         taxLines: form.taxLines.filter((t) => t.label.trim() || t.amount !== '').map((t) => ({ label: t.label.trim() || 'Tax', amount: num(t.amount) })),
         discount, roundOff, total,
+        creditMemoFor: form.creditMemo ? form.creditMemoFor.trim() : null,
+        bankLast4: form.bankLast4 || null,
       };
       const saved = await api.saveInvoiceFromDocument(result.documentId, name, invoice);
       onSaved(saved);
@@ -290,6 +300,8 @@ function Review({ result, onBack, onSaved }) {
           <Banner kind="warn"><strong>PO {books.po.number} belongs to {books.po.vendorName},</strong> not to {form.vendorName}: it will not match.</Banner>
         )}
         {books.po?.onFile && books.po.sameVendor && <Banner kind="info"><Check size={14} aria-hidden="true" /> PO {books.po.number} is on file for this vendor: it will be three-way matched.</Banner>}
+
+        <CreditAndBank form={form} set={set} books={books} />
 
         <div className="vb-grid-2">
           <Field label="Vendor (who issued it)" flag={<Flag k="vendorName" />} tag={<Tag field="vendor_name" />}>
@@ -362,6 +374,44 @@ function Review({ result, onBack, onSaved }) {
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+/**
+ * Two things the books need to know, filled in from the document so they usually need no typing: whether this is a
+ * credit note (and for which of the vendor's invoices), and the bank account it asks to be paid into (last 4 digits).
+ * A different account than the one on file is said plainly, with what saving will do.
+ */
+function CreditAndBank({ form, set, books }) {
+  const onFile = books.bank?.onFile ?? null;
+  const typed = /^\d{4}$/.test(form.bankLast4) ? form.bankLast4 : null;
+  const found = books.creditNote?.creditedInvoice;
+  const foundIt = found && found.number === form.creditMemoFor.trim();
+  return (
+    <div className="vb-intake-extra">
+      <label className="vb-check">
+        <input type="checkbox" checked={form.creditMemo} onChange={(e) => set({ creditMemo: e.target.checked })} />
+        <span>This is a <b>credit note</b>: the vendor owes you money back, so nothing is paid on it{books.creditNote?.detected ? ' (the document says so)' : ''}.</span>
+      </label>
+      {form.creditMemo && (
+        <Field label="Which of their invoices does it credit? (invoice number)">
+          <input value={form.creditMemoFor} onChange={(e) => set({ creditMemoFor: e.target.value })} className={!form.creditMemoFor.trim() ? 'is-flagged' : ''} placeholder="e.g. INV-2024-0847" />
+          <span className="vb-field-hint">
+            {foundIt
+              ? <><Check size={13} aria-hidden="true" /> Found on file: invoice {found.number} ({found.status}). The credit is checked against what is still owed on it.</>
+              : 'It must be an invoice from this vendor that is already on file.'}
+          </span>
+        </Field>
+      )}
+      <Field label="Bank account on this invoice (last 4 digits, if printed)">
+        <input value={form.bankLast4} inputMode="numeric" maxLength={4} onChange={(e) => set({ bankLast4: e.target.value.replace(/\D/g, '').slice(0, 4) })} className={form.bankLast4 && !typed ? 'is-flagged' : ''} placeholder="none" />
+        {typed && onFile && typed !== onFile && (
+          <span className="vb-flag" role="note"><AlertTriangle size={13} aria-hidden="true" /> Different from the account on file (ending {onFile}). Saving holds every invoice from this vendor until someone phones them on a number from your own records and a second person signs off.</span>
+        )}
+        {typed && onFile && typed === onFile && <span className="vb-field-hint"><Check size={13} aria-hidden="true" /> Same account as on file.</span>}
+        {typed && !onFile && <span className="vb-field-hint">No account on file for this vendor yet: this one is kept, and a later invoice asking for a different one is held.</span>}
+      </Field>
     </div>
   );
 }

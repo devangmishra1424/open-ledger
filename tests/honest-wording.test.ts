@@ -10,9 +10,9 @@ import { toFrontendInvoice } from "@/lib/api-shapes";
 
 /**
  * Everything a reviewer (or an interviewer) reads must describe what VeriBook actually does. These
- * phrases name steps it has no screen or code for: contacting the vendor, credit notes or corrected
- * invoices, coding to an expense account, a whitelist, reviewer roles ("senior reviewer"), recording a
- * unit conversion, part-approving or part-rejecting an invoice, onboarding, teams. (An approved credit memo
+ * phrases name steps it has no screen or code for: contacting the vendor, asking for credit notes or corrected
+ * invoices (a credit note that arrives IS entered, on the invoice review screen), coding to an expense account,
+ * a whitelist, reviewer roles ("senior reviewer"), recording a unit conversion, part-approving or part-rejecting an invoice, onboarding, teams. (An approved credit memo
  * does come off what is owed: its own invoice while that is unpaid, then the vendor's later invoices.)
  * Phoning the vendor IS a step: the bank-change callback records it and a second person signs off.
  */
@@ -50,6 +50,29 @@ describe("on-screen guidance names only steps VeriBook can take", () => {
       facts.bankChangeFact({ status: "callback_pending", action }),
     ]);
     expect(sentences.filter((t) => UNDOABLE.test(t))).toEqual([]);
+  });
+
+  it("the figures shown for each finding: titles, labels, values and rules, for every route", () => {
+    const shown = ALL_ACTIONS.flatMap((action: Action) => [
+      facts.priceVariance({ lineNumber: 1, description: "Bolts", uom: "each", billedPrice: 11, poPrice: 10, billedQty: 5, variancePct: 0.1, impact: 5, currency: "USD", action }),
+      facts.quantityVariance({ lineNumber: 1, description: "Bolts", uom: "each", ordered: 10, acceptedReceived: 8, billedBefore: 2, billedNow: 9, excess: 3, impact: 30, currency: "USD", action }),
+      facts.unmatchedLines({ poNumber: "PO-1", lines: [{ description: "Expedite fee", qty: 1, unitPrice: 40, amount: 40 }], total: 40, currency: "USD", action }),
+      facts.uomMismatch({ invoiceDescription: "Bolts", invoiceUom: "box", poLineNumber: 1, poDescription: "Bolts", poUom: "each", plausible: false, action }),
+      facts.taxVariance({ description: "Bolts", charged: 20, actualRate: 0.2, expectedRate: 0.18, expectedTax: 18, currency: "USD", action, codeName: "18% GST, as printed on the invoice" }),
+      facts.blanketValue({ poNumber: "PO-1", ceiling: 10000, prior: 6000, current: 5000, currency: "USD", action }),
+      facts.blanketQty({ poNumber: "PO-1", ceiling: 100, prior: 60, current: 50, action }),
+      facts.beforeReceipt({ poNumber: "PO-1", invoiceDate: "2026-10-01", earliestReceipt: null, action }),
+      facts.beforeReceipt({ poNumber: "PO-1", invoiceDate: "2026-10-01", earliestReceipt: "2026-10-20", gapDays: 19, action }),
+      facts.currencyMismatch({ billCurrency: "EUR", poCurrency: "USD", poNumber: "PO-1", billRate: 1, poRate: 1, ratePct: 0, action }),
+      facts.nonPo({ amount: 6500, currency: "USD", printedPoReference: "PO-9", trustTier: "new", action }),
+      facts.noPo({ poReference: "PO-9", poStatus: "closed", action }),
+      facts.creditMemo({ credit: 2000, currency: "USD", relatedNumber: "INV-1", relatedStatus: "paid", openAmount: 0, net: -2000, action }),
+      facts.creditMemo({ credit: 2000, currency: "USD", relatedNumber: "INV-1", relatedStatus: "void", openAmount: 0, net: -2000, action }),
+      facts.bankChange({ status: "callback_pending", action, oldLast4: "4471", newLast4: "9012", fromThisInvoice: true }),
+    ].map((f) => f.shown));
+    expect(allText(shown).filter((t) => UNDOABLE.test(t))).toEqual([]);
+    // Each one says what is wrong: at least one figure is marked as the wrong part, except an informational fit.
+    expect(shown.filter((s) => !s.points.some((p) => p.wrong)).map((s) => s.title)).toEqual([]);
   });
 
   it("the reason-code names and descriptions the database serves", async () => {

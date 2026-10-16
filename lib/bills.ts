@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { TransactionSql } from "postgres";
 import { getSql } from "@/db/client";
 import { HttpError } from "@/lib/http";
+import { recordInvoiceBankAccountInTx } from "@/lib/ledger/bank-change-review";
+import type { StatedTax } from "@/lib/tax-lines";
 
 /**
  * Creating an invoice (vendor_bills + lines, and the vendor if it is new) from validated input.
@@ -36,6 +38,18 @@ export interface NewBillInput {
   /** The uploaded file this invoice was read from (source_documents.id). */
   sourceDocumentId?: string | null;
   /**
+   * Set when this is a credit note / credit memo: the number of the vendor's own invoice it credits. It is saved as a
+   * credit memo against that invoice (it must be on file), which the match step nets against what is still open on it.
+   */
+  creditMemoFor?: string | null;
+  /** Last 4 digits of the bank account the invoice asks to be paid into; a different one than on file holds the vendor. */
+  bankLast4?: string | null;
+  /**
+   * The tax rate printed on the invoice and each line's share of the tax (aligned with `lines`; lib/tax-lines.ts), so
+   * the match step can check the tax charged against that rate. Null when the invoice prints no rate.
+   */
+  statedTax?: (StatedTax & { perLine: number[] }) | null;
+  /**
    * true (API callers): a stated total that disagrees with lines + tax is rejected (422).
    * false (read off a document): kept as stated — the extractor already lowered its confidence
    * for the mismatch, which routes the invoice to a person.
@@ -43,7 +57,11 @@ export interface NewBillInput {
   strictTotals: boolean;
 }
 
-export interface CreatedBill { billId: string; vendorId: string; invoiceNumber: string; vendorCreated: boolean }
+export interface CreatedBill {
+  billId: string; vendorId: string; invoiceNumber: string; vendorCreated: boolean;
+  /** What the bank account on the invoice did: kept as the first on file, the same as on file, or a change (vendor held). Null when none was given. */
+  bankAccount: "first" | "same" | "changed" | null;
+}
 
 const CENT = 0.02;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -92,8 +110,12 @@ export function normalizeBillInput(input: NewBillInput, today = new Date().toISO
   if (input.dueDate != null && !ISO_DATE.test(input.dueDate)) throw new HttpError(400, "dueDate must be YYYY-MM-DD");
   const currency = (input.currency ?? "USD").toUpperCase();
   if (!CURRENCY.test(currency)) throw new HttpError(400, "currency must be a 3-letter code such as USD");
+  const creditMemoFor = input.creditMemoFor?.trim() || null;
+  if (creditMemoFor && creditMemoFor.length > 60) throw new HttpError(400, "the credited invoice number is too long (max 60 characters)");
+  const bankLast4 = input.bankLast4?.trim() || null;
+  if (bankLast4 && !/^\d{4}$/.test(bankLast4)) throw new HttpError(400, "bankLast4 must be the last 4 digits of the account");
 
-  return { lines, subtotal, tax: round2(tax), adjustment: round2(adjustment), total: round2(total), invoiceDate, dueDate: input.dueDate ?? null, currency };
+  return { lines, subtotal, tax: round2(tax), adjustment: round2(adjustment), total: round2(total), invoiceDate, dueDate: input.dueDate ?? null, currency, creditMemoFor, bankLast4 };
 }
 
 /** One payee however it is typed: case and runs of spaces do not matter. Legal suffixes and punctuation are NOT folded: "Acme Ltd" and "Acme Inc" can be different legal entities, and merging payees is a fraud risk. */
@@ -149,19 +171,48 @@ export async function createBill(input: NewBillInput): Promise<CreatedBill> {
       throw new HttpError(409, `invoice ${invoiceNumber} from this vendor was already received (id ${dup[0].id})`);
     }
 
+    // A credit memo nets against the vendor's own invoice: without it on file there is nothing to check it against.
+    let relatedInvoiceId: string | null = null;
+    if (n.creditMemoFor) {
+      const [related] = await tx`
+        SELECT id FROM vendor_bills WHERE vendor_id = ${vendorId} AND invoice_number = ${n.creditMemoFor} AND invoice_type = 'standard'`;
+      if (!related) throw new HttpError(422, `no invoice ${n.creditMemoFor} from this vendor is on file: add that invoice first, or save this as an ordinary invoice`);
+      relatedInvoiceId = related.id;
+    }
+
     // Default expense account so an approval can post even when no line ever matches a PO line
     // (postBillApproval's only other source for one).
     const glRows = await tx`SELECT id FROM chart_of_accounts WHERE account_number = '6000'`;
     const defaultGl: string | null = glRows[0]?.id ?? null;
+    const taxCodeId = input.statedTax && input.statedTax.perLine.length === n.lines.length ? await statedTaxCode(tx, input.statedTax) : null;
 
     await tx`
-      INSERT INTO vendor_bills (id, vendor_id, po_id, po_reference, invoice_number, invoice_date, due_date, currency, subtotal, tax_total, adjustment_total, total_amount, raw_source, source_document_id)
-      VALUES (${billId}, ${vendorId}, ${poId}, ${poReference}, ${invoiceNumber}, ${n.invoiceDate}, ${n.dueDate}, ${n.currency}, ${n.subtotal}, ${n.tax}, ${n.adjustment}, ${n.total}, ${input.rawSource ?? null}, ${input.sourceDocumentId ?? null})`;
-    for (const l of n.lines) {
+      INSERT INTO vendor_bills (id, vendor_id, po_id, po_reference, invoice_number, invoice_date, due_date, currency, subtotal, tax_total, adjustment_total, total_amount,
+                                raw_source, source_document_id, invoice_type, related_invoice_id)
+      VALUES (${billId}, ${vendorId}, ${poId}, ${poReference}, ${invoiceNumber}, ${n.invoiceDate}, ${n.dueDate}, ${n.currency}, ${n.subtotal}, ${n.tax}, ${n.adjustment}, ${n.total},
+              ${input.rawSource ?? null}, ${input.sourceDocumentId ?? null}, ${relatedInvoiceId ? "credit_memo" : "standard"}, ${relatedInvoiceId})`;
+    for (const [i, l] of n.lines.entries()) {
+      const lineTax = taxCodeId && input.statedTax!.perLine[i] > 0 ? input.statedTax!.perLine[i] : null;
       await tx`
-        INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, gl_account_id)
-        VALUES (${randomUUID()}, ${billId}, ${l.description}, ${l.quantity}, ${l.unitPrice}, ${defaultGl})`;
+        INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, gl_account_id, tax_code_id, tax_amount)
+        VALUES (${randomUUID()}, ${billId}, ${l.description}, ${l.quantity}, ${l.unitPrice}, ${defaultGl}, ${lineTax == null ? null : taxCodeId}, ${lineTax})`;
     }
-    return { billId, vendorId, invoiceNumber, vendorCreated };
+    // In the same transaction: an invoice and the bank change it brings are saved together or not at all.
+    const bankAccount = n.bankLast4 ? await recordInvoiceBankAccountInTx(tx, { vendorId, last4: n.bankLast4, sourceInvoiceId: billId }) : null;
+    return { billId, vendorId, invoiceNumber, vendorCreated, bankAccount };
   });
+}
+
+/**
+ * The tax code for a rate printed on an invoice ("18% GST, as printed on the invoice"), created on first use. It posts
+ * to the same input-tax account (2210) as an invoice without one, so approving and posting are unchanged; it exists so
+ * the match step can compare each line's tax with the printed rate. Idempotent: one row per type and rate.
+ */
+async function statedTaxCode(tx: Tx, t: StatedTax): Promise<string> {
+  const id = `stated-${t.type}-${Number((t.rate * 100).toFixed(3))}`;
+  await tx`
+    INSERT INTO tax_codes (id, name, rate, tax_type, direction, tax_account_id, effective_from)
+    VALUES (${id}, ${t.name}, ${t.rate}, ${t.type}, 'input', (SELECT id FROM chart_of_accounts WHERE account_number = '2210'), '2000-01-01')
+    ON CONFLICT (id) DO NOTHING`;
+  return id;
 }

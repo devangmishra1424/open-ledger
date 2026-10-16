@@ -19,7 +19,7 @@ export const GET = handle("GET /api/purchase-orders", async (req) => {
 
 /**
  * POST /api/purchase-orders — the PO an invoice is matched against:
- *   { vendor | vendorId, poNumber, orderDate?, currency?, buyerName?,
+ *   { vendor | vendorId, poNumber, orderDate?, currency?, buyerName?, spendingLimit? (a blanket order's total limit),
  *     items: [{ description, qty, rate, uom? }],
  *     receipt?: { receivedInFull?: true, lines?: [{ line, qty }], receiptDate?, receiverName?, condition? },
  *     sourceDocumentId? }  (the PO document it was read from: POST /api/documents/read with purpose purchase_order)
@@ -48,6 +48,7 @@ export const POST = handle("POST /api/purchase-orders", async (req) => {
     orderDate: typeof body.orderDate === "string" ? body.orderDate : null,
     currency: typeof body.currency === "string" ? body.currency : null,
     buyerName: typeof body.buyerName === "string" ? body.buyerName : null,
+    spendingLimit: spendingLimitOf(body.spendingLimit),
     lines: body.items.map((it: any) => ({ description: it?.description, quantity: it?.qty, unitPrice: it?.rate, uom: typeof it?.uom === "string" ? it.uom : null })),
     receipt: body.receipt === undefined || body.receipt === null ? null : receiptFromBody(body.receipt),
     sourceDocumentId,
@@ -55,3 +56,11 @@ export const POST = handle("POST /api/purchase-orders", async (req) => {
   const recheckedInvoices = await recheckWaitingForNewPo({ poNumber: created.poNumber, vendorId: created.vendorId });
   return Response.json({ ...created, recheckedInvoices }, { status: 201 });
 });
+
+/** The optional spending limit: a number, a numeric string from a form field, or empty for a normal order. Range is checked by normalizePurchaseOrder. */
+function spendingLimitOf(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = typeof v === "string" ? Number(v.replace(/,/g, "")) : v;
+  if (typeof n !== "number" || !Number.isFinite(n)) throw new HttpError(400, "spendingLimit must be a number");
+  return n;
+}

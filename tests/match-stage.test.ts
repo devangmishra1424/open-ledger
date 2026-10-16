@@ -80,6 +80,9 @@ afterAll(async () => {
   await sql`DELETE FROM vendors WHERE id = ANY(${[vendorId, trustedVendorId, ...fraudBankVendorIds]})`;
 });
 
+/** Every finding also records its figures for the screens: a plain title and at least one point. */
+const SHOWN = expect.objectContaining({ title: expect.any(String), points: expect.arrayContaining([expect.objectContaining({ label: expect.any(String), value: expect.any(String) })]) });
+
 describe("runMatchStage", () => {
   it("a clean, fully-matched invoice auto-approves with no findings", async () => {
     const { poId, lineId } = await makePoWithLine({ poNumber: PREFIX + "-PO-CLEAN", unitPrice: 10, qtyOrdered: 100 });
@@ -96,7 +99,7 @@ describe("runMatchStage", () => {
   it("no PO reference at all fires EXC-NON_PO using the dollar-threshold table", async () => {
     const billId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-INV-NONPO", totalAmount: 500 });
     const r = await runMatchStage(billId);
-    expect(r.findings).toEqual([{ code: "EXC-NON_PO", action: expect.any(String), fact: expect.stringContaining("refers to no purchase order") }]);
+    expect(r.findings).toEqual([{ code: "EXC-NON_PO", action: expect.any(String), fact: expect.stringContaining("refers to no purchase order"), shown: SHOWN }]);
     expect(r.combined.dominantException).toBe("EXC-NON_PO");
   });
 
@@ -110,7 +113,7 @@ describe("runMatchStage", () => {
     const { poId } = await makePoWithLine({ poNumber: PREFIX + "-PO-CLOSED", status: "closed", unitPrice: 10, qtyOrdered: 100 });
     const billId = await makeBill({ poId, invoiceNumber: PREFIX + "-INV-CLOSEDPO", totalAmount: 1000 });
     const r = await runMatchStage(billId);
-    expect(r.findings).toEqual([{ code: "EXC-NO_PO", action: "escalate_l2", fact: expect.stringContaining("which is closed") }]);
+    expect(r.findings).toEqual([{ code: "EXC-NO_PO", action: "escalate_l2", fact: expect.stringContaining("which is closed"), shown: SHOWN }]);
   });
 
   // Not tested: an invalid/nonexistent po_id on vendor_bills. vendor_bills.po_id is a real FK
@@ -319,7 +322,7 @@ describe("runMatchStage", () => {
 
       const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-1", totalAmount: 1500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
       const r = await runMatchStage(creditId);
-      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.any(String) }]);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.any(String), shown: SHOWN }]);
       expect(r.detail.creditMemoNetAmount).toBe(-1500);
     });
 
@@ -329,7 +332,7 @@ describe("runMatchStage", () => {
 
       const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-2", totalAmount: 1500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
       const r = await runMatchStage(creditId);
-      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "auto_approve", fact: expect.stringContaining("It fits inside the open amount") }]);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "auto_approve", fact: expect.stringContaining("It fits inside the open amount"), shown: SHOWN }]);
       expect(r.detail.creditMemoNetAmount).toBe(8500);
     });
 
@@ -339,7 +342,7 @@ describe("runMatchStage", () => {
 
       const creditId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-CM-VOID", totalAmount: 1500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
       const r = await runMatchStage(creditId);
-      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.stringContaining("which was rejected, so nothing was ever owed on it") }]);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.stringContaining("which was rejected, so nothing was ever owed on it"), shown: SHOWN }]);
       expect(r.detail.creditMemoNetAmount).toBe(-1500);
 
       // Even a credit of 0 (net 0, which fits anywhere else) is a person's call.
@@ -363,7 +366,7 @@ describe("runMatchStage", () => {
       const creditId = await makeBill({ poId, invoiceNumber: PREFIX + "-CM-4", totalAmount: 500, invoiceType: "credit_memo", relatedInvoiceId: originalId });
       await addBillLine(creditId, { qty: 999, unitPrice: 10 }); // would be a wild EXC-QTY_VAR if 3-way matching ran
       const r = await runMatchStage(creditId);
-      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.any(String) }]);
+      expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.any(String), shown: SHOWN }]);
     });
   });
 
@@ -470,7 +473,7 @@ describe("runMatchStage", () => {
       await addBillLine(billId, { description: "Expedite fee", qty: 1, unitPrice: 900 });
 
       const r = await runMatchStage(billId);
-      expect(r.findings).toEqual([{ code: "EXC-UNMATCHED_LINE", action: "escalate_l1", fact: expect.stringMatching(/^One invoice line is not on purchase order .+ at all: .+This invoice was sent to a reviewer\.$/) }]);
+      expect(r.findings).toEqual([{ code: "EXC-UNMATCHED_LINE", action: "escalate_l1", fact: expect.stringMatching(/^One invoice line is not on purchase order .+ at all: .+This invoice was sent to a reviewer\.$/), shown: SHOWN }]);
       expect(r.combined.overallAction).toBe("escalate_l1");
       expect(r.combined.dominantException).toBe("EXC-UNMATCHED_LINE");
       expect(r.detail.lineMatch).toMatchObject({
@@ -531,7 +534,7 @@ describe("runMatchStage", () => {
       const billId = await makeBill({ poId: null, invoiceNumber: PREFIX + "-FRAUDBANK-1", totalAmount: 500, vendorId: bankVendorId });
 
       const r = await runMatchStage(billId);
-      expect(r.findings).toEqual([{ code: "EXC-FRAUD_BANK", action: "block_fraud_flag", fact: expect.stringContaining("nothing is paid to this vendor") }]);
+      expect(r.findings).toEqual([{ code: "EXC-FRAUD_BANK", action: "block_fraud_flag", fact: expect.stringContaining("nothing is paid to this vendor"), shown: SHOWN }]);
       expect(r.detail.bankChangeGateStatus).toBe("flagged");
 
       const reviewRows = await sql`SELECT * FROM vendor_bank_change_reviews WHERE vendor_id = ${bankVendorId}`;

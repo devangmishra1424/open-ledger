@@ -58,7 +58,20 @@ export interface VendorBillLine {
 }
 
 export interface ToolCallLog { name: string; args: Record<string, unknown>; rawResult: unknown; resultHash: string; }
-export interface Claim { text: string; tag: 'grounded'|'ungrounded'|'contradicted'; evidencePointer?: string; }
+/**
+ * One figure behind a finding, for a person to read at a glance: who says it (the invoice, the purchase order, the
+ * delivery, your own records), the value as it stands there, and whether it is the part that is wrong.
+ */
+export interface FactPoint {
+  source: 'invoice' | 'order' | 'receipt' | 'records' | 'difference' | 'rule';
+  label: string;
+  value: string;
+  wrong?: boolean;
+}
+/** A finding's facts as a short plain title and its figures (lib/matching/finding-facts.ts). */
+export interface FactShown { title: string; points: FactPoint[]; }
+/** `shown` is set on a matching finding's fact claim (recorded since 2026-10-17); older records have only `text`. */
+export interface Claim { text: string; tag: 'grounded'|'ungrounded'|'contradicted'; evidencePointer?: string; shown?: FactShown; }
 export interface PolicyEval { ruleId: string; threshold: number; actualValue: number; verdict: 'pass'|'fail'; }
 
 export interface Decision {

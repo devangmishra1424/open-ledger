@@ -56,6 +56,7 @@ export default function PurchaseOrders() {
                 <div>
                   <h3 style={{ margin: 0, fontSize: 15 }}>{po.poNumber} <span className="vb-muted" style={{ fontWeight: 400 }}>&middot; {po.vendor}</span></h3>
                   <div className="vb-dim vb-small">Ordered {po.orderDate} &middot; {formatMoney(po.total, po.currency)} &middot; {po.invoiceCount === 0 ? 'no invoices yet' : `${po.invoiceCount} invoice${po.invoiceCount === 1 ? '' : 's'}`}</div>
+                  {po.spendingLimit != null && <div className="vb-small" style={{ marginTop: 2 }}>Blanket order: all its invoices together may come to at most <b>{formatMoney(po.spendingLimit, po.currency)}</b></div>}
                 </div>
                 <div className="vb-inline">
                   <span className={`vb-chip ${st.cls}`} title={st.title}>{st.label}</span>

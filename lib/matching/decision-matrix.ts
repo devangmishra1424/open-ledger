@@ -1,3 +1,5 @@
+import type { FactShown } from "@/lib/types";
+
 /**
  * The authoritative per-exception severity engine — docs/ap-three-way-match-spec.md §3.1
  * (Core Decision Table) + §3.2 (Dollar-Threshold Severity Escalation, "more restrictive
@@ -217,6 +219,8 @@ export interface ExceptionFinding {
   action: Action;
   /** The specific facts behind this finding (which line, which numbers), worded by lib/matching/finding-facts.ts; recorded as a claim next to the code. */
   fact?: string;
+  /** The same facts as a plain title and figures side by side, recorded on that claim for the screens. */
+  shown?: FactShown;
 }
 
 /**

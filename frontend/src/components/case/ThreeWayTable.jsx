@@ -62,7 +62,13 @@ export default function ThreeWayTable({ threeWay, invoiceCurrency }) {
                   <td className="num"><b>{num(l.qtyOrdered)}</b><span>@ {num(l.unitPrice)}</span></td>
                   <td className="num"><b>{num(l.qtyReceived)}</b></td>
                   <td className="num">
-                    {l.invoice ? <><b>{num(l.invoice.qty)}</b><span>@ {num(l.invoice.unitPrice)}</span></> : <span className="vb-dim">&mdash;</span>}
+                    {l.invoice ? (
+                      <>
+                        {/* the billed figure that is off is marked, so the eye lands on exactly what is wrong */}
+                        <b>{l.flags.some((f) => f === 'qty_over_received' || f === 'qty_over_ordered') ? <mark className="vb-wrong">{num(l.invoice.qty)}</mark> : num(l.invoice.qty)}</b>
+                        <span>@ {l.flags.includes('price_over') ? <mark className="vb-wrong">{num(l.invoice.unitPrice)}</mark> : num(l.invoice.unitPrice)}</span>
+                      </>
+                    ) : <span className="vb-dim">&mdash;</span>}
                   </td>
                   <td>
                     {flags.length === 0
@@ -77,7 +83,7 @@ export default function ThreeWayTable({ threeWay, invoiceCurrency }) {
                 <td><div className="vb-3w-item">{l.description}</div><div className="vb-dim vb-3w-sub">On the invoice only</div></td>
                 <td className="num"><span className="vb-dim">&mdash;</span></td>
                 <td className="num"><span className="vb-dim">&mdash;</span></td>
-                <td className="num"><b>{num(l.qty)}</b><span>@ {num(l.unitPrice)}</span></td>
+                <td className="num"><b><mark className="vb-wrong">{num(l.qty)}</mark></b><span>@ {num(l.unitPrice)}</span></td>
                 <td><div className="vb-3w-flag-bad">No matching line on the purchase order</div></td>
               </tr>
             ))}

@@ -6,6 +6,7 @@ import type { InvoiceExtraction } from "@/lib/documents/invoice";
 import { getDocument, PURPOSE_WORDS } from "@/lib/documents/store";
 import { handle, HttpError, readJsonBody, reviewerName } from "@/lib/http";
 import { runPipeline } from "@/lib/pipeline/orchestrator";
+import { spreadTax, statedTaxRate } from "@/lib/tax-lines";
 
 export const maxDuration = 60; // the pipeline continues in the background after the response
 
@@ -15,13 +16,19 @@ export const maxDuration = 60; // the pipeline continues in the background after
  *
  * Body: { documentId, reviewerName, invoice: { vendorName, invoiceNumber, invoiceDate, dueDate?, poNumber?,
  *   currency, lines: [{ description, quantity, unitPrice }], charges?: [{ label, amount }],
- *   taxLines?: [{ label, amount }], discount?, roundOff?, total } }
+ *   taxLines?: [{ label, amount }], discount?, roundOff?, total,
+ *   creditMemoFor? (a credit note: the number of the vendor's invoice it credits),
+ *   bankLast4? (the last 4 digits of the bank account the invoice asks to be paid into) } }
  *
  * The values are the person's (they may have corrected the reading), so they must add up exactly:
  * lines + charges + taxes - discount + round off = total, or 422 says by how much it is out. Charges (shipping,
  * freight) become invoice lines, so the three-way match sees them as lines nobody ordered; round off and discount
  * are the invoice's adjustment (posted to account 7300). The extract decision on the hash-chained trail records
  * how the machine read the document, who checked it, and every field they changed.
+ *
+ * A credit note is saved as a credit memo against the vendor's invoice it names (422 when that invoice is not on
+ * file). A bank account different from the one on file holds every invoice from the vendor until a callback and a
+ * second sign-off (lib/ledger/bank-change-review.ts); the response's `bankAccount` says which happened.
  *
  * 404 unknown document; 409 the document is already an invoice, or this vendor already sent this invoice number.
  */
@@ -41,6 +48,11 @@ export const POST = handle("POST /api/invoices/from-document", async (req) => {
 
   const tax = round2(inv.taxLines.reduce((s, t) => s + t.amount, 0));
   const adjustment = round2(inv.roundOff - inv.discount);
+  // The rate printed on the tax lines, so the match step can check the tax charged against it (lib/tax-lines.ts).
+  const stated = statedTaxRate(inv.taxLines);
+  const perLine = stated
+    ? spreadTax({ charged: tax, items: inv.lines.map((l) => l.quantity * l.unitPrice), charges: inv.charges.map((c) => c.amount), discount: inv.discount, rate: stated.rate })
+    : null;
   const created = await createBill({
     vendorName: inv.vendorName,
     poNumber: inv.poNumber,
@@ -55,6 +67,9 @@ export const POST = handle("POST /api/invoices/from-document", async (req) => {
     rawSource: (doc.reading.layout_text || doc.reading.markdown).slice(0, 200_000),
     sourceDocumentId: documentId,
     strictTotals: true, // a person's figures must add up; the review screen shows the sum before saving
+    creditMemoFor: inv.creditMemoFor,
+    bankLast4: inv.bankLast4,
+    statedTax: stated && perLine ? { ...stated, perLine } : null,
   });
 
   const saved: ExtractionSubmission = {
@@ -82,7 +97,7 @@ export const POST = handle("POST /api/invoices/from-document", async (req) => {
   console.info(`POST /api/invoices/from-document: document ${documentId} -> invoice ${created.billId} by ${by} (${result.review!.corrections.length} correction(s))`);
 
   const invoice = await getFrontendInvoice(created.billId);
-  return Response.json({ ...invoice, corrections: result.review!.corrections, vendorCreated: created.vendorCreated }, { status: 201 });
+  return Response.json({ ...invoice, corrections: result.review!.corrections, vendorCreated: created.vendorCreated, bankAccount: created.bankAccount }, { status: 201 });
 });
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -93,6 +108,7 @@ interface ReviewedInvoice {
   charges: Array<{ label: string; amount: number }>;
   taxLines: Array<{ label: string; amount: number }>;
   discount: number; roundOff: number; total: number;
+  creditMemoFor: string | null; bankLast4: string | null;
 }
 
 function parseInvoice(raw: unknown): ReviewedInvoice {
@@ -150,6 +166,12 @@ function parseInvoice(raw: unknown): ReviewedInvoice {
     discount: o.discount == null || o.discount === "" ? 0 : num(o.discount, "invoice.discount", 0),
     roundOff: o.roundOff == null || o.roundOff === "" ? 0 : num(o.roundOff, "invoice.roundOff"),
     total: num(o.total, "invoice.total", 0.01),
+    creditMemoFor: str("creditMemoFor", false, 60),
+    bankLast4: (() => {
+      const v = str("bankLast4", false, 4);
+      if (v != null && !/^\d{4}$/.test(v)) throw new HttpError(400, "invoice.bankLast4 must be exactly 4 digits");
+      return v;
+    })(),
   };
 }
 

@@ -204,6 +204,39 @@ export async function getOrCreateBankChangeReview(input: CreateBankChangeReviewI
   });
 }
 
+/**
+ * The bank account an invoice asks to be paid into (its last 4 digits, read off the document and checked by the
+ * person saving it), recorded inside the caller's transaction (lib/bills.ts createBill):
+ *   - "first": the vendor had no account on file; this one is kept. Nothing is held.
+ *   - "same": it is the account on file. Nothing changes.
+ *   - "changed": a different account. The vendor's account and bank_account_changed_at are updated and a review is
+ *     opened (callback_pending) naming the old and new account and this invoice, so every invoice from the vendor is
+ *     held (detectBankChangeGate) until someone phones the vendor and a second person signs off.
+ * A change always opens a NEW review, even back to an account reviewed before: an old sign-off does not clear a
+ * fresh change (the gate reads the newest review for the current account).
+ */
+export async function recordInvoiceBankAccountInTx(
+  tx: TransactionSql<{}>, input: { vendorId: string; last4: string; sourceInvoiceId: string },
+): Promise<"first" | "same" | "changed"> {
+  await tx`SELECT pg_advisory_xact_lock(${REVIEW_LOCK_KEY})`;
+  const [vendor] = await tx`SELECT bank_account_last4 FROM vendors WHERE id = ${input.vendorId} FOR UPDATE`;
+  if (!vendor) throw new Error(`recordInvoiceBankAccountInTx: no vendor found with id '${input.vendorId}'`);
+  const onFile: string | null = vendor.bank_account_last4 ?? null;
+  if (onFile === null) {
+    await tx`UPDATE vendors SET bank_account_last4 = ${input.last4} WHERE id = ${input.vendorId}`;
+    return "first";
+  }
+  if (onFile === input.last4) return "same";
+
+  const now = new Date().toISOString();
+  await tx`UPDATE vendors SET bank_account_last4 = ${input.last4}, bank_account_changed_at = ${now} WHERE id = ${input.vendorId}`;
+  await tx`
+    INSERT INTO vendor_bank_change_reviews (id, vendor_id, old_bank_last4, new_bank_last4, status, source_invoice_id, created_at)
+    VALUES (${randomUUID()}, ${input.vendorId}, ${onFile}, ${input.last4}, 'callback_pending', ${input.sourceInvoiceId}, ${now})`;
+  console.info(`recordInvoiceBankAccountInTx: vendor ${input.vendorId} bank account changed (ending ${onFile} -> ${input.last4}) on invoice ${input.sourceInvoiceId}; its invoices are held`);
+  return "changed";
+}
+
 export interface LogCallbackAttemptInput {
   reviewId: string;
   phoneUsed: string;

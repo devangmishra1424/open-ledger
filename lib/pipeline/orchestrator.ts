@@ -235,7 +235,7 @@ export async function runMatchStageDecision(vendorBillId: string, parentDecision
   // trail, and the "ask why" explainer that answers only from it, can say what was wrong and by how much.
   const claims: Claim[] = matchResult.findings.flatMap((f): Claim[] => [
     { text: `${f.code}: ${f.action}`, tag: "grounded" },
-    ...(f.fact ? [{ text: f.fact, tag: "grounded" as const }] : []),
+    ...(f.fact ? [{ text: f.fact, tag: "grounded" as const, ...(f.shown ? { shown: f.shown } : {}) }] : []),
   ]);
   if (matchResult.cleanFact) claims.push({ text: matchResult.cleanFact, tag: "grounded" });
 

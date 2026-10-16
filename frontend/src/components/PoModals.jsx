@@ -20,6 +20,19 @@ Line Items:
    Unit Price: $62.50
 `;
 
+/** A blanket order: one PO that many invoices bill against, up to a spending limit. */
+const sampleBlanketPo = () => `PURCHASE ORDER (BLANKET)
+Vendor: Northwind Parts Ltd.
+PO Number: PO-B${Math.floor(1000 + Math.random() * 9000)}
+Order Date: ${today()}
+Not to exceed: $2,000.00
+
+Line Items:
+1. Maintenance Kit
+   Qty: 40
+   Unit Price: $62.50
+`;
+
 /** " 2 invoices that cited it were linked and checked again." for a toast; "" when there were none. */
 function recheckedWords(list, waited, happened) {
   if (!list?.length) return '';
@@ -117,6 +130,7 @@ export function AddPoModal({ onClose, onSaved }) {
   const [poNumber, setPoNumber] = useState('');
   const [orderDate, setOrderDate] = useState(today());
   const [currency, setCurrency] = useState('USD');
+  const [limit, setLimit] = useState('');
   const [items, setItems] = useState([{ description: '', qty: '1', rate: '' }]);
   const [receipt, setReceipt] = useState(newReceipt('full'));
   const [busy, setBusy] = useState(false);
@@ -140,6 +154,7 @@ export function AddPoModal({ onClose, onSaved }) {
       if (d.poNumber) setPoNumber(d.poNumber);
       if (d.orderDate) setOrderDate(d.orderDate);
       if (d.currency) setCurrency(d.currency);
+      setLimit(d.spendingLimit != null ? String(d.spendingLimit) : '');
       if (d.lines.length > 0) setItems(d.lines.map((l) => ({ description: l.description, qty: String(l.quantity), rate: String(l.unitPrice) })));
       const notes = [];
       if (r.alreadyUploaded?.purchaseOrderId) notes.push('This exact file was already saved as a purchase order.');
@@ -176,6 +191,7 @@ export function AddPoModal({ onClose, onSaved }) {
     try {
       const body = {
         vendor: vendor.trim(), poNumber: poNumber.trim(), orderDate, currency,
+        spendingLimit: limit.trim() ? Number(limit.replace(/,/g, '')) : undefined,
         items: items.map((it) => ({ description: it.description.trim(), qty: Number(it.qty), rate: Number(it.rate) })),
         receipt: receiptPayload(receipt, items),
         sourceDocumentId: documentId ?? undefined,
@@ -231,6 +247,7 @@ export function AddPoModal({ onClose, onSaved }) {
                 <button type="button" className="vb-btn vb-btn-sm" onClick={() => fileRef.current?.click()} disabled={reading}><Upload size={14} /> Upload a PO (PDF, scan, photo, Word, Excel)</button>
                 <button type="button" className="vb-btn vb-btn-sm" onClick={readDocument} disabled={reading || !doc.trim()}>{reading ? <Spinner label="Reading…" /> : 'Read it into the form'}</button>
                 <button type="button" className="vb-link-btn" onClick={() => setDoc(samplePo())}>Use a sample PO</button>
+                <button type="button" className="vb-link-btn" onClick={() => setDoc(sampleBlanketPo())}>Use a sample blanket order</button>
               </div>
               <div className="vb-field-hint" style={{ marginTop: 6 }}>Read by the same document reader as invoices (OCR for scans and photos). The vendor is taken from the Vendor / Supplier / To block, not your own letterhead. Nothing is saved until you press Save; anything it cannot read, you type.</div>
               {readFrom && <div className="vb-field-hint" style={{ marginTop: 4 }}>Read {readFrom.filename}: {readFrom.ocrUsed ? `OCR ${Math.floor((readFrom.ocrConfidence ?? 0) * 100)}% confident` : 'no OCR needed'}{readFrom.timingMs?.total ? `, ${(readFrom.timingMs.total / 1000).toFixed(1)} s` : ''}.</div>}
@@ -243,6 +260,11 @@ export function AddPoModal({ onClose, onSaved }) {
               <label className="vb-field"><span>Order date</span><input type="date" required value={orderDate} onChange={(e) => setOrderDate(e.target.value)} /></label>
               <label className="vb-field"><span>Currency</span><input value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase().slice(0, 3))} maxLength={3} /></label>
             </div>
+            <label className="vb-field">
+              <span>Spending limit (optional)</span>
+              <input inputMode="decimal" value={limit} onChange={(e) => setLimit(e.target.value)} placeholder="Leave empty for a normal order" />
+              <span className="vb-field-hint">Only for a blanket order: all its invoices together may come to at most this much. Filled in for you when the PO says &ldquo;not to exceed&rdquo;.</span>
+            </label>
 
             <div className="vb-field">
               <span>Lines ordered</span>
