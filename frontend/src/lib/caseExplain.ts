@@ -245,7 +245,7 @@ function choiceWords(inv: CaseLike): CaseExplanation['choices'] {
         : `Posts ${amount} to the ledger as owed to ${inv.vendor}, then pays it (simulated: no money moves). Your name goes on the record.`),
     reject: why('reject') ?? (credit
       ? `Voids this credit: ${amount} is never posted. Use it if the credit is wrong.`
-      : `Voids this invoice: ${amount} is never posted or paid. Use it for a duplicate, an overcharge you will not accept, or a bill nobody ordered.`),
+      : `Voids this invoice: ${amount} is never posted or paid. Use it for an overcharge you will not accept, or a bill nobody ordered.`),
     contest: why('contest') ?? 'Sends it back to the AI with your note, e.g. "the new price was agreed on 3 October". The AI re-reviews with it, but can only make the outcome stricter: it cannot approve what the rules flagged.',
   };
 }
