@@ -1,12 +1,14 @@
 import { randomUUID, createHash } from "node:crypto";
-import type { TransactionSql } from "postgres";
+import type { ISql, TransactionSql } from "postgres";
 import { getSql } from "@/db/client";
 
 /**
  * The two AP journal entries (DESIGN.md §5.3) — always separate rows, never one mutable
  * status flag:
  *   - postBillApproval: Dr 6xxx Expense (bill line's own gl_account_id, or its PO line's) —
- *     Cr 2000 Accounts Payable.
+ *     Cr 2000 Accounts Payable. For a credit memo (invoice_type 'credit_memo', its amounts
+ *     stored as positive magnitudes) the same lines post the other way round: Dr Accounts
+ *     Payable — Cr Expense, lowering what is owed to the vendor. A credit memo is never paid.
  *   - postPayment: Dr 2000 Accounts Payable — Cr 1000 Cash. Supports split/partial payment
  *     across multiple vendor_bills via the `applications` array.
  *
@@ -149,6 +151,32 @@ export function buildBillApprovalDraft(input: BillApprovalDraftInput): JournalEn
   };
 }
 
+/**
+ * Pure builder for an approved credit memo: the bill-approval entry with every line on the
+ * other side — Dr Accounts Payable for the full credit, Cr each line's expense account (and the
+ * tax and adjustment accounts). It shares the bill-approval idempotency key: a credit memo is one
+ * vendor_bills row with one approval posting, like any bill.
+ */
+export function buildCreditMemoDraft(input: BillApprovalDraftInput): JournalEntryDraft {
+  const asBill = buildBillApprovalDraft(input);
+  return {
+    ...asBill,
+    memo: `Credit memo approval: ${input.invoiceNumber}`,
+    lines: asBill.lines.map((l) => ({ ...l, debitAmount: l.creditAmount, creditAmount: l.debitAmount })),
+  };
+}
+
+/**
+ * The total of credit memos already posted against a bill (vendor_bills.related_invoice_id): what
+ * they took off what is owed on it. A credit memo counts once it has its own journal entry.
+ */
+export async function creditsPostedAgainst(sql: ISql<{}>, billId: string): Promise<number> {
+  const rows = await sql`
+    SELECT COALESCE(SUM(total_amount), 0) AS credited FROM vendor_bills
+    WHERE related_invoice_id = ${billId} AND invoice_type = 'credit_memo' AND journal_entry_id IS NOT NULL`;
+  return Number(rows[0].credited);
+}
+
 export interface PaymentDraftInput {
   paymentId: string;
   totalAmount: number;
@@ -275,7 +303,8 @@ export interface PostResult {
 
 /**
  * Called by the pipeline's stage-7 "audit" node (BUILD.md §5.1) on auto-approve. Posts the
- * Dr Expense — Cr AP entry and marks the bill posted. Idempotent: a retried call for the same
+ * Dr Expense — Cr AP entry (Dr AP — Cr Expense for a credit memo) and marks the bill posted.
+ * Idempotent: a retried call for the same
  * billId returns the already-posted entry rather than inserting a second one, both via the
  * idempotency_key lookup and (belt-and-suspenders) via vendor_bills.journal_entry_id itself.
  */
@@ -349,7 +378,8 @@ export async function postBillApprovalInTx(tx: TransactionSql<{}>, billId: strin
   }
 
   const entryDate = new Date().toISOString().slice(0, 10);
-  const draft = buildBillApprovalDraft({
+  const build = bill.invoice_type === "credit_memo" ? buildCreditMemoDraft : buildBillApprovalDraft;
+  const draft = build({
     billId,
     invoiceNumber: bill.invoice_number,
     currency: bill.currency,
@@ -384,8 +414,9 @@ export interface PaymentApplicationInput {
 /**
  * Posts the Dr AP — Cr Cash entry for a payment, writes payment_applications for each
  * application (split/partial payment across multiple vendor_bills), and flips each applied
- * bill to 'paid' once its cumulative applied amount covers its total_amount. Idempotent the
- * same way as postBillApproval.
+ * bill to 'paid' once its cumulative applied amount plus the credit memos posted against it
+ * cover its total_amount. Refuses to apply a payment to a credit memo. Idempotent the same way
+ * as postBillApproval.
  *
  * NOTE: the `payments` table (db/schema.sql) has no currency/exchange_rate column of its own
  * (unlike purchase_orders/vendor_bills) — this posts in USD at exchange_rate 1.0. Flagged
@@ -419,9 +450,11 @@ export async function postPayment(paymentId: string, applications: PaymentApplic
 
     const resolvedApplications: Array<{ vendorBillId: string; appliedAmount: number; apAccountId: string; vendorId: string; totalAmount: number }> = [];
     for (const app of applications) {
-      const billRows = await tx`SELECT id, ap_account_id, vendor_id, total_amount FROM vendor_bills WHERE id = ${app.vendorBillId}`;
+      const billRows = await tx`SELECT id, ap_account_id, vendor_id, total_amount, invoice_type FROM vendor_bills WHERE id = ${app.vendorBillId}`;
       if (billRows.length === 0) throw new Error(`postPayment: no vendor_bill found with id '${app.vendorBillId}'`);
       const bill = billRows[0];
+      // A credit memo is money the vendor owes back: paying it would send the credit to the vendor a second time.
+      if (bill.invoice_type === "credit_memo") throw new Error(`postPayment: vendor_bill '${app.vendorBillId}' is a credit memo, which is never paid`);
       const apAccountId = await resolveApAccountId(tx, bill.ap_account_id);
       resolvedApplications.push({
         vendorBillId: app.vendorBillId,
@@ -461,8 +494,9 @@ export async function postPayment(paymentId: string, applications: PaymentApplic
 
     for (const app of resolvedApplications) {
       const sumRows = await tx`SELECT COALESCE(SUM(applied_amount), 0) as total FROM payment_applications WHERE vendor_bill_id = ${app.vendorBillId}`;
-      const totalApplied = Number(sumRows[0].total);
-      if (totalApplied >= app.totalAmount - BALANCE_EPSILON) {
+      // Credit memos posted against the bill settle part of it too, so a bill paid net of its credits is fully paid.
+      const totalSettled = Number(sumRows[0].total) + await creditsPostedAgainst(tx, app.vendorBillId);
+      if (totalSettled >= app.totalAmount - BALANCE_EPSILON) {
         await tx`UPDATE vendor_bills SET status = 'paid' WHERE id = ${app.vendorBillId}`;
       }
     }

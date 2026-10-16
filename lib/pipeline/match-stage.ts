@@ -4,6 +4,7 @@ import { classifyDateGap, classifyTaxRateVariance, classifyPriceVariance, classi
 import { computePoLineFulfillment } from "@/lib/matching/partial-handling";
 import { isPlausibleUomConversion } from "@/lib/matching/uom-dimension";
 import { detectBankChangeGate, getOrCreateBankChangeReview } from "@/lib/ledger/bank-change-review";
+import { creditsPostedAgainst } from "@/lib/ledger/journal";
 import {
   evaluateNoPo, evaluateNonPo, evaluateBeforeReceipt, evaluatePriceVariance, evaluateQuantityVariance,
   evaluateCurrency, evaluateBlanketExceeded, evaluateTaxVariance, evaluateCreditMemo, evaluateUomMismatch,
@@ -125,12 +126,14 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
       detail.creditMemoNote = `related_invoice_id '${bill.related_invoice_id}' does not exist`;
       return { findings, combined: combineExceptions(findings), detail };
     }
-    // Simplification, stated honestly: "remaining open amount" is treated as binary (0 once
-    // 'paid', else the full total_amount) rather than tracking partial payments via
-    // payment_applications — nothing in this codebase currently posts partial payments either
-    // (see INTEGRATION.md's note on lib/ledger/journal.ts's postPayment being unwired), so
-    // finer-grained tracking here would be precision this system can't yet back up elsewhere.
-    const remainingOpenAmount = related.status === "paid" ? 0 : related.total_amount;
+    // "Remaining open amount": 0 once the related invoice is 'paid', else its total less the
+    // credit memos already posted against it (an approved credit is taken off what is paid on
+    // its invoice — lib/payments/payments.ts settleApprovedBill), so two credits cannot both
+    // "fit" inside the same open amount. Partial payments are not tracked: an invoice is only
+    // ever paid in one payment, at approval.
+    const remainingOpenAmount = related.status === "paid"
+      ? 0
+      : Math.max(0, Number(related.total_amount) - await creditsPostedAgainst(sql, bill.related_invoice_id));
     const netAmount = remainingOpenAmount - bill.total_amount;
     detail.creditMemoNetAmount = netAmount;
     addFinding(findings, "EXC-CREDIT_MEMO", evaluateCreditMemo(netAmount), (action) => facts.creditMemoFact({

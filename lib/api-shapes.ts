@@ -127,6 +127,8 @@ export interface FrontendInvoice {
   taxTotal: number;
   /** Round off minus invoice-level discount: total = items + tax + adjustment. */
   adjustmentTotal: number;
+  /** A credit memo is money the vendor owes back: approving it lowers what is owed to them and pays nothing. */
+  invoiceType: "standard" | "credit_memo";
 
   rawStatus: BillStatus;
   state: CaseState;
@@ -272,6 +274,7 @@ export function toFrontendInvoice(params: {
 
   // --- what happened, in one line ---
   const lastHumanApprove = lastOf(humanActions, (h) => h.action === "approve");
+  const creditMemo = bill.invoice_type === "credit_memo";
   const lastHumanReject = lastOf(humanActions, (h) => h.action === "reject");
   let headline: string;
   let detail: string | null = null;
@@ -313,6 +316,12 @@ export function toFrontendInvoice(params: {
     case "approved":
     case "paid": {
       decidedBy = lastHumanApprove ? lastHumanApprove.reviewer : "system";
+      if (creditMemo) {
+        // Never 'paid': a credit is not paid out, it lowers what is owed to the vendor.
+        headline = `${lastHumanApprove ? `Approved by ${lastHumanApprove.reviewer}` : "Auto-approved: the credit fits inside what is open on its invoice"}, credit posted to the ledger`;
+        detail = `It lowers what you owe ${vendorName}. Nothing is paid.`;
+        break;
+      }
       const how = lastHumanApprove ? `Approved by ${lastHumanApprove.reviewer}` : "Auto-approved: clean three-way match";
       headline = state === "paid" ? `${how}, paid` : `${how}, posted to the ledger`;
       detail = state === "paid" && payment ? `Payment ${payment.reference}${payment.reference.startsWith("SIMULATED-") ? " (simulated: no money moved)" : ""}` : null;
@@ -376,6 +385,7 @@ export function toFrontendInvoice(params: {
     poReference: bill.po_reference ?? null,
     taxTotal: Number(bill.tax_total ?? 0),
     adjustmentTotal: Number(bill.adjustment_total ?? 0),
+    invoiceType: creditMemo ? "credit_memo" : "standard",
     decisions: decisions.map((d) => ({
       id: d.id, nodeId: d.nodeId, label: nodeLabel(d.nodeId),
       actor: d.agentId, model: d.model ?? null,

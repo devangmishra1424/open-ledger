@@ -5,13 +5,15 @@ import * as facts from "@/lib/matching/finding-facts";
 import { REASON_GUIDE, AUTO_APPROVED_GUIDE } from "../frontend/src/lib/reasonGuide";
 import { STAGE_GUIDE } from "../frontend/src/lib/stageGuide";
 import { actionWords, outcomeWords } from "../frontend/src/lib/labels";
-import { routeFor } from "../frontend/src/lib/caseExplain";
+import { routeFor, explainCase, type CaseLike } from "../frontend/src/lib/caseExplain";
+import { toFrontendInvoice } from "@/lib/api-shapes";
 
 /**
  * Everything a reviewer (or an interviewer) reads must describe what VeriBook actually does. These
  * phrases name steps it has no screen or code for: contacting the vendor, credit notes or corrected
  * invoices, coding to an expense account, a whitelist, reviewer roles ("senior reviewer"), recording a
- * unit conversion, part-approving or part-rejecting an invoice, netting credits, onboarding, teams.
+ * unit conversion, part-approving or part-rejecting an invoice, using a credit against a later invoice,
+ * onboarding, teams. (An approved credit memo does come off its own invoice's payment while that is unpaid.)
  * Phoning the vendor IS a step: the bank-change callback records it and a second person signs off.
  */
 const UNDOABLE = /ask the vendor|contact|credit note|corrected invoice|reissue|finance|expense account|\bcod(e|ed|ing) it\b|coding|whitelist|senior|treasury|new callback|record the conversion|conversion, record it|reject the excess|pay what was received|part that was delivered|netted|net it against|onboard|\bw-?9\b|e-?mail|fraud review team/i;
@@ -70,5 +72,53 @@ describe("an AI recommendation written as advice is not shown as an outcome", ()
     expect(outcomeWords({ nodeId: "investigate", actionTaken: "escalate_l2" })).toBe("Recommended: sent to a reviewer (level 2)");
     expect(outcomeWords({ nodeId: "investigate", actionTaken: "Auto-Approve" })).toBe("Recommended: approved automatically");
     expect(actionWords(prose)).toBe("Free-text advice, not one of the system’s routes");
+  });
+});
+
+describe("a credit memo is never described as paid", () => {
+  // "Nothing is paid" / "never paid out" are the honest sentences; any other "pays" or "paid" about a credit is not.
+  const SAYS_PAID = /(?<!nothing |nothing is |never )(pays?|paid)/i;
+  const credit: CaseLike = {
+    vendor: "Acme Corp", amount: 2000, currency: "USD", poNumber: "Non-PO", state: "needs_attention", invoiceType: "credit_memo",
+    reason: { code: "EXC-CREDIT_MEMO", name: "Credit Memo", description: "A credit memo larger than what is still open on the invoice it relates to." },
+    decisions: [], threeWay: null, bankChange: null,
+    actions: { approve: { allowed: true }, reject: { allowed: true }, contest: { allowed: false, reason: "no AI review" } }, summary: { decidedBy: null },
+  };
+
+  it("the Approve and Reject buttons say what happens to a credit", () => {
+    const { choices } = explainCase(credit);
+    expect(choices.approve).toBe("Posts this credit of $2,000.00 to the ledger: it lowers what you owe Acme Corp. Nothing is paid. Your name goes on the record.");
+    expect([choices.approve, choices.reject].filter((t) => SAYS_PAID.test(t))).toEqual([]);
+    // An ordinary invoice still says it is paid.
+    expect(explainCase({ ...credit, invoiceType: "standard" }).choices.approve).toMatch(/then pays it/);
+  });
+
+  it("the trail's last step and the headline, once a credit is approved", () => {
+    expect(outcomeWords({ nodeId: "audit", actionTaken: "auto_approve" }, { invoiceType: "credit_memo" })).toBe("Credit posted to the ledger; nothing paid");
+    expect(outcomeWords({ nodeId: "audit", actionTaken: "no_payment" })).toBe("Posted to the ledger; nothing paid");
+    expect(outcomeWords({ nodeId: "audit", actionTaken: "auto_approve" })).toBe("Posted to the ledger and paid");
+
+    const bill = { id: "cm1", invoice_number: "INV-2024-0847-CM", status: "posted", total_amount: 2000, currency: "USD", invoice_type: "credit_memo",
+      received_at: "2026-10-16T09:00:00Z", invoice_date: "2026-10-16", due_date: null };
+    const at = "2026-10-16T10:00:00Z";
+    const view = (decisions: any[]) => toFrontendInvoice({ bill, vendorName: "Acme Corp", taxId: null, paymentTermsCode: null, poNumber: null, decisions, lines: [], reasons: new Map() });
+    const byPerson = view([
+      { id: "p", nodeId: "policy", agentId: "engine", actionTaken: "escalate_l1", reasonCode: "EXC-CREDIT_MEMO", hash: "h1", createdAt: at },
+      { id: "h", nodeId: "human_review", agentId: "human:Priya", actionTaken: "human_approved", triggeredByActor: "Priya", hash: "h2", createdAt: at },
+      { id: "a", nodeId: "audit", agentId: "engine", actionTaken: "no_payment", hash: "h3", createdAt: at },
+    ]);
+    const auto = view([{ id: "p", nodeId: "policy", agentId: "engine", actionTaken: "auto_approve", reasonCode: "EXC-CREDIT_MEMO", hash: "h1", createdAt: at },
+      { id: "a", nodeId: "audit", agentId: "engine", actionTaken: "auto_approve", hash: "h2", createdAt: at }]);
+
+    expect(byPerson.invoiceType).toBe("credit_memo");
+    expect(byPerson.summary).toMatchObject({ headline: "Approved by Priya, credit posted to the ledger", detail: "It lowers what you owe Acme Corp. Nothing is paid.", decidedBy: "Priya" });
+    expect(auto.summary.headline).toBe("Auto-approved: the credit fits inside what is open on its invoice, credit posted to the ledger");
+    expect([byPerson, auto].flatMap((v) => [v.summary.headline, v.summary.detail ?? ""]).filter((t) => SAYS_PAID.test(t))).toEqual([]);
+  });
+
+  it("the reason guide tells a reviewer what approving a credit does", () => {
+    const usually = REASON_GUIDE["EXC-CREDIT_MEMO"].usually;
+    expect(usually).toMatch(/reduction of what you owe the vendor, and nothing is paid/);
+    expect(SAYS_PAID.test(usually)).toBe(false);
   });
 });

@@ -3,7 +3,7 @@ import { getSql } from "@/db/client";
 import { writeDecision, writeDecisionInTx, getDecisionsForInvoice } from "@/lib/ledger/decisions";
 import { postBillApprovalInTx } from "@/lib/ledger/journal";
 import { detectBankChangeGate } from "@/lib/ledger/bank-change-review";
-import { triggerPayment, type PaymentResult } from "@/lib/payments/payments";
+import { settleApprovedBill, settlementNote, type PaymentResult } from "@/lib/payments/payments";
 import { checkHumanAction } from "@/lib/bill-workflow";
 import { reconsider, isEscalateSeniorResult } from "@/lib/pipeline/reconsider";
 import { HttpError } from "@/lib/http";
@@ -39,12 +39,12 @@ const ACTION_TAKEN: Record<HumanChoice, string> = {
 
 const MIN_REASON_LENGTH = 10;
 
-interface BillRow { id: string; vendorId: string; status: BillStatus; totalAmount: number }
+interface BillRow { id: string; vendorId: string; status: BillStatus; currency: string }
 
 async function loadBill(billId: string): Promise<BillRow> {
-  const rows = await getSql()`SELECT id, vendor_id, status, total_amount FROM vendor_bills WHERE id = ${billId}`;
+  const rows = await getSql()`SELECT id, vendor_id, status, currency FROM vendor_bills WHERE id = ${billId}`;
   if (rows.length === 0) throw new HumanActionError(404, `no invoice found with id '${billId}'`);
-  return { id: rows[0].id, vendorId: rows[0].vendor_id, status: rows[0].status, totalAmount: rows[0].total_amount };
+  return { id: rows[0].id, vendorId: rows[0].vendor_id, status: rows[0].status, currency: rows[0].currency };
 }
 
 /** Writes the human_review decision + its reviews row, inside the caller's transaction. */
@@ -87,6 +87,8 @@ export interface ActionOutcome {
   decision?: Decision;
   payment?: PaymentResult;
   paymentError?: string;
+  /** Why approving moved no money: a credit memo is never paid, and credits can cover a whole invoice. */
+  noPayment?: "credit_memo" | "covered_by_credit";
 }
 
 export async function approveInvoice(p: { billId: string; reviewer: string; note?: string }): Promise<ActionOutcome> {
@@ -113,10 +115,23 @@ export async function approveInvoice(p: { billId: string; reviewer: string; note
 
   // The invoice is now approved and POSTED. Payment is a separate step with its own failure
   // mode: if it fails the ledger entry is still correct and the invoice stays posted-but-unpaid,
-  // with the failure on the record.
+  // with the failure on the record. A credit memo is never paid (settleApprovedBill pays nothing).
   try {
-    const payment = await triggerPayment(p.billId, bill.totalAmount);
-    return { alreadyDone: false, decision, payment };
+    const settlement = await settleApprovedBill(p.billId);
+    // When approving did not simply pay the total, the trail says what happened instead.
+    const note = settlementNote(settlement, bill.currency);
+    if (note) {
+      const now = new Date().toISOString();
+      await writeDecision({
+        invoiceId: p.billId, nodeId: "audit", agentId: "deterministic-policy-engine",
+        parentDecisionId: decision.id, startedAt: now, endedAt: now,
+        actionTaken: settlement.kind === "paid" ? "paid_less_credit" : "no_payment",
+        claims: [{ text: note, tag: "grounded" }],
+        idempotencyKey: `human:${p.billId}:settlement:${decision.id}`,
+      });
+    }
+    if (settlement.kind === "paid") return { alreadyDone: false, decision, payment: settlement.payment };
+    return { alreadyDone: false, decision, noPayment: settlement.kind };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     const now = new Date().toISOString();
