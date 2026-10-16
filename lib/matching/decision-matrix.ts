@@ -19,7 +19,8 @@
 
 export type Action = "auto_approve" | "auto_reject" | "escalate_l1" | "escalate_l2" | "block" | "block_fraud_flag";
 
-const ALL_ACTIONS: readonly Action[] = ["auto_approve", "auto_reject", "escalate_l1", "escalate_l2", "block", "block_fraud_flag"];
+/** Exported so lib/agent/tools.ts's submit_investigation can constrain recommended_action to exactly these values. */
+export const ALL_ACTIONS: readonly Action[] = ["auto_approve", "auto_reject", "escalate_l1", "escalate_l2", "block", "block_fraud_flag"];
 
 /** Narrows free text (an LLM's recommendation, a DB column) to a real Action, or undefined — never a cast. */
 export function asAction(value: string | null | undefined): Action | undefined {
