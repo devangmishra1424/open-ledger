@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build:web": "npm --prefix frontend ci && npm --prefix frontend run build && node scripts/copy-web.cjs",
+    "build": "npm run build:web && next build",
     "start": "next start",
     "migrate": "tsx --env-file=.env db/migrate.ts",
     "seed": "tsx --env-file=.env scripts/seed.ts",

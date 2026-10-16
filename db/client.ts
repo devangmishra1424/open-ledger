@@ -14,9 +14,15 @@ import postgres from "postgres";
  * is that schema ONLY (never `public` as a fallback): db/migrate-lib.ts issues unqualified
  * DROP/CREATE, so a fallback to `public` would let a test run touch live tables.
  */
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error("DATABASE_URL is not set — copy your Supabase connection string into .env");
+// Checked when the first query is made, not when this module is imported: `next build` imports every
+// route module to collect page data, and a build (Vercel's, CI's) has no reason to hold the database
+// secret. A missing DATABASE_URL still fails loud, at the first request that needs the database.
+function connectionStringOrThrow(): string {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL is not set — copy your Supabase connection string into .env");
+  }
+  return connectionString;
 }
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -36,7 +42,7 @@ let sqlClient: ReturnType<typeof postgres> | undefined;
 export function getSql() {
   if (!sqlClient) {
     const schema = activeSchema();
-    sqlClient = postgres(connectionString!, {
+    sqlClient = postgres(connectionStringOrThrow(), {
       // pgbouncer transaction-mode pooling doesn't support prepared statements.
       prepare: false,
       // Bounded pool + explicit timeouts — found the hard way: a client abandoning a query
@@ -47,7 +53,9 @@ export function getSql() {
       // real queries per poll (the dashboard alone runs 8), could genuinely exceed 10
       // concurrent connections with more than one tab open — visible as dashboard calls
       // taking 15-120+ seconds, queued behind each other rather than actually hung.
-      max: 20,
+      // DB_POOL_MAX lowers it for a serverless host, where every instance holds its own pool and many
+      // instances x 20 connections would exhaust the pooler.
+      max: Number(process.env.DB_POOL_MAX) > 0 ? Number(process.env.DB_POOL_MAX) : 20,
       idle_timeout: 10, // seconds a connection can sit idle before this client releases it
       connect_timeout: 10, // seconds to wait for a new connection before failing loud
       // NUMERIC columns (all money, quantities and rates) arrive as strings by default, to avoid

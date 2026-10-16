@@ -47,6 +47,19 @@ Open the inbox. Six invoices will be waiting, each for a different reason: a ban
 
 `npm run migrate` and the demo-wipe scripts refuse to touch the live schema without `--yes`.
 
+## Hosting it
+
+One Vercel project serves everything: `npm run build` builds the frontend (`build:web`), copies it into `public/`, then runs `next build`; the API is the Next.js routes and every other path gets the single-page app. The build needs no secret. `vercel.json` runs the functions in Mumbai (`bom1`), next to the Supabase database. Set these in the Vercel project (Settings, Environment Variables), then redeploy:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | the **pooled** Supabase string (port 6543) |
+| `DB_SCHEMA` | `veribook_demo`, so the hosted copy works on the demo tables and never the live `public` ones |
+| `GROQ_API_KEY` | the AI provider key (without it every AI step says it could not run and stops the invoice for a person) |
+| `DB_POOL_MAX` | `5` (each serverless instance holds its own pool) |
+
+Check it with `GET /api/system`, then open `/app`. Limits of a hosted copy: the document reader is a separate Python service of about 2 GB and does not run on Vercel, so **From a document** answers 503 with the reason (typed-in invoices, POs and receipts work); sign-in is off, so anyone with the link can approve invoices and spend the AI quota (see Known limits).
+
 ## Checks
 
 ```bash
