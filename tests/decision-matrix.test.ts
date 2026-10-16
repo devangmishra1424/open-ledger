@@ -59,6 +59,10 @@ describe("decision-matrix (docs/ap-three-way-match-spec.md §3)", () => {
     it("EXC-CREDIT_MEMO: escalates L1 when net < 0 (vendor owes us)", () => {
       expect(evaluateCreditMemo(-1500)).toBe("escalate_l1");
     });
+    it("EXC-CREDIT_MEMO: escalates L1 whenever the related invoice was rejected, whatever the net", () => {
+      expect(evaluateCreditMemo(0, true)).toBe("escalate_l1");
+      expect(evaluateCreditMemo(500, true)).toBe("escalate_l1");
+    });
 
     it("EXC-PARTIAL always auto-approves", () => {
       expect(evaluatePartial()).toBe("auto_approve");

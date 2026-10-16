@@ -153,7 +153,12 @@ export function evaluateNonPo(amount: number, vendorWhitelisted: boolean): Actio
   return moreRestrictive(pctRule, dollarThresholdAction("EXC-NON_PO", amount) ?? pctRule);
 }
 
-export function evaluateCreditMemo(netAmount: number): Action {
+/**
+ * relatedVoid: the related invoice was rejected, so nothing was ever owed on it for the credit to
+ * come off. Always a person's call, even for a credit of 0 (net 0 would otherwise auto-approve).
+ */
+export function evaluateCreditMemo(netAmount: number, relatedVoid = false): Action {
+  if (relatedVoid) return "escalate_l1";
   return netAmount >= 0 ? "auto_approve" : "escalate_l1";
 }
 

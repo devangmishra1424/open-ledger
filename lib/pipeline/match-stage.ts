@@ -126,17 +126,20 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
       detail.creditMemoNote = `related_invoice_id '${bill.related_invoice_id}' does not exist`;
       return { findings, combined: combineExceptions(findings), detail };
     }
-    // "Remaining open amount": 0 once the related invoice is 'paid', else its total less the
-    // credit memos already posted against it (an approved credit is taken off what is paid on
-    // its invoice — lib/payments/payments.ts settleApprovedBill), so two credits cannot both
-    // "fit" inside the same open amount. Partial payments are not tracked: an invoice is only
-    // ever paid in one payment, at approval.
-    const remainingOpenAmount = related.status === "paid"
+    // "Remaining open amount": 0 once the related invoice is 'paid' or was rejected ('void':
+    // nothing was ever owed on it, so approving a credit against it would post Dr Accounts
+    // Payable for money never owed), else its total less the credit memos already posted
+    // against it (an approved credit is taken off what is paid on its invoice —
+    // lib/payments/payments.ts settleApprovedBill), so two credits cannot both "fit" inside the
+    // same open amount. Partial payments are not tracked: an invoice is only ever paid in one
+    // payment, at approval.
+    const relatedVoid = related.status === "void";
+    const remainingOpenAmount = related.status === "paid" || relatedVoid
       ? 0
       : Math.max(0, Number(related.total_amount) - await creditsPostedAgainst(sql, bill.related_invoice_id));
     const netAmount = remainingOpenAmount - bill.total_amount;
     detail.creditMemoNetAmount = netAmount;
-    addFinding(findings, "EXC-CREDIT_MEMO", evaluateCreditMemo(netAmount), (action) => facts.creditMemoFact({
+    addFinding(findings, "EXC-CREDIT_MEMO", evaluateCreditMemo(netAmount, relatedVoid), (action) => facts.creditMemoFact({
       credit: bill.total_amount, currency: bill.currency, relatedNumber: related.invoice_number ?? null, relatedStatus: related.status,
       openAmount: remainingOpenAmount, net: netAmount, action,
     }));

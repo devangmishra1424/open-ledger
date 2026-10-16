@@ -46,6 +46,7 @@ describe("on-screen guidance names only steps VeriBook can take", () => {
       facts.currencyFact({ billCurrency: "USD", poCurrency: "USD", poNumber: "PO-1", billRate: 1.02, poRate: 1, ratePct: 0.02, action }),
       facts.nonPoFact({ amount: 6500, currency: "USD", printedPoReference: null, trustTier: "new", action }),
       facts.creditMemoFact({ credit: 2000, currency: "USD", relatedNumber: "INV-1", relatedStatus: "posted", openAmount: 500, net: -1500, action }),
+      facts.creditMemoFact({ credit: 2000, currency: "USD", relatedNumber: "INV-1", relatedStatus: "void", openAmount: 0, net: -2000, action }),
       facts.bankChangeFact({ status: "callback_pending", action }),
     ]);
     expect(sentences.filter((t) => UNDOABLE.test(t))).toEqual([]);

@@ -4,7 +4,7 @@ import { getSql } from "@/db/client";
 import { writeDecision, getDecisionsForInvoice } from "@/lib/ledger/decisions";
 import { buildBillApprovalDraft, buildCreditMemoDraft, computeIdempotencyKey, postBillApproval, postPayment } from "@/lib/ledger/journal";
 import { triggerPayment, settleApprovedBill } from "@/lib/payments/payments";
-import { approveInvoice } from "@/lib/ledger/human-review";
+import { approveInvoice, rejectInvoice } from "@/lib/ledger/human-review";
 import { runAuditStage } from "@/lib/pipeline/orchestrator";
 import { runMatchStage } from "@/lib/pipeline/match-stage";
 
@@ -245,5 +245,18 @@ describe("an approved credit memo comes off what is paid on its invoice", () => 
 
     expect(r.detail.creditMemoNetAmount).toBe(-500);
     expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.stringContaining("USD 500.00 still open") }]);
+  });
+
+  it("the match step: a credit against an invoice a person rejected has nothing to come off, so it goes to a person", async () => {
+    const vendorId = await makeVendor();
+    const { billId: invoiceId } = await makeBill(vendorId, { amount: 2000 });
+    await rejectInvoice({ billId: invoiceId, reviewer: "Priya" });
+    expect(await statusOf(invoiceId)).toBe("void");
+    const { billId: creditId } = await makeBill(vendorId, { amount: 500, creditFor: invoiceId, status: "processing" });
+
+    const r = await runMatchStage(creditId);
+
+    expect(r.detail.creditMemoNetAmount).toBe(-500);
+    expect(r.findings).toEqual([{ code: "EXC-CREDIT_MEMO", action: "escalate_l1", fact: expect.stringContaining("which was rejected, so nothing was ever owed on it") }]);
   });
 });
