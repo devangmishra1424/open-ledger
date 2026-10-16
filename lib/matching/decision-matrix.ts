@@ -210,6 +210,8 @@ export function evaluateUnmatchedLine(unmatchedAmount: number): Action {
 export interface ExceptionFinding {
   code: ExceptionCode;
   action: Action;
+  /** The specific facts behind this finding (which line, which numbers), worded by lib/matching/finding-facts.ts; recorded as a claim next to the code. */
+  fact?: string;
 }
 
 /**

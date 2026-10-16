@@ -62,6 +62,22 @@ describe("toFrontendInvoice", () => {
     expect(v.status).toBe("In Review");
   });
 
+  it("needs_attention: the headline detail is the engine's specific fact for this invoice when one was recorded", () => {
+    const fact = 'PO line 1 "Annual support": billed USD 17,710.00 per each against the order\'s USD 15,400.00, 15% above it (2% is tolerated).';
+    const decisions = pipelineUpToPolicy("EXC-PRICE_VAR", "block");
+    decisions[2] = { ...decisions[2], claims: ["EXC-PRICE_VAR: block", fact] };
+    decisions[4] = { ...decisions[4], claims: ["Verifier disagreed with the Investigator: I disagree with the auto-approve conclusion because the total does not match"] };
+    expect(build("exception", decisions).summary.detail).toBe(fact);
+  });
+
+  it("needs_attention: an older record with no fact and a verifier disagreement gets the rule plus one clear sentence, not a clipped paragraph", () => {
+    const decisions = pipelineUpToPolicy("EXC-PRICE_VAR", "block");
+    decisions[2] = { ...decisions[2], claims: ["EXC-PRICE_VAR: block"] };
+    decisions[4] = { ...decisions[4], claims: ["Verifier disagreed with the Investigator: I disagree with the Investigator's no-exception conclusion. While the line matchedCount is 1"] };
+    expect(build("exception", decisions).summary.detail)
+      .toBe("Invoice unit price varies from the PO unit price beyond tolerance. A second AI check also disagreed with the first, so the stricter outcome stands.");
+  });
+
   it("contest is disabled, with the reason, when a deterministic rule stopped the invoice before any AI ran", () => {
     const v = build("exception", [d("extract", { actionTaken: "parsed" }), d("validate", { actionTaken: "block", reasonCode: "EXC-NO_PO" }), d("policy", { actionTaken: "block", reasonCode: "EXC-NO_PO" })]);
     expect(v.actions.contest).toEqual({ allowed: false, reason: expect.stringMatching(/deterministic rule/) });

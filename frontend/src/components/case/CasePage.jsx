@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react';
 import { api } from '../../services/api';
 import { useInvoices } from '../../state/Invoices';
 import { useReviewer } from '../../state/Reviewer';
@@ -13,7 +13,7 @@ import Stages, { Integrity } from './Stages';
 import AskVoice from './AskVoice';
 import SourceDocument from './SourceDocument';
 import Recheck from './Recheck';
-import { REASON_GUIDE, AUTO_APPROVED_GUIDE } from '../../lib/reasonGuide';
+import Verdict from './Verdict';
 import { formatMoney, timeAgo, actorWords } from '../../lib/labels';
 
 const money2 = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -27,41 +27,6 @@ function Section({ id, title, sub, children, tone }) {
       </div>
       {children}
     </section>
-  );
-}
-
-function Guide({ invoice }) {
-  const code = invoice.reason?.code;
-  const g = code ? REASON_GUIDE[code] : null;
-  if (invoice.state === 'approved' || invoice.state === 'paid') {
-    if (invoice.summary.decidedBy !== 'system') return null;
-    return (
-      <div className="vb-guide">
-        <h3>Why this went through on its own</h3>
-        <p>{AUTO_APPROVED_GUIDE.means}</p>
-        <ul>{AUTO_APPROVED_GUIDE.checks.map((c) => <li key={c}>{c}</li>)}</ul>
-      </div>
-    );
-  }
-  if (!g) return null;
-  return (
-    <div className="vb-guide">
-      <div className="vb-guide-grid">
-        <div>
-          <h3>What this means</h3>
-          <p>{g.means}</p>
-          <h3>Why it matters</h3>
-          <p>{g.why}</p>
-        </div>
-        <div>
-          <h3>What to check</h3>
-          <ul>{g.check.map((c) => <li key={c}>{c}</li>)}</ul>
-          <h3>How these usually end</h3>
-          <p>{g.usually}</p>
-        </div>
-      </div>
-      <p className="vb-guide-engine"><b>How the system responds to this on its own:</b> {g.engine}</p>
-    </div>
   );
 }
 
@@ -147,24 +112,23 @@ export default function CasePage() {
         </dl>
       </header>
 
+      {/* ---------- how to read this page, for someone seeing it for the first time ---------- */}
+      <nav className="vb-pageguide" aria-label="On this page">
+        <span className="vb-dim">On this page:</span>
+        {[
+          ['stands', '1. The verdict and why'],
+          ['3way', '2. Ordered vs received vs billed'],
+          ['how', '3. Every step that decided it'],
+          ['ask', '4. Ask a question'],
+        ].map(([id, label]) => (
+          <button key={id} type="button" className="vb-pageguide-link" onClick={() => document.getElementById(`sec-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{label}</button>
+        ))}
+        <span className="vb-dim vb-pageguide-aside">Decide in the panel on the right.</span>
+      </nav>
+
       {/* ---------- where it stands: the one thing to read first ---------- */}
-      <Section id="stands" title="Where it stands" sub="The short version, then what it means.">
-        <div className={`vb-why vb-why-${invoice.state}`}>
-          <strong>{invoice.summary.headline}</strong>
-          {invoice.summary.detail && <p>{invoice.summary.detail}</p>}
-        </div>
-        {aiFailed && (
-          <div style={{ marginTop: 12 }}>
-            <Banner kind="warn" action={
-              <button type="button" className="vb-btn vb-btn-sm" disabled={retrying || !invoice.actions.contest.allowed} onClick={retry}>
-                {retrying ? <Spinner label="Retrying…" /> : <><RotateCcw size={14} /> Retry AI review</>}
-              </button>
-            }>
-              The {lastAi.nodeId === 'verify' ? 'second AI check' : 'AI review'} did not complete. That is why a person has to look at it; the invoice itself may be fine.
-            </Banner>
-          </div>
-        )}
-        <Guide invoice={invoice} />
+      <Section id="stands" title="Where it stands" sub="The verdict for this invoice, what the checks found on it, what the AI did, and what has to happen next.">
+        <Verdict invoice={invoice} aiFailed={aiFailed} lastAi={lastAi} retry={retry} retrying={retrying} />
       </Section>
 
       <div className="vb-case-grid">
@@ -178,6 +142,7 @@ export default function CasePage() {
           )}
           <section className="vb-card vb-aside-card">
             <h2>Your decision</h2>
+            <p className="vb-small vb-muted" style={{ margin: '0 0 8px' }}>The system routes the invoice; a person makes the call on anything it holds. Each button below says what it would do to this invoice.</p>
             <p className="vb-dim vb-small" style={{ margin: '0 0 12px' }}>
               Acting as <b>{name || 'nobody yet'}</b>{locked ? ' (signed in)' : <> &middot; <button type="button" className="vb-link-btn" onClick={openNameDialog}>{name ? 'change' : 'set your name'}</button></>}
             </p>
@@ -189,21 +154,23 @@ export default function CasePage() {
           <section className="vb-card vb-aside-card">
             <h2>At a glance</h2>
             <dl className="vb-glance">
-              <dt>Read by</dt>
+              <dt title="Which reader took the fields off the document, and how sure it reported being">Read by</dt>
               <dd>{extract ? `${actorWords(extract)}${extract.confidence != null ? `, ${extract.confidence}% sure` : ''}` : 'n/a'}</dd>
-              <dt>Steps run</dt>
+              <dt title="Automatic steps recorded for this invoice, and actions people took">Steps run</dt>
               <dd>{invoice.processedByAgents.length} automatic{invoice.humanActions.length ? `, ${invoice.humanActions.length} by people` : ''}</dd>
-              <dt>Flags raised</dt>
-              <dd>{invoice.riskFlags.length ? invoice.riskFlags.map((f) => <span key={f} className="vb-tok vb-tok-code" title={invoice.reasonNames[f]}>{f}</span>) : 'None'}</dd>
-              <dt>Payment</dt>
-              <dd>{invoice.payment ? <>{invoice.payment.reference}{invoice.payment.simulated ? ' (simulated)' : ''}</> : 'Not paid'}</dd>
+              <dt title="Every reason any step raised, not only the one that decided the route">Flags raised</dt>
+              <dd>{invoice.riskFlags.length
+                ? <ul className="vb-glance-flags">{invoice.riskFlags.map((f) => <li key={f}><span className="vb-tok vb-tok-code">{f}</span> {invoice.reasonNames[f] ?? ''}</li>)}</ul>
+                : 'None'}</dd>
+              <dt title="The payment reference once paid. Payments here are simulated: no money moves">Payment</dt>
+              <dd>{invoice.payment ? <>{invoice.payment.reference}{invoice.payment.simulated ? ' (simulated: no money moved)' : ''}</> : 'Not paid'}</dd>
             </dl>
           </section>
         </aside>
 
         {/* ---------- main column ---------- */}
         <div className="vb-case-main">
-          <Section id="3way" title="Ordered, received, invoiced" sub="The three documents a payment depends on, side by side. This is the same pairing the matching engine works from.">
+          <Section id="3way" title="Ordered, received, invoiced" sub="The three documents a payment depends on: the purchase order (what was agreed), the goods receipt (what arrived in good condition) and the invoice (what is billed). Highlighted rows are where they disagree. It is the same line pairing the matching engine used.">
             {invoice.threeWay === undefined
               ? <div style={{ padding: 20 }}><Spinner label="Loading the purchase order…" /></div>
               : <ThreeWayTable threeWay={invoice.threeWay} invoiceCurrency={invoice.currency} />}
@@ -241,7 +208,7 @@ export default function CasePage() {
             <AskVoice key={invoice.id} invoice={invoice} />
           </Section>
 
-          <Section id="how" title="How it was decided" sub="Every step, in order: what it is, who did it, what it concluded and why. Ask any step to explain itself.">
+          <Section id="how" title="How it was decided" sub="Every step, in order. Steps marked Rules always give the same answer for the same invoice; steps marked AI recommend, and can only make an outcome stricter. Any step can be asked to explain itself, from the recorded trail only.">
             <Stages invoice={invoice} />
           </Section>
 
@@ -259,7 +226,7 @@ export default function CasePage() {
             </Section>
           )}
 
-          <Section id="integrity" title="Audit trail integrity" sub="Proof the history above has not been changed.">
+          <Section id="integrity" title="Audit trail integrity" sub="Proof the history above has not been changed since it was written: each record is sealed with a hash of the one before it.">
             <Integrity invoice={invoice} />
           </Section>
         </div>

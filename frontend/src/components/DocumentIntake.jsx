@@ -87,7 +87,7 @@ function Picker({ error, onFile, onText }) {
   return (
     <div className="vb-intake-pick">
       <p className="vb-muted" style={{ margin: 0, fontSize: 14 }}>
-        Any invoice: a PDF, a scan, a phone photo, a Word or Excel file. It is read and the form below it is filled in for you to check; nothing is saved until you do.
+        Any invoice: a PDF, a scan, a phone photo, a Word or Excel file. It is read and the form below it is filled in for you to check; nothing is saved until you do. Once saved, it runs through the seven checks against its purchase order and appears in the inbox a few seconds later, approved or with the exact reason it was held.
       </p>
       <div
         className={`vb-drop${over ? ' is-over' : ''}`}

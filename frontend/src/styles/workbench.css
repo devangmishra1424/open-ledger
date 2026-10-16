@@ -400,3 +400,90 @@ body { background: var(--vb-bg); }
 .vb-gate { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: var(--vb-bg); color: var(--vb-text); }
 .vb-gate h1 { margin: 0; font-size: 22px; }
 .vb-gate p { margin: 0; max-width: 520px; line-height: 1.6; }
+
+/* ---------- self-explaining UI: orientation, routes, verdict, step kinds ---------- */
+.vb-orient { position: relative; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 20px 28px; padding: 18px 22px; margin-bottom: 16px; border-color: rgba(167, 201, 87, 0.28); background: linear-gradient(135deg, rgba(167, 201, 87, 0.07), transparent 60%), var(--vb-panel); }
+.vb-orient h2 { margin: 0 0 10px; font-size: 16.5px; line-height: 1.35; padding-right: 48px; }
+.vb-orient-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13.5px; line-height: 1.5; color: var(--vb-muted); }
+.vb-orient-steps b { color: var(--vb-text); font-weight: 600; }
+.vb-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; font-size: 12.5px; color: var(--vb-dim); }
+.vb-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.vb-legend .vb-state-dot { display: inline-block; width: 9px; height: 9px; }
+.vb-orient-picks h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--vb-accent); }
+.vb-orient-picks ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.vb-pick { width: 100%; display: flex; flex-direction: column; gap: 1px; padding: 8px 12px; border-radius: var(--vb-radius-sm); border: 1px solid var(--vb-border); background: var(--vb-panel-2); color: var(--vb-text); font: inherit; text-align: left; cursor: pointer; }
+.vb-pick:hover { border-color: var(--vb-accent); background: var(--vb-raised); }
+.vb-pick-title { font-size: 13.5px; font-weight: 600; }
+.vb-pick-title::after { content: ' \2192'; color: var(--vb-accent); }
+.vb-pick-sub { font-size: 12px; color: var(--vb-dim); }
+.vb-orient-close { position: absolute; top: 14px; right: 18px; font-size: 12.5px; }
+.vb-orient-reopen { display: inline-block; margin: 0 0 12px; font-size: 13px; }
+.vb-tab-help { margin: -4px 0 10px; font-size: 13px; color: var(--vb-dim); }
+
+.vb-route { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0.2px; border: 1px solid transparent; white-space: nowrap; }
+.vb-route-sm { font-size: 11px; padding: 1px 8px; margin-right: 8px; vertical-align: 1px; }
+.vb-route-good { background: var(--vb-ok-bg); color: var(--vb-accent); border-color: rgba(167, 201, 87, 0.35); }
+.vb-route-warn { background: var(--vb-attention-bg); color: var(--vb-attention); border-color: rgba(255, 207, 64, 0.35); }
+.vb-route-bad { background: var(--vb-danger-bg); color: var(--vb-danger); border-color: rgba(255, 123, 123, 0.35); }
+.vb-route-info { background: var(--vb-info-bg); color: var(--vb-info); border-color: rgba(143, 180, 255, 0.35); }
+
+.vb-pageguide { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 14px; font-size: 13px; }
+.vb-pageguide-link { background: var(--vb-panel-2); border: 1px solid var(--vb-border-soft); color: var(--vb-text); border-radius: 999px; padding: 3px 11px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.vb-pageguide-link:hover { border-color: var(--vb-accent); }
+.vb-pageguide-aside { margin-left: auto; }
+
+.vb-verdict { display: flex; flex-direction: column; gap: 14px; }
+.vb-verdict-top { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.vb-verdict-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 0 32px; }
+.vb-verdict-grid h3, .vb-rule h4 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--vb-dim); margin: 4px 0 8px; font-weight: 700; }
+.vb-found { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+.vb-found li { font-size: 14px; line-height: 1.6; color: var(--vb-text); }
+.vb-found-ai li { color: var(--vb-muted); font-size: 13.5px; }
+.vb-next { display: flex; gap: 12px; align-items: baseline; padding: 10px 14px; border-radius: var(--vb-radius-sm); background: var(--vb-panel-2); border-left: 3px solid var(--vb-accent); font-size: 14px; line-height: 1.5; }
+.vb-next-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--vb-accent); font-weight: 700; white-space: nowrap; }
+.vb-rule { border-top: 1px solid var(--vb-border-soft); padding-top: 10px; }
+.vb-rule summary { cursor: pointer; color: var(--vb-info); font-size: 13.5px; }
+.vb-rule p, .vb-rule li { font-size: 13.5px; line-height: 1.6; margin: 0 0 4px; }
+.vb-rule ul { margin: 0; padding-left: 18px; }
+.vb-rule .vb-guide-grid { margin-top: 6px; }
+
+.vb-choices { margin: 12px 0 0; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; line-height: 1.45; }
+.vb-choices dt { font-weight: 700; color: var(--vb-text); display: inline; }
+.vb-choices dt::after { content: ': '; }
+.vb-choices dd { display: inline; margin: 0; color: var(--vb-muted); }
+.vb-choices .is-off dt, .vb-choices .is-off dd { color: var(--vb-dim); }
+
+.vb-kind { display: inline-block; margin-left: 8px; padding: 0 7px; border-radius: 5px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; vertical-align: 2px; border: 1px solid var(--vb-border); color: var(--vb-muted); cursor: help; }
+.vb-kind-rules { color: var(--vb-accent); border-color: rgba(167, 201, 87, 0.4); }
+.vb-kind-ai { color: var(--vb-info); border-color: rgba(143, 180, 255, 0.45); background: var(--vb-info-bg); }
+.vb-kind-mixed { color: #d9e7b0; border-color: rgba(167, 201, 87, 0.3); }
+.vb-kind-person { color: var(--vb-attention); border-color: rgba(255, 207, 64, 0.35); }
+.vb-stage-what { margin-top: 3px; line-height: 1.5; max-width: 80ch; }
+.vb-gates { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 18px; font-size: 13.5px; }
+.vb-gates .is-ok span:first-child { color: var(--vb-accent); font-weight: 700; }
+.vb-gates .is-bad { color: var(--vb-danger); }
+.vb-glance-flags { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.vb-glance dt[title] { cursor: help; text-decoration: underline dotted var(--vb-border); text-underline-offset: 3px; }
+
+.vb-intro p { margin: 0; line-height: 1.6; font-size: 14px; color: var(--vb-muted); max-width: 900px; }
+.vb-intro b { color: var(--vb-text); }
+.vb-legend-dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 18px; margin: 14px 0 0; font-size: 12.5px; }
+.vb-legend-dl dt { color: var(--vb-text); font-weight: 600; }
+.vb-legend-dl dd { margin: 2px 0 0; color: var(--vb-dim); line-height: 1.45; }
+.vb-pipe-reading { margin-top: 6px; padding: 6px 10px; border-radius: 6px; background: var(--vb-panel-2); font-size: 12.5px; line-height: 1.45; color: var(--vb-muted); }
+.vb-audit-explain { margin: 4px 0 10px; line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .vb-orient { grid-template-columns: minmax(0, 1fr); }
+  .vb-verdict-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .vb-gates { grid-template-columns: minmax(0, 1fr); }
+  .vb-pageguide-aside { margin-left: 0; }
+}
+/* The reason column holds a route chip, the headline and the detail stacked; the detail keeps its own two-line clamp. */
+.vb-row-why { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; -webkit-line-clamp: unset; }
+.vb-row-why .vb-route-sm { margin: 0; }
+/* Orientation: the explanation on top, the six "start here" invoices as a grid under it, so the card stays short. */
+.vb-orient { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.vb-orient-picks ul { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 1100px) { .vb-orient-picks ul { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .vb-orient-picks ul { grid-template-columns: minmax(0, 1fr); } }

@@ -57,7 +57,8 @@ export default function SettingsPage() {
               <input type="number" min="0" max="100" step="any" required value={confidence} onChange={(e) => setConfidence(e.target.value)} />
               <span className="vb-field-hint">If the Investigator reports less than {confidence || 0}% sure, a person decides. Models are not well calibrated, so treat this as a coarse safety net.</span>
             </label>
-            <div><button type="submit" className="vb-btn vb-btn-primary" disabled={saving || !dirty}>{saving ? <Spinner label="Saving…" /> : 'Save limits'}</button></div>
+            <div><button type="submit" className="vb-btn vb-btn-primary" disabled={saving || !dirty} title={dirty ? 'Applies to the next invoice checked. Invoices already decided keep the limits they were checked with.' : 'Change a limit first'}>{saving ? <Spinner label="Saving…" /> : 'Save limits'}</button>
+              <span className="vb-field-hint" style={{ display: 'block', marginTop: 6 }}>Applies to invoices checked from now on; decided invoices keep the limits they were checked with.</span></div>
           </form>
         )}
       </section>
@@ -68,10 +69,12 @@ export default function SettingsPage() {
         {!system ? <Spinner label="Loading…" /> : (
           <dl className="vb-kv">
             <dt>AI provider</dt>
-            <dd>{system.llm.configured ? system.llm.provider : <span style={{ color: 'var(--vb-danger)' }}>Not configured: documents the template cannot read, and every AI step, will fail</span>}</dd>
-            <dt>Reads documents</dt><dd className="vb-mono">{system.llm.models.extractor} <span className="vb-dim">(after the template parser)</span></dd>
-            <dt>Investigates exceptions</dt><dd className="vb-mono">{system.llm.models.investigator}</dd>
-            <dt>Double-checks</dt><dd className="vb-mono">{system.llm.models.verifier} <span className="vb-dim">(a different model family on purpose)</span></dd>
+            <dd>{system.llm.configured
+              ? <>{system.llm.provider} <div className="vb-dim vb-small">Serves the three AI steps below. If it is down or out of quota, those steps fail and the invoice waits for a person; nothing is guessed.</div></>
+              : <span style={{ color: 'var(--vb-danger)' }}>Not configured: documents the template cannot read, and every AI step, will fail</span>}</dd>
+            <dt>Reads documents</dt><dd><span className="vb-mono">{system.llm.models.extractor}</span> <div className="vb-dim vb-small">Only when the fixed template parser cannot read a document. Its reading is checked: lines must add up to the totals.</div></dd>
+            <dt>Investigates exceptions</dt><dd><span className="vb-mono">{system.llm.models.investigator}</span> <div className="vb-dim vb-small">Looks up vendor history, duplicates and past corrections with real tools, and recommends. It can only make an outcome stricter.</div></dd>
+            <dt>Double-checks</dt><dd><span className="vb-mono">{system.llm.models.verifier}</span> <div className="vb-dim vb-small">A different model family on purpose, so the two rarely make the same mistake. Runs only on serious cases (a senior review or a block); if it disagrees, the stricter view wins.</div></dd>
             <dt>Payments</dt><dd><strong>{system.paymentRail.mode === 'simulated' ? 'Simulated' : system.paymentRail.mode}</strong>. Payments are recorded and posted to the ledger; no money moves.</dd>
             <dt>Vendor callbacks</dt><dd>Made by a person. No automated call is placed; the person records the answer and a second person signs off.</dd>
             <dt>Sign-in</dt>

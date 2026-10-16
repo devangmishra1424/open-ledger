@@ -231,7 +231,13 @@ export async function runValidateStage(vendorBillId: string, parentDecisionId?: 
 export async function runMatchStageDecision(vendorBillId: string, parentDecisionId?: string, recon?: ReconsiderationInput): Promise<{ decision: Decision; matchResult: MatchStageResult }> {
   const startedAt = new Date().toISOString();
   const matchResult = await runMatchStage(vendorBillId);
-  const claims: Claim[] = matchResult.findings.map((f) => ({ text: `${f.code}: ${f.action}`, tag: "grounded" }));
+  // Each finding as its code and action, then the facts behind it (which line, which numbers), so the
+  // trail, and the "ask why" explainer that answers only from it, can say what was wrong and by how much.
+  const claims: Claim[] = matchResult.findings.flatMap((f): Claim[] => [
+    { text: `${f.code}: ${f.action}`, tag: "grounded" },
+    ...(f.fact ? [{ text: f.fact, tag: "grounded" as const }] : []),
+  ]);
+  if (matchResult.cleanFact) claims.push({ text: matchResult.cleanFact, tag: "grounded" });
 
   const d = await writeDecision({
     invoiceId: vendorBillId, nodeId: "match", agentId: "deterministic-matching-engine",

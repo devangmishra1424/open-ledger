@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { explainCase } from '../../lib/caseExplain';
 import { api } from '../../services/api';
 import { useInvoices } from '../../state/Invoices';
 import { useReviewer } from '../../state/Reviewer';
@@ -59,7 +60,7 @@ export default function DecisionPanel({ invoice }) {
   );
 
   const LABEL = { approve: 'Approve', contest: 'Challenge', reject: 'Reject' };
-  const disabledReasons = ['approve', 'contest', 'reject'].filter((k) => !actions[k].allowed && actions[k].reason).map((k) => [k, actions[k].reason]);
+  const choices = useMemo(() => explainCase(invoice).choices, [invoice]);
 
   if (invoice.state === 'processing') {
     return <p className="vb-muted vb-small">The automatic checks are still running. Decisions open up when they finish.</p>;
@@ -68,10 +69,19 @@ export default function DecisionPanel({ invoice }) {
   return (
     <div>
       <div className="vb-actions">
-        <button type="button" className="vb-btn vb-btn-primary" disabled={!actions.approve.allowed || busy} onClick={() => setForm(form === 'approve' ? null : 'approve')}>Approve</button>
-        <button type="button" className="vb-btn" disabled={!actions.contest.allowed || busy} onClick={() => setForm(form === 'contest' ? null : 'contest')}>Challenge</button>
-        <button type="button" className="vb-btn vb-btn-danger" disabled={!actions.reject.allowed || busy} onClick={() => setForm(form === 'reject' ? null : 'reject')}>Reject</button>
+        <button type="button" className="vb-btn vb-btn-primary" disabled={!actions.approve.allowed || busy} title={choices.approve} onClick={() => setForm(form === 'approve' ? null : 'approve')}>Approve</button>
+        <button type="button" className="vb-btn" disabled={!actions.contest.allowed || busy} title={choices.contest} onClick={() => setForm(form === 'contest' ? null : 'contest')}>Challenge</button>
+        <button type="button" className="vb-btn vb-btn-danger" disabled={!actions.reject.allowed || busy} title={choices.reject} onClick={() => setForm(form === 'reject' ? null : 'reject')}>Reject</button>
       </div>
+      {!form && (
+        <dl className="vb-choices" aria-label="What each button does">
+          {['approve', 'contest', 'reject'].map((k) => (
+            <div key={k} className={actions[k].allowed ? undefined : 'is-off'}>
+              <dt>{LABEL[k]}</dt><dd>{choices[k]}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
 
       {form && (
         <div className="vb-action-form">
@@ -93,11 +103,6 @@ export default function DecisionPanel({ invoice }) {
         </div>
       )}
 
-      {disabledReasons.length > 0 && (
-        <ul className="vb-disabled-reasons">
-          {disabledReasons.map(([k, reason]) => <li key={k}><b>{LABEL[k]}</b> is unavailable: {reason}.</li>)}
-        </ul>
-      )}
     </div>
   );
 }
