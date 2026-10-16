@@ -156,6 +156,10 @@ describe("runMatchStage", () => {
     // The recorded fact names the real numbers, and the route the engine actually chose.
     expect(price?.fact).toMatch(/^PO line 1 ".+": billed USD 11\.00 per .+ against the order's USD 10\.00, 10% above it \(2% is tolerated\)\. At the billed quantity of 100 that is USD 100\.00 more than agreed\./);
     expect(price?.fact).toMatch(/This invoice was blocked\.$/);
+    // What the AI reviewers are handed carries the rules' findings, so they cannot read the line
+    // pairing alone and call a 10% overcharge "a perfect line match".
+    expect(r.detail.ruleFindings).toEqual([{ code: "EXC-PRICE_VAR", route: "block", fact: price?.fact }]);
+    expect(r.detail.rulesOutcome).toBe("block");
   });
 
   it("invoicing more than the GRN's accepted quantity fires EXC-QTY_VAR, even though it matches the PO's ordered quantity", async () => {

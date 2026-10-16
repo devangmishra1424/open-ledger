@@ -47,7 +47,7 @@ describe("finding facts", () => {
 
   it("blanket ceiling: this invoice alone, or together with earlier ones, and how far over", () => {
     const alone = facts.blanketValueFact({ poNumber: "PO-2024-1170", ceiling: 10000, prior: 0, current: 12500, currency: "USD", action: evaluateBlanketExceeded(0.25) });
-    expect(alone).toContain("This invoice alone (USD 12,500.00) the order reaches USD 12,500.00, USD 2,500.00 (25%) over the ceiling");
+    expect(alone).toContain("This invoice alone comes to USD 12,500.00, USD 2,500.00 (25%) over the ceiling");
     expect(alone.endsWith("This invoice was blocked.")).toBe(true);
     const cumulative = facts.blanketValueFact({ poNumber: "PO-1", ceiling: 10000, prior: 9500, current: 1000, currency: "USD", action: evaluateBlanketExceeded(0.05) });
     expect(cumulative).toContain("Earlier cleared invoices on it total USD 9,500.00; with this one (USD 1,000.00)");

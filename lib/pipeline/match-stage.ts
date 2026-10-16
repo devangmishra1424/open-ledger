@@ -54,6 +54,17 @@ function addFinding(findings: ExceptionFinding[], code: ExceptionFinding["code"]
 }
 
 export async function runMatchStage(vendorBillId: string): Promise<MatchStageResult> {
+  const result = await matchInvoice(vendorBillId);
+  // The AI reviewers read `detail`, and their prompt says it carries every tolerance fact. Without
+  // the rules' own findings they read lineMatch (which pairs lines, not whether a pair passed) and
+  // called a 15% overcharge "a perfect line match", or said "no exceptions apply" on a flagged one.
+  result.detail.ruleFindings = result.findings.map((f) => ({ code: f.code, route: f.action, fact: f.fact ?? null }));
+  result.detail.rulesOutcome = result.combined.overallAction;
+  if (result.cleanFact) result.detail.cleanMatch = result.cleanFact;
+  return result;
+}
+
+async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
   const sql = getSql();
 
   const billRows = await sql`SELECT * FROM vendor_bills WHERE id = ${vendorBillId}`;

@@ -78,8 +78,10 @@ export function taxVarianceFact(p: {
 export function blanketValueFact(p: { poNumber: string; ceiling: number; prior: number; current: number; currency: string; action: Action }): string {
   const total = p.prior + p.current;
   const over = total - p.ceiling;
-  const before = p.prior > 0 ? `Earlier cleared invoices on it total ${money(p.prior, p.currency)}; with this one (${money(p.current, p.currency)})` : `This invoice alone (${money(p.current, p.currency)})`;
-  return `Blanket order ${p.poNumber} may be billed up to ${money(p.ceiling, p.currency)} in total. ${before} the order reaches ${money(total, p.currency)}, ${money(over, p.currency)} (${pct(over / p.ceiling)}) over the ceiling. ` +
+  const before = p.prior > 0
+    ? `Earlier cleared invoices on it total ${money(p.prior, p.currency)}; with this one (${money(p.current, p.currency)}) the order reaches`
+    : "This invoice alone comes to";
+  return `Blanket order ${p.poNumber} may be billed up to ${money(p.ceiling, p.currency)} in total. ${before} ${money(total, p.currency)}, ${money(over, p.currency)} (${pct(over / p.ceiling)}) over the ceiling. ` +
     `Up to 10% over, a reviewer decides at level 2; more than 10% is blocked. ${outcome(p.action)}`;
 }
 
