@@ -35,11 +35,14 @@ export default function AuditReports() {
     let cancelled = false;
     setData(null);
     setError(null);
-    api.getAuditReport(tab, query).then((d) => !cancelled && setData(d)).catch((e) => !cancelled && setError(e));
+    // Kept with the tab it was fetched for: on a switch, the old tab's data must never be drawn by the new tab's view
+    // (the ageing view read the overrides data's missing ledger and the page went blank).
+    api.getAuditReport(tab, query).then((d) => !cancelled && setData({ ...d, tab })).catch((e) => !cancelled && setError(e));
     return () => { cancelled = true; };
   }, [tab, from, to, asOf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const info = TABS.find((t) => t.key === tab);
+  const ready = data && data.tab === tab ? data : null;
   return (
     <section className="vb-card vb-pad vb-audit-reports" aria-labelledby="vb-audit-reports-title">
       <h2 id="vb-audit-reports-title" style={{ marginTop: 0 }}>Reports for the auditor</h2>
@@ -56,14 +59,14 @@ export default function AuditReports() {
         ) : (
           <label className="vb-field"><span>As of</span><input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} /></label>
         )}
-        <button type="button" className="vb-btn vb-btn-sm" disabled={!data || data.rows.length === 0} onClick={() => api.downloadAuditReport(tab, query).catch((e) => setError(e))}><Download size={14} /> Download CSV</button>
+        <button type="button" className="vb-btn vb-btn-sm" disabled={!ready || ready.rows.length === 0} onClick={() => api.downloadAuditReport(tab, query).catch((e) => setError(e))}><Download size={14} /> Download CSV</button>
       </div>
       {error && <Banner kind="error">{error.message}</Banner>}
-      {!data && !error && <Spinner label="Loading…" />}
-      {data && data.rows.length === 0 && tab !== 'ageing' && <p className="vb-muted">Nothing in this period.</p>}
-      {data && data.rows.length > 0 && tab === 'overrides' && <Overrides rows={data.rows} />}
-      {data && tab === 'ageing' && <Ageing report={data} />}
-      {data && data.rows.length > 0 && tab === 'received-not-invoiced' && <NotInvoiced report={data} />}
+      {!ready && !error && <Spinner label="Loading…" />}
+      {ready && ready.rows.length === 0 && tab !== 'ageing' && <p className="vb-muted">Nothing in this period.</p>}
+      {ready && ready.rows.length > 0 && tab === 'overrides' && <Overrides rows={ready.rows} />}
+      {ready && tab === 'ageing' && <Ageing report={ready} />}
+      {ready && ready.rows.length > 0 && tab === 'received-not-invoiced' && <NotInvoiced report={ready} />}
     </section>
   );
 }
