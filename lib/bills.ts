@@ -4,6 +4,7 @@ import { getSql } from "@/db/client";
 import { HttpError } from "@/lib/http";
 import { recordInvoiceBankAccountInTx } from "@/lib/ledger/bank-change-review";
 import type { StatedTax } from "@/lib/tax-lines";
+import { canonicalUom } from "@/lib/matching/uom-dimension";
 
 /**
  * Creating an invoice (vendor_bills + lines, and the vendor if it is new) from validated input.
@@ -16,7 +17,8 @@ import type { StatedTax } from "@/lib/tax-lines";
  * was recorded as a $750.00 liability.
  */
 
-export interface NewBillLine { description: string; quantity: number; unitPrice: number }
+/** `uom` as printed ("Nos", "box"); stored in one spelling (canonicalUom), "each" when none is given. */
+export interface NewBillLine { description: string; quantity: number; unitPrice: number; uom?: string | null }
 
 export interface NewBillInput {
   vendorId?: string;
@@ -87,6 +89,7 @@ export function normalizeBillInput(input: NewBillInput, today = new Date().toISO
       description: description.slice(0, 500),
       quantity: finiteNumber(l.quantity, `line ${i + 1}: quantity`, { min: 0.0001 }),
       unitPrice: finiteNumber(l.unitPrice, `line ${i + 1}: unit price`, { min: 0 }),
+      uom: canonicalUom(typeof l.uom === "string" ? l.uom : null),
     };
   });
 
@@ -194,8 +197,8 @@ export async function createBill(input: NewBillInput): Promise<CreatedBill> {
     for (const [i, l] of n.lines.entries()) {
       const lineTax = taxCodeId && input.statedTax!.perLine[i] > 0 ? input.statedTax!.perLine[i] : null;
       await tx`
-        INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, gl_account_id, tax_code_id, tax_amount)
-        VALUES (${randomUUID()}, ${billId}, ${l.description}, ${l.quantity}, ${l.unitPrice}, ${defaultGl}, ${lineTax == null ? null : taxCodeId}, ${lineTax})`;
+        INSERT INTO vendor_bill_lines (id, vendor_bill_id, description, qty_invoiced, unit_price, uom, gl_account_id, tax_code_id, tax_amount)
+        VALUES (${randomUUID()}, ${billId}, ${l.description}, ${l.quantity}, ${l.unitPrice}, ${l.uom}, ${defaultGl}, ${lineTax == null ? null : taxCodeId}, ${lineTax})`;
     }
     // In the same transaction: an invoice and the bank change it brings are saved together or not at all.
     const bankAccount = n.bankLast4 ? await recordInvoiceBankAccountInTx(tx, { vendorId, last4: n.bankLast4, sourceInvoiceId: billId }) : null;

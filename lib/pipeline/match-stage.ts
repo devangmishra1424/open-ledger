@@ -381,6 +381,9 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
     ...convertedLines,
   ];
 
+  // Lines whose tax is off its code's rate, gathered so one tax code gives ONE finding for the invoice: an
+  // invoice's tax is one charge, and three cards saying the same 9.1% against 8.25% read as three problems.
+  const taxOff: Array<{ description: string; charged: number; base: number; expectedRate: number; expectedTax: number; codeName: string | null }> = [];
   for (const l of linesToCheck) {
     const poLine = l.poLine;
     const priceVariance = classifyPriceVariance(l.unitPrice, poLine.unitPrice);
@@ -409,10 +412,7 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
         if (taxZone.zone !== "green") {
           const expectedTaxAmount = lineAmount * expectedRate;
           const amountDiff = Math.abs(rawLine.tax_amount - expectedTaxAmount);
-          addFinding(findings, "EXC-TAX_VAR", evaluateTaxVariance(taxZone.varianceAbs, amountDiff), (action) => facts.taxVariance({
-            description: rawLine.description, charged: rawLine.tax_amount, actualRate, expectedRate, expectedTax: expectedTaxAmount, currency: bill.currency, action,
-            codeName: taxCodeRows[0]?.name ?? null,
-          }));
+          taxOff.push({ description: rawLine.description, charged: Number(rawLine.tax_amount), base: lineAmount, expectedRate: Number(expectedRate), expectedTax: expectedTaxAmount, codeName: taxCodeRows[0]?.name ?? null });
         }
       }
     }
@@ -453,6 +453,20 @@ async function matchInvoice(vendorBillId: string): Promise<MatchStageResult> {
         billedBefore: qtyInvoicedPrior, billedNow: l.qty, excess: fulfillment.excessQty, impact: excessAmountImpact, currency: bill.currency, action,
       }));
     }
+  }
+
+  const taxGroups = new Map<string, typeof taxOff>();
+  for (const t of taxOff) taxGroups.set(`${t.expectedRate}|${t.codeName}`, [...(taxGroups.get(`${t.expectedRate}|${t.codeName}`) ?? []), t]);
+  for (const group of taxGroups.values()) {
+    const charged = group.reduce((s, t) => s + t.charged, 0);
+    const base = group.reduce((s, t) => s + t.base, 0);
+    const expectedTax = group.reduce((s, t) => s + t.expectedTax, 0);
+    const actualRate = charged / base;
+    const amountDiff = Math.abs(charged - expectedTax);
+    addFinding(findings, "EXC-TAX_VAR", evaluateTaxVariance(Math.abs(actualRate - group[0].expectedRate), amountDiff), (action) => facts.taxVariance({
+      description: group.length === 1 ? group[0].description : `${group.length} lines`, lineCount: group.length,
+      charged, actualRate, expectedRate: group[0].expectedRate, expectedTax, currency: bill.currency, action, codeName: group[0].codeName,
+    }));
   }
 
   const cleanFact = findings.length === 0 && linesToCheck.length > 0

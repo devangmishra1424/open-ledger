@@ -203,6 +203,8 @@ CREATE TABLE app_settings (
   id TEXT PRIMARY KEY DEFAULT 'default',
   auto_approval_confidence REAL NOT NULL DEFAULT 90.0,
   max_auto_payment_amount NUMERIC(18,4) NOT NULL DEFAULT 50000.00,
+  -- The limits for currencies other than USD, as JSON {"INR": 4000000} (migration 010).
+  currency_limits TEXT NOT NULL DEFAULT '{"INR": 4000000}',
   erp_webhook_url TEXT,
   updated_at TEXT NOT NULL DEFAULT now()::text
 );

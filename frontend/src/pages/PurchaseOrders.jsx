@@ -5,6 +5,8 @@ import { api } from '../services/api';
 import { AddPoModal, ReceiptModal } from '../components/PoModals';
 import { Banner, Empty, Spinner } from '../components/ui';
 import { formatMoney } from '../lib/labels';
+import { useReviewer } from '../state/Reviewer';
+import { useToasts } from '../state/Toasts';
 
 function receiptState(po) {
   const received = po.lines.reduce((s, l) => s + l.received, 0);
@@ -24,6 +26,21 @@ export default function PurchaseOrders() {
   const [error, setError] = useState(null);
   const [adding, setAdding] = useState(false);
   const [receiving, setReceiving] = useState(null);
+  const { withReviewer } = useReviewer();
+  const toast = useToasts();
+
+  /** A delivery recorded by mistake: removed, then the PO's waiting invoices are checked again. */
+  const removeReceipt = (po, r) => withReviewer(async (name) => {
+    if (!window.confirm(`Remove the delivery of ${r.date} (${r.units} units, ${r.condition}) from ${po.poNumber}? Those goods stop counting as received.`)) return;
+    try {
+      const res = await api.removeReceipt(po.id, r.id, name);
+      const n = res.recheckedInvoices?.length ?? 0;
+      toast.success(`Delivery removed from ${po.poNumber}.${n ? ` ${n} waiting invoice${n === 1 ? ' is' : 's are'} being checked again.` : ''}`);
+      load();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  });
 
   const load = useCallback(() => {
     api.getPurchaseOrders().then((o) => { setOrders(o); setError(null); }).catch((e) => setError(e));
@@ -77,6 +94,17 @@ export default function PurchaseOrders() {
                   ))}
                 </tbody>
               </table>
+              {po.receipts.length > 0 && (
+                <div className="vb-small" style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                  <span className="vb-dim">Deliveries recorded:</span>
+                  {po.receipts.map((r) => (
+                    <span key={r.id} className={`vb-chip ${r.condition === 'accepted' ? 'vb-chip-neutral' : 'vb-chip-rejected'}`}>
+                      {r.date} · {r.units} units · {r.condition}{r.receiver ? ` · ${r.receiver}` : ''}
+                      {' '}<button type="button" className="vb-link-btn" onClick={() => removeReceipt(po, r)} title="Recorded by mistake? Remove it; the goods stop counting as received and waiting invoices are checked again.">remove</button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </section>
           );
         })}

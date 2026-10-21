@@ -173,7 +173,7 @@ function initialForm(s, books = {}) {
     dueDate: s.due_date ?? '',
     poNumber: s.po_reference ?? '',
     currency: s.currency ?? '',
-    lines: (s.line_items?.length ? s.line_items : [{ description: '', quantity: 1, unit_price: '' }]).map((l) => ({ description: l.description, quantity: String(amt(l.quantity)), unitPrice: String(amt(l.unit_price)) })),
+    lines: (s.line_items?.length ? s.line_items : [{ description: '', quantity: 1, unit_price: '' }]).map((l) => ({ description: l.description, quantity: String(amt(l.quantity)), unitPrice: String(amt(l.unit_price)), uom: l.uom || 'each' })),
     charges: (s.other_charges ?? []).map((c) => ({ label: c.label, amount: String(amt(c.amount)) })),
     taxLines: (s.tax_lines?.length ? s.tax_lines : s.tax ? [{ label: 'Tax', amount: s.tax }] : []).map((t) => ({ label: t.label, amount: String(amt(t.amount)) })),
     discount: s.discount ? String(s.discount) : '',
@@ -235,7 +235,7 @@ function Review({ result, onBack, onSaved }) {
       const invoice = {
         vendorName: form.vendorName.trim(), invoiceNumber: form.invoiceNumber.trim(), invoiceDate: form.invoiceDate,
         dueDate: form.dueDate || null, poNumber: form.poNumber.trim() || null, currency: form.currency.trim().toUpperCase(),
-        lines: form.lines.map((l) => ({ description: l.description.trim(), quantity: num(l.quantity), unitPrice: num(l.unitPrice) })),
+        lines: form.lines.map((l) => ({ description: l.description.trim(), quantity: num(l.quantity), unitPrice: num(l.unitPrice), uom: (l.uom || 'each').trim() })),
         charges: form.charges.filter((c) => c.label.trim() || c.amount !== '').map((c) => ({ label: c.label.trim() || 'Charge', amount: num(c.amount) })),
         taxLines: form.taxLines.filter((t) => t.label.trim() || t.amount !== '').map((t) => ({ label: t.label.trim() || 'Tax', amount: num(t.amount) })),
         discount, roundOff, total,
@@ -330,17 +330,18 @@ function Review({ result, onBack, onSaved }) {
           <span>Item lines <Tag field="line_items" /></span>
           <Flag k="lines" />
           <div className={`vb-lines${flags.lines ? ' is-flagged' : ''}`}>
-            <div className="vb-lines-head" aria-hidden="true"><span>Description</span><span>Qty</span><span>Unit price</span><span>Amount</span><span /></div>
+            <div className="vb-lines-head" aria-hidden="true"><span>Description</span><span>Qty</span><span>Unit</span><span>Unit price</span><span>Amount</span><span /></div>
             {form.lines.map((l, i) => (
               <div className="vb-lines-row" key={i}>
                 <input aria-label={`Line ${i + 1} description`} value={l.description} onChange={(e) => setRow('lines', i, { description: e.target.value })} />
                 <input aria-label={`Line ${i + 1} quantity`} inputMode="decimal" value={l.quantity} onChange={(e) => setRow('lines', i, { quantity: e.target.value })} />
+                <input aria-label={`Line ${i + 1} unit`} title="Unit, as on the invoice (each, box, case, kg...)" value={l.uom ?? 'each'} maxLength={20} onChange={(e) => setRow('lines', i, { uom: e.target.value })} />
                 <input aria-label={`Line ${i + 1} unit price`} inputMode="decimal" value={l.unitPrice} onChange={(e) => setRow('lines', i, { unitPrice: e.target.value })} />
                 <span className="vb-mono vb-line-amount">{fmt((num(l.quantity) || 0) * (num(l.unitPrice) || 0))}</span>
                 <button type="button" className="vb-btn vb-btn-sm" aria-label={`Remove line ${i + 1}`} disabled={form.lines.length === 1} onClick={() => set({ lines: form.lines.filter((_, j) => j !== i) })}><Trash2 size={14} /></button>
               </div>
             ))}
-            <button type="button" className="vb-btn vb-btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => set({ lines: [...form.lines, { description: '', quantity: '1', unitPrice: '' }] })}><Plus size={14} /> Add a line</button>
+            <button type="button" className="vb-btn vb-btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => set({ lines: [...form.lines, { description: '', quantity: '1', unitPrice: '', uom: 'each' }] })}><Plus size={14} /> Add a line</button>
           </div>
         </div>
 

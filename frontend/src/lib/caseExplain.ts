@@ -98,7 +98,7 @@ const norm = (a: string | null | undefined) => (a ?? '').trim().toLowerCase().re
 
 export function money(n: number, currency = 'USD'): string {
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n);
+    return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency, maximumFractionDigits: 2, minimumFractionDigits: 2 }).format(n);
   } catch {
     return `${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
   }
@@ -223,6 +223,12 @@ function aiStory(inv: CaseLike, matchAction: string | null, policyAction: string
     if (a === 'error') out.push(`The second AI check could not finish: ${(ver.claims[0] ?? '').replace(/^Verifier failed: /, '')}`);
     else if (a === 'disagreement') out.push(`A second AI from a different model family${ver.model ? ` (${ver.model})` : ''} checked it independently and disagreed, so the stricter of the two views stands.`);
     else out.push(`A second AI from a different model family${ver.model ? ` (${ver.model})` : ''} checked it independently and agreed.`);
+  }
+  // A person's challenge, answered (or not) by the AI steps, and any figures the AI wrote that are not in the records.
+  for (const d of [inv1, ver]) {
+    for (const c of d?.claims ?? []) {
+      if (c.startsWith('Answer to ') || c.includes("'s question was not answered by the AI") || c.startsWith('Figures in this AI explanation')) out.push(c);
+    }
   }
   const m = SEVERITY[norm(matchAction)];
   const p = SEVERITY[norm(policyAction)];

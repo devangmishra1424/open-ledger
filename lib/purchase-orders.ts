@@ -3,6 +3,7 @@ import type { TransactionSql } from "postgres";
 import { getSql } from "@/db/client";
 import { HttpError } from "@/lib/http";
 import { findOrCreateVendor } from "@/lib/bills";
+import { canonicalUom } from "@/lib/matching/uom-dimension";
 import { PURPOSE_WORDS, type DocumentPurpose } from "@/lib/documents/store";
 
 /**
@@ -85,7 +86,7 @@ export function normalizePurchaseOrder(input: NewPoInput, today = new Date().toI
   const lines = input.lines.map((l, i) => {
     const description = typeof l?.description === "string" ? l.description.trim() : "";
     if (!description) throw new HttpError(400, `line ${i + 1}: description is required`);
-    const uom = typeof l.uom === "string" && l.uom.trim() ? l.uom.trim().toLowerCase() : "each";
+    const uom = canonicalUom(typeof l.uom === "string" ? l.uom : null);
     if (uom.length > 20) throw new HttpError(400, `line ${i + 1}: unit of measure is too long`);
     return {
       lineNumber: i + 1,
@@ -226,7 +227,7 @@ export async function recordReceipt(
     if (!po) throw new HttpError(404, `no purchase order found with id '${poId}'`);
     if (po.status === "closed") throw new HttpError(409, `purchase order ${po.po_number} is closed; goods cannot be received against it`);
 
-    const poLines = await tx`SELECT id, line_number, qty_ordered FROM purchase_order_lines WHERE po_id = ${poId} ORDER BY line_number`;
+    const poLines = await tx`SELECT id, line_number, description, qty_ordered FROM purchase_order_lines WHERE po_id = ${poId} ORDER BY line_number`;
     const n = normalizeReceipt(input, poLines.map((l) => ({ lineNumber: Number(l.line_number), quantity: Number(l.qty_ordered) })));
     const lineIdByNumber = new Map<number, string>(poLines.map((l) => [Number(l.line_number), l.id as string]));
 
@@ -246,8 +247,44 @@ export async function recordReceipt(
         throw new HttpError(409, "this exact receipt (same date, receiver, condition and quantities) is already recorded for this purchase order");
       }
     }
+    // Goods accepted beyond what was ordered are almost always the same delivery recorded twice (the PO saved as
+    // "Received in full", then its delivery note recorded too). Counted, they hide an over-billing: 10 lab coats
+    // billed against 8 delivered looked fine once 18 were "received". So it is refused, with the way out.
+    if (n.condition === "accepted") {
+      const already = await tx`
+        SELECT grl.po_line_id, SUM(grl.qty_received) AS qty FROM goods_receipt_lines grl JOIN goods_receipts gr ON gr.id = grl.goods_receipt_id
+        WHERE gr.po_id = ${poId} AND gr.condition = 'accepted' GROUP BY grl.po_line_id`;
+      const over = n.lines.flatMap((l) => {
+        const pl = poLines.find((p) => Number(p.line_number) === l.lineNumber)!;
+        const have = Number(already.find((a: any) => a.po_line_id === pl.id)?.qty ?? 0);
+        return have + l.quantity > Number(pl.qty_ordered) + 1e-9
+          ? [`line ${l.lineNumber} "${pl.description}": ordered ${Number(pl.qty_ordered)}, already received ${have}, this adds ${l.quantity}`] : [];
+      });
+      if (over.length > 0) {
+        throw new HttpError(409, `this would count more goods than were ordered (${over.join("; ")}). If an earlier receipt was recorded by mistake, for example "Received in full" when the purchase order was saved, remove it on the Orders page first`);
+      }
+    }
     const documentId = opts.sourceDocumentId ? await receiptDocument(tx, opts.sourceDocumentId) : null;
     return { receiptId: await insertReceipt(tx, poId, lineIdByNumber, n, documentId), poNumber: po.po_number as string, receiptDate: n.receiptDate, condition: n.condition };
+  });
+}
+
+/**
+ * Removes a goods receipt recorded by mistake (and its lines), so the goods stop counting as received. One
+ * transaction; the PO row is locked so a receipt being recorded at the same moment waits. The document it was read
+ * from is kept (it can be recorded again). Invoices already approved against it are not changed; the caller
+ * re-checks the PO's invoices that are still waiting on a person.
+ */
+export async function removeReceipt(poId: string, receiptId: string): Promise<{ poNumber: string; receiptDate: string }> {
+  return getSql().begin(async (tx) => {
+    const po = (await tx`SELECT id, po_number FROM purchase_orders WHERE id = ${poId} FOR UPDATE`)[0];
+    if (!po) throw new HttpError(404, `no purchase order found with id '${poId}'`);
+    const [receipt] = await tx`SELECT id, receipt_date FROM goods_receipts WHERE id = ${receiptId} AND po_id = ${poId}`;
+    if (!receipt) throw new HttpError(404, `purchase order ${po.po_number} has no receipt '${receiptId}'`);
+    await tx`DELETE FROM goods_receipt_lines WHERE goods_receipt_id = ${receiptId}`;
+    await tx`DELETE FROM goods_receipts WHERE id = ${receiptId}`;
+    console.info(`removeReceipt: receipt ${receiptId} (dated ${receipt.receipt_date}) removed from PO ${po.po_number}`);
+    return { poNumber: po.po_number as string, receiptDate: receipt.receipt_date as string };
   });
 }
 
@@ -277,6 +314,8 @@ export interface PoSummary {
   total: number;
   receivedInFull: boolean;
   invoiceCount: number;
+  /** Every delivery recorded against it, oldest first, so one recorded by mistake can be seen and removed. */
+  receipts: Array<{ id: string; date: string; condition: string; receiver: string | null; units: number }>;
   /** A blanket order's spending limit; null for a normal order. */
   spendingLimit: number | null;
   lines: Array<{ lineNumber: number; description: string; uom: string; ordered: number; received: number; unitPrice: number }>;
@@ -314,6 +353,10 @@ async function summarize(pos: readonly any[]): Promise<PoSummary[]> {
     WHERE pl.po_id IN ${sql(ids)}
     GROUP BY pl.id ORDER BY pl.po_id, pl.line_number`;
   const billRows = await sql`SELECT po_id, count(*)::int AS n FROM vendor_bills WHERE po_id IN ${sql(ids)} GROUP BY po_id`;
+  const receiptRows = await sql`
+    SELECT gr.id, gr.po_id, gr.receipt_date, gr.condition, gr.receiver_name, COALESCE(SUM(grl.qty_received), 0) AS units
+    FROM goods_receipts gr LEFT JOIN goods_receipt_lines grl ON grl.goods_receipt_id = gr.id
+    WHERE gr.po_id IN ${sql(ids)} GROUP BY gr.id ORDER BY gr.receipt_date, gr.id`;
   const billCount = new Map<string, number>(billRows.map((b) => [b.po_id as string, b.n as number]));
 
   return pos.map((p) => {
@@ -326,6 +369,9 @@ async function summarize(pos: readonly any[]): Promise<PoSummary[]> {
       total: round2(lines.reduce((s, l) => s + l.ordered * l.unitPrice, 0)),
       receivedInFull: lines.length > 0 && lines.every((l) => l.received >= l.ordered),
       invoiceCount: billCount.get(p.id) ?? 0,
+      receipts: receiptRows.filter((r: any) => r.po_id === p.id).map((r: any) => ({
+        id: r.id as string, date: r.receipt_date as string, condition: r.condition as string, receiver: (r.receiver_name ?? null) as string | null, units: Number(r.units),
+      })),
       spendingLimit: p.max_value_ceiling == null ? null : Number(p.max_value_ceiling),
       lines,
     };

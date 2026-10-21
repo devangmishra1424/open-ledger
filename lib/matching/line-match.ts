@@ -165,6 +165,9 @@ const HUNGARIAN_DISALLOWED_COST = 1e12;
  * all three. A line that would only resolve via literal amount-splitting or summing surfaces
  * here as unmatched, to be handled by the investigate stage (Layer 2), not silently combined.
  */
+/** The least description resemblance (trigram overlap, 0-1) for the amount-based pass to pair two lines. */
+const HUNGARIAN_MIN_SIMILARITY = 0.3;
+
 export function matchLinesHungarian(invoiceLines: InvoiceLineInput[], poLines: PoLineInput[]): LineMatchReport {
   if (invoiceLines.length === 0 || poLines.length === 0) {
     return {
@@ -177,6 +180,10 @@ export function matchLinesHungarian(invoiceLines: InvoiceLineInput[], poLines: P
   const costMatrix = invoiceLines.map((invLine) =>
     poLines.map((poLine) => {
       if (poLine.uom !== invLine.uom) return HUNGARIAN_DISALLOWED_COST;
+      // Amounts alone are not enough to pair two lines: in a live test this paired "Nitrile Exam Gloves" with
+      // "Hex Bolt M10x50" (the only other line counted in "each") and reported a 99% undercharge. The descriptions
+      // must at least resemble each other; the greedy pass already took every close (>= 0.85) match.
+      if (descriptionSimilarity(poLine.description, invLine.description) < HUNGARIAN_MIN_SIMILARITY) return HUNGARIAN_DISALLOWED_COST;
       const invoiceLineAmount = invLine.unitPrice * invLine.qty;
       const poLineAmount = poLine.unitPrice * poLine.qtyOrdered;
       return Math.abs(invoiceLineAmount - poLineAmount);

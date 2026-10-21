@@ -94,7 +94,8 @@ export const STATE_LABEL = {
 
 export function formatMoney(amount, currency = 'USD') {
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
+    // INR in Indian grouping (₹1,50,000.00); everything else western.
+    return new Intl.NumberFormat(currency === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
   } catch {
     // An unknown currency code from a document: show the number and the code rather than throwing in render.
     return `${Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;

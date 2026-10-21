@@ -131,8 +131,10 @@ export function AddPoModal({ onClose, onSaved }) {
   const [orderDate, setOrderDate] = useState(today());
   const [currency, setCurrency] = useState('USD');
   const [limit, setLimit] = useState('');
-  const [items, setItems] = useState([{ description: '', qty: '1', rate: '' }]);
-  const [receipt, setReceipt] = useState(newReceipt('full'));
+  const [items, setItems] = useState([{ description: '', qty: '1', rate: '', uom: 'each' }]);
+  // Not received yet by default: the delivery note is usually recorded next, and starting on "Received in full"
+  // counted the same goods twice when it was.
+  const [receipt, setReceipt] = useState(newReceipt('none'));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(null);
@@ -155,7 +157,7 @@ export function AddPoModal({ onClose, onSaved }) {
       if (d.orderDate) setOrderDate(d.orderDate);
       if (d.currency) setCurrency(d.currency);
       setLimit(d.spendingLimit != null ? String(d.spendingLimit) : '');
-      if (d.lines.length > 0) setItems(d.lines.map((l) => ({ description: l.description, qty: String(l.quantity), rate: String(l.unitPrice) })));
+      if (d.lines.length > 0) setItems(d.lines.map((l) => ({ description: l.description, qty: String(l.quantity), rate: String(l.unitPrice), uom: l.uom || 'each' })));
       const notes = [];
       if (r.alreadyUploaded?.purchaseOrderId) notes.push('This exact file was already saved as a purchase order.');
       if (r.books?.existingPoId) notes.push(`A purchase order numbered ${d.poNumber} is already on file; saving would be refused.`);
@@ -192,7 +194,7 @@ export function AddPoModal({ onClose, onSaved }) {
       const body = {
         vendor: vendor.trim(), poNumber: poNumber.trim(), orderDate, currency,
         spendingLimit: limit.trim() ? Number(limit.replace(/,/g, '')) : undefined,
-        items: items.map((it) => ({ description: it.description.trim(), qty: Number(it.qty), rate: Number(it.rate) })),
+        items: items.map((it) => ({ description: it.description.trim(), qty: Number(it.qty), rate: Number(it.rate), uom: (it.uom || 'each').trim() })),
         receipt: receiptPayload(receipt, items),
         sourceDocumentId: documentId ?? undefined,
       };
@@ -269,14 +271,15 @@ export function AddPoModal({ onClose, onSaved }) {
             <div className="vb-field">
               <span>Lines ordered</span>
               {items.map((it, i) => (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 80px 110px 36px', gap: 8, marginBottom: 6 }}>
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 80px 70px 110px 36px', gap: 8, marginBottom: 6 }}>
                   <input aria-label={`Line ${i + 1} description`} required value={it.description} onChange={(e) => setItem(i, { description: e.target.value })} placeholder="Description" />
                   <input aria-label={`Line ${i + 1} quantity`} required type="number" min="0.0001" step="any" value={it.qty} onChange={(e) => setItem(i, { qty: e.target.value })} />
+                  <input aria-label={`Line ${i + 1} unit`} title="Unit, as on the PO (each, box, case, kg...)" value={it.uom ?? 'each'} maxLength={20} onChange={(e) => setItem(i, { uom: e.target.value })} />
                   <input aria-label={`Line ${i + 1} unit price`} required type="number" min="0" step="any" value={it.rate} onChange={(e) => setItem(i, { rate: e.target.value })} placeholder="Unit price" />
                   <button type="button" className="vb-btn vb-btn-sm" aria-label={`Remove line ${i + 1}`} disabled={items.length === 1} onClick={() => setItems((l) => l.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
                 </div>
               ))}
-              <button type="button" className="vb-btn vb-btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => setItems((l) => [...l, { description: '', qty: '1', rate: '' }])}><Plus size={14} /> Add a line</button>
+              <button type="button" className="vb-btn vb-btn-sm" style={{ alignSelf: 'flex-start' }} onClick={() => setItems((l) => [...l, { description: '', qty: '1', rate: '', uom: 'each' }])}><Plus size={14} /> Add a line</button>
             </div>
             <div className="vb-muted" style={{ fontSize: 14 }}>PO total: <strong className="vb-mono" style={{ color: 'var(--vb-text)' }}>{total.toLocaleString('en-US', { minimumFractionDigits: 2 })} {currency}</strong></div>
 

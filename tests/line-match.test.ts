@@ -182,14 +182,14 @@ describe("matchLinesHungarian (spec §1.7, N:M via min-cost assignment)", () => 
 });
 
 describe("matchLines (full two-pass pipeline)", () => {
-  it("greedy handles the exact-reference line; Hungarian picks up the rest by amount", () => {
+  it("greedy handles the exact-reference line; Hungarian picks up a reworded line by amount", () => {
     const poLines = [
       po({ id: "po-1", lineNumber: 1, description: "Steel Widget", unitPrice: 10, qtyOrdered: 100 }),
       po({ id: "po-2", lineNumber: 2, description: "Office Chair", unitPrice: 200, qtyOrdered: 5 }),
     ];
     const invoiceLines = [
       inv({ id: "inv-1", statedPoLineNumber: 1, description: "Steel Widget", unitPrice: 10, qty: 100 }),
-      inv({ id: "inv-2", description: "Something unrelated entirely", unitPrice: 200, qty: 5 }),
+      inv({ id: "inv-2", description: "Ergonomic Office Chair (black)", unitPrice: 200, qty: 5 }),
     ];
     const r = matchLines(invoiceLines, poLines);
     expect(r.matched).toHaveLength(2);
@@ -197,6 +197,15 @@ describe("matchLines (full two-pass pipeline)", () => {
     expect(byInv["inv-1"].matchMethod).toBe("exact_line_number");
     expect(byInv["inv-2"].matchMethod).toBe("hungarian");
     expect(byInv["inv-2"].poLineId).toBe("po-2");
+  });
+
+  it("an unrelated line is not paired just because its amount fits: it stays unmatched (billed for something not ordered)", () => {
+    // Regression: "Nitrile Exam Gloves" was paired with "Hex Bolt M10x50" and reported as a 99% undercharge.
+    const poLines = [po({ id: "po-1", lineNumber: 1, description: "Hex Bolt M10x50", unitPrice: 18.5, qtyOrdered: 500 })];
+    const invoiceLines = [inv({ id: "inv-1", description: "Nitrile Exam Gloves", unitPrice: 0.149, qty: 2000 })];
+    const r = matchLines(invoiceLines, poLines);
+    expect(r.matched).toEqual([]);
+    expect(r.unmatchedInvoiceLines).toEqual([{ invoiceLineId: "inv-1" }]);
   });
 
   it("a PO line already consumed by the greedy pass is never offered to the Hungarian pass", () => {

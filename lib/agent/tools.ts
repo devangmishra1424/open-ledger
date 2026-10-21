@@ -102,6 +102,10 @@ export const SUBMIT_INVESTIGATION = tool(
       type: "string",
       description: "Must cite specific tool results, e.g. 'per check_duplicate, 0.97 similarity to INV-2288'. Say what the results show and why they support recommended_action; do not suggest steps outside this system (contacting the vendor, requesting documents, sending it to a team).",
     },
+    answer_to_reviewer: {
+      type: "string",
+      description: "Only when the input has human_question (a person challenged the decision): answer that question directly, in one to three sentences, from the records you were given (receipts, PO lines, amounts); say plainly if the records show something was recorded wrongly. Leave empty otherwise.",
+    },
     // An enum, not free text: a prose recommendation ("Escalate to the fraud team and hold payment")
     // matches no action, so policy could not apply it. investigate() still checks the value, since a
     // provider may not enforce the enum, and policy holds anything unreadable for a person.
@@ -121,6 +125,10 @@ export const SUBMIT_VERIFICATION = tool(
     agrees: { type: "boolean", description: "Whether you agree with the Investigator's conclusion" },
     exception_types: { type: "array", items: { type: "string" } },
     confidence: { type: "number" },
+answer_to_reviewer: {
+      type: "string",
+      description: "Only when the input has human_question (a person challenged the decision): answer that question directly, in one to three sentences, from the records you were given (receipts, PO lines, amounts); say plainly if the records show something was recorded wrongly. Leave empty otherwise.",
+    },
     notes: { type: "string", description: "Required if agrees=false: state specifically what you assessed differently and why. Findings only: do not suggest steps outside this system (contacting the vendor, requesting documents, sending it to a team)." },
   },
   ["agrees", "exception_types", "confidence", "notes"],

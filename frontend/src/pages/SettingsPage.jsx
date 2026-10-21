@@ -5,18 +5,23 @@ import { useToasts } from '../state/Toasts';
 import { Banner, Spinner } from '../components/ui';
 import { formatMoney } from '../lib/labels';
 
+/** {"INR": 4000000} -> [{ code: 'INR', amount: '4000000' }], in a stable order. */
+const rowsOf = (limits) => Object.entries(limits ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([code, amount]) => ({ code, amount: String(amount) }));
+
 export default function SettingsPage() {
   const { system } = useOutletContext() ?? {};
   const toast = useToasts();
   const [saved, setSaved] = useState(null);
   const [confidence, setConfidence] = useState('');
   const [maxAmount, setMaxAmount] = useState('');
+  /** Limits for currencies other than USD: [{ code, amount }] as typed. */
+  const [others, setOthers] = useState([]);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     api.getSettings()
-      .then((s) => { setSaved(s); setConfidence(String(s.autoApprovalConfidence)); setMaxAmount(String(s.maxAutoPaymentAmount)); })
+      .then((s) => { setSaved(s); setConfidence(String(s.autoApprovalConfidence)); setMaxAmount(String(s.maxAutoPaymentAmount)); setOthers(rowsOf(s.currencyLimits)); })
       .catch(setError);
   }, []);
 
@@ -24,8 +29,10 @@ export default function SettingsPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await api.updateSettings({ autoApprovalConfidence: Number(confidence), maxAutoPaymentAmount: Number(maxAmount) });
+      const currencyLimits = Object.fromEntries(others.filter((o) => o.code.trim()).map((o) => [o.code.trim().toUpperCase(), Number(o.amount)]));
+      const res = await api.updateSettings({ autoApprovalConfidence: Number(confidence), maxAutoPaymentAmount: Number(maxAmount), currencyLimits });
       setSaved(res);
+      setOthers(rowsOf(res.currencyLimits));
       toast.success('Saved. The next invoice is checked against these limits.');
     } catch (err) {
       toast.error(err.message);
@@ -34,7 +41,9 @@ export default function SettingsPage() {
     }
   };
 
-  const dirty = saved && (Number(confidence) !== saved.autoApprovalConfidence || Number(maxAmount) !== saved.maxAutoPaymentAmount);
+  const othersChanged = saved && JSON.stringify(rowsOf(saved.currencyLimits)) !== JSON.stringify(others.filter((o) => o.code.trim()).map((o) => ({ code: o.code.trim().toUpperCase(), amount: String(Number(o.amount)) })));
+  const othersValid = others.every((o) => !o.code.trim() || (/^[A-Za-z]{3}$/.test(o.code.trim()) && o.code.trim().toUpperCase() !== 'USD' && Number(o.amount) >= 0 && o.amount !== ''));
+  const dirty = saved && othersValid && (Number(confidence) !== saved.autoApprovalConfidence || Number(maxAmount) !== saved.maxAutoPaymentAmount || othersChanged);
 
   return (
     <div className="vb-page">
@@ -48,10 +57,22 @@ export default function SettingsPage() {
         {saved && (
           <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 520 }}>
             <label className="vb-field">
-              <span>Largest invoice that can be auto-approved</span>
+              <span>Largest invoice that can be auto-approved (USD)</span>
               <input type="number" min="0" step="any" required value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} />
-              <span className="vb-field-hint">Anything above {formatMoney(Number(maxAmount) || 0)} goes to a person, however clean it is.</span>
+              <span className="vb-field-hint">A USD invoice above {formatMoney(Number(maxAmount) || 0)} goes to a person, however clean it is.</span>
             </label>
+            <div className="vb-field">
+              <span>The same limit in other currencies</span>
+              {others.map((o, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '90px minmax(0, 1fr) 36px', gap: 8 }}>
+                  <input aria-label={`Currency ${i + 1}`} value={o.code} maxLength={3} placeholder="INR" onChange={(e) => setOthers((l) => l.map((x, j) => (j === i ? { ...x, code: e.target.value.toUpperCase() } : x)))} />
+                  <input aria-label={`Limit ${i + 1}`} type="number" min="0" step="any" value={o.amount} onChange={(e) => setOthers((l) => l.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))} />
+                  <button type="button" className="vb-btn vb-btn-sm" aria-label={`Remove ${o.code || 'currency'}`} onClick={() => setOthers((l) => l.filter((_, j) => j !== i))}>&times;</button>
+                </div>
+              ))}
+              <button type="button" className="vb-link-btn" style={{ alignSelf: 'flex-start' }} onClick={() => setOthers((l) => [...l, { code: '', amount: '' }])}>+ Add a currency</button>
+              <span className="vb-field-hint">There are no exchange rates here, so each currency has its own limit. An invoice in a currency not listed always goes to a person.</span>
+            </div>
             <label className="vb-field">
               <span>Minimum AI confidence to auto-approve (%)</span>
               <input type="number" min="0" max="100" step="any" required value={confidence} onChange={(e) => setConfidence(e.target.value)} />

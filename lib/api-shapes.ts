@@ -368,6 +368,8 @@ export function toFrontendInvoice(params: {
   const priority: FrontendInvoice["priority"] = state === "needs_attention" ? "High" : state === "processing" ? "Medium" : "Low";
   const latest = decisions[decisions.length - 1];
   const lastMatch = lastOf(machine, (d) => d.nodeId === "match");
+  // A vendor's bank change holds what is still to be paid; an invoice already paid or rejected has nothing left to hold.
+  const bankHeld = Boolean(gate?.gating) && state !== "paid" && state !== "rejected";
   const lastValidate = lastOf(machine, (d) => d.nodeId === "validate");
 
   return {
@@ -410,7 +412,7 @@ export function toFrontendInvoice(params: {
     summary: { headline, detail, decidedBy },
     reason,
     actions: { approve: availability("approve"), reject: availability("reject"), contest: availability("contest") },
-    bankChange: gate?.gating
+    bankChange: bankHeld && gate
       ? {
           reviewId: gate.review?.id ?? null, status: gate.status, step: bankChangeStep(gate),
           callbackBy: gate.review?.callbackConfirmedBy ?? null, callbackPhone: gate.review?.callbackPhoneUsed ?? null,
@@ -425,7 +427,7 @@ export function toFrontendInvoice(params: {
       threeWay: params.threeWay ?? null,
       bill: { amount: Number(bill.total_amount), currency: bill.currency, invoiceDate: String(bill.invoice_date), poReference: bill.po_reference ?? null, hasPo: Boolean(bill.po_id) },
       vendorTrustTier: params.vendorTrustTier ?? null,
-      bankChange: gate?.gating ? { status: gate.status, oldBankLast4: gate.review?.oldBankLast4 ?? null, newBankLast4: gate.review?.newBankLast4 ?? null } : null,
+      bankChange: bankHeld && gate ? { status: gate.status, oldBankLast4: gate.review?.oldBankLast4 ?? null, newBankLast4: gate.review?.newBankLast4 ?? null } : null,
     }),
   };
 }
