@@ -7,6 +7,7 @@ import { useReviewer } from '../state/Reviewer';
 import { Banner, Empty, Spinner } from '../components/ui';
 import { actionWords, formatMoney, groundingNote, shortHash, timeAgo } from '../lib/labels';
 import { REASON_GUIDE } from '../lib/reasonGuide';
+import AuditReports from '../components/AuditReports';
 import './AuditTrail.css';
 
 /**
@@ -277,6 +278,8 @@ export default function AuditTrail() {
           <RefreshCw size={14} className={verifying ? 'vb-audit-spin' : undefined} /> {verifying ? 'Verifying…' : 'Verify again'}
         </button>
       </section>
+
+      <AuditReports />
 
       {loadError && <Banner kind="error">Could not load audit requests: {loadError.message}</Banner>}
 
