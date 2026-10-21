@@ -192,6 +192,17 @@ export const api = {
   createPurchaseOrder: (po) => request('/purchase-orders', { method: 'POST', body: po }),
   parsePurchaseOrder: (rawText) => request('/purchase-orders/parse', { method: 'POST', body: { rawText }, timeout: LONG_TIMEOUT_MS }),
   removeReceipt: (poId, receiptId, reviewerName) => request(`/purchase-orders/${encodeURIComponent(poId)}/receipts/${encodeURIComponent(receiptId)}`, { method: 'DELETE', body: { reviewerName } }),
+  getAuditReport: (kind, query) => request(`/audit/reports/${encodeURIComponent(kind)}?${new URLSearchParams(query)}`),
+  /** The same report as a CSV file (fetched with the session, then handed to the browser to save). */
+  downloadAuditReport: async (kind, query) => {
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/audit/reports/${encodeURIComponent(kind)}?${new URLSearchParams({ ...query, format: 'csv' })}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) throw new Error(`Could not download the report (${res.status})`);
+    const url = URL.createObjectURL(await res.blob());
+    const a = Object.assign(document.createElement('a'), { href: url, download: `veribook-${kind}.csv` });
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   recordReceipt: (poId, receipt) => request(`/purchase-orders/${encodeURIComponent(poId)}/receipts`, { method: 'POST', body: receipt }),
 
   // --- Human decisions (reviewerName is required by the server: it is recorded in the hash chain) ---

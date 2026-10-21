@@ -19,10 +19,16 @@ const scrypt = promisify(scryptCb) as (password: string, salt: Buffer, keylen: n
 const N = 16384, R = 8, P = 1, KEY_LENGTH = 32;
 const MAXMEM = 64 * 1024 * 1024;
 
+export type Role = "clerk" | "approver" | "admin";
+
 export interface Account {
   username: string;
   name: string;
   passwordHash: string;
+  /** clerk: enters and challenges, never approves. approver (the default): approves within its limits. admin: no amount limit. */
+  role: Role;
+  /** Largest invoice this person may approve, per currency ({"INR": 500000}); a currency not listed has no limit. */
+  approvalLimits: Record<string, number>;
 }
 
 export class AccountConfigError extends Error {
@@ -80,9 +86,15 @@ export function parseAccounts(raw: string | undefined): Account[] {
     const nameKey = name.toLowerCase().replace(/\s+/g, " ");
     if (usernames.has(userKey)) throw new AccountConfigError(`VERIBOOK_USERS: username '${username}' appears twice`);
     if (names.has(nameKey)) throw new AccountConfigError(`VERIBOOK_USERS: name '${name}' appears twice; names must be unique because the audit trail records them`);
+    const role = e.role === undefined ? "approver" : e.role;
+    if (role !== "clerk" && role !== "approver" && role !== "admin") throw new AccountConfigError(`VERIBOOK_USERS[${i}]: role must be clerk, approver or admin`);
+    const limits = e.approvalLimits ?? {};
+    if (typeof limits !== "object" || Array.isArray(limits) || Object.entries(limits as object).some(([c, v]) => !/^[A-Z]{3}$/.test(c) || typeof v !== "number" || !(v >= 0))) {
+      throw new AccountConfigError(`VERIBOOK_USERS[${i}]: approvalLimits must look like {"INR": 500000, "USD": 10000}`);
+    }
     usernames.add(userKey);
     names.add(nameKey);
-    accounts.push({ username, name, passwordHash });
+    accounts.push({ username, name, passwordHash, role, approvalLimits: limits as Record<string, number> });
   }
   return accounts;
 }
