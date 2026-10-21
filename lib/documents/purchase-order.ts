@@ -24,6 +24,11 @@ export interface PoDraft {
 }
 
 const PO_NUMBER = /^(?:p\.?\s*o\.?|purchase\s*order|order)\s*(?:no\.?|number|#|ref(?:erence)?)?(?!\s*date)(?=[\s:#.]|$)/i;
+/** A label that says "number": tried first, so a "PURCHASE ORDER" heading is never read as the label (a US PO's
+ *  heading once gave "1200", the start of the buyer's street address under it). */
+const PO_NUMBER_LABEL = /^(?:p\.?\s*o\.?|purchase\s*order|order)\s*(?:no\.?|number|#|ref(?:erence)?)(?!\s*date)(?=[\s:#.]|$)/i;
+/** An all-number date like 10/01/2026: day/month order cannot be told from the date itself. */
+const NUMERIC_DATE = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-]\d{2,4}$/;
 const ORDER_DATE = /^(?:(?:po|p\.o\.|order|purchase\s*order)\s*date|date\s*of\s*order|date)(?=[\s:.\-]|$)/i;
 const VENDOR = /^(?:vendor(?:\s*(?:name|details))?|supplier(?:\s*(?:name|details))?|to|seller|ship\s*from|issued\s*to)(?=[\s:.,\-]|$)/i;
 
@@ -34,7 +39,7 @@ export function readPurchaseOrder(reading: Reading): PoDraft {
   const order = dateOrderFor(currency, text);
 
   const vendor = labelledValue(rows, VENDOR, "text") ?? labelledValue(rows, LABELS.vendor, "text");
-  const poNumber = labelledValue(rows, PO_NUMBER, "id");
+  const poNumber = labelledValue(rows, PO_NUMBER_LABEL, "id") ?? labelledValue(rows, PO_NUMBER, "id");
   const dated = labelledValue(rows, ORDER_DATE, "date", order);
   const orderDate = dated ? parseDate(dated.value, order)?.iso ?? null : null;
   const { lines, problems } = readLines(rows);
@@ -43,6 +48,10 @@ export function readPurchaseOrder(reading: Reading): PoDraft {
   if (!vendor) missing.push("the vendor (no Vendor / Supplier / To block was found)");
   if (!poNumber) missing.push("the PO number");
   if (!orderDate) missing.push("the order date");
+  const both = dated ? NUMERIC_DATE.exec(dated.value.trim()) : null;
+  if (orderDate && both && Number(both[1]) <= 12 && Number(both[2]) <= 12 && both[1] !== both[2]) {
+    missing.push(`this was printed as an all-number date ("${dated!.value.trim()}"), which could be day/month either way: check the order date (read as ${orderDate})`);
+  }
   if (lines.length === 0) missing.push("the line items");
   for (const p of problems) if (!p.endsWith("no item table found")) missing.push(p.replace(/^line_items: /, ""));
   if (vendor?.conf != null || poNumber?.conf != null) missing.push("this was read by OCR: check the vendor name and PO number letter by letter");

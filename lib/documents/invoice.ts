@@ -68,12 +68,15 @@ export function assessInvoice(s: ExtractionSubmission): Assessment {
     add("each line: quantity x price = amount", offLines.length === 0,
       `line_items: ${offLines.map((l) => `"${l.description.slice(0, 30)}" ${l.quantity} x ${l.unit_price} is not its amount ${l.amount}`).join("; ")}`);
     const lineSum = round2(s.line_items.reduce((sum, l) => sum + (l.amount ?? l.quantity * l.unit_price), 0));
+    const charges = round2((s.other_charges ?? []).reduce((sum, c) => sum + c.amount, 0));
+    // A charge printed as a row of the item table (shipping) is read as a charge, but the invoice's own subtotal
+    // includes it: then the subtotal is items + charges, and the charges are not added a second time.
+    const subtotalHasCharges = charges !== 0 && s.subtotal != null && !close(lineSum, s.subtotal) && close(round2(lineSum + charges), s.subtotal);
     if (s.subtotal != null) {
-      add("items add up to the subtotal", close(lineSum, s.subtotal), `line_items sum to ${lineSum.toFixed(2)} but the subtotal says ${s.subtotal.toFixed(2)}`);
+      add("items add up to the subtotal", close(lineSum, s.subtotal) || subtotalHasCharges, `line_items sum to ${lineSum.toFixed(2)} but the subtotal says ${s.subtotal.toFixed(2)}`);
     }
     if (s.total != null) {
-      const charges = round2((s.other_charges ?? []).reduce((sum, c) => sum + c.amount, 0));
-      const expected = round2((s.subtotal ?? lineSum) + (s.tax ?? 0) + charges - (s.discount ?? 0) + (s.round_off ?? 0));
+      const expected = round2((s.subtotal ?? lineSum) + (s.tax ?? 0) + (subtotalHasCharges ? 0 : charges) - (s.discount ?? 0) + (s.round_off ?? 0));
       const parts = [`subtotal ${(s.subtotal ?? lineSum).toFixed(2)}`, `tax ${(s.tax ?? 0).toFixed(2)}`];
       if (charges) parts.push(`charges ${charges.toFixed(2)}`);
       if (s.discount) parts.push(`less discount ${s.discount.toFixed(2)}`);
