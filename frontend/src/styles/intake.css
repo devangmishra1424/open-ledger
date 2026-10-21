@@ -51,7 +51,7 @@
 .vb-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 
 .vb-lines { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--vb-border-soft, var(--vb-border)); border-radius: var(--vb-radius-sm); }
-.vb-lines-head, .vb-lines-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px 96px 92px 36px; gap: 6px; align-items: center; }
+.vb-lines-head, .vb-lines-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px 64px 96px 92px 36px; gap: 6px; align-items: center; }
 .vb-lines-head { font-size: 11.5px; color: var(--vb-dim); padding: 0 2px; }
 .vb-lines-row input, .vb-amount-row input { background: var(--vb-bg); border: 1px solid var(--vb-border); color: var(--vb-text); border-radius: var(--vb-radius-sm); padding: 8px 9px; font: inherit; font-size: 13.5px; min-height: 38px; width: 100%; }
 .vb-line-amount { text-align: right; font-size: 13px; color: var(--vb-muted); }
@@ -73,7 +73,7 @@
 @media (max-width: 560px) {
   .vb-grid-3 { grid-template-columns: minmax(0, 1fr); }
   .vb-lines-head { display: none; }
-  .vb-lines-row { grid-template-columns: minmax(0, 1fr) 64px 84px 36px; }
+  .vb-lines-row { grid-template-columns: minmax(0, 1fr) 64px 56px 84px 36px; }
   .vb-line-amount { display: none; }
 }
 

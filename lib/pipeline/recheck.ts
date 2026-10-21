@@ -39,6 +39,7 @@ const MAX_PER_TRIGGER = 50;
 export type RecheckReason =
   | { kind: "po_added"; poNumber: string; by: string }
   | { kind: "goods_received"; poNumber: string; receiptDate: string; by: string }
+  | { kind: "receipt_removed"; poNumber: string; receiptDate: string; by: string }
   | { kind: "manual"; by: string };
 
 export interface RecheckStarted {
@@ -52,6 +53,7 @@ function why(reason: RecheckReason): string {
   switch (reason.kind) {
     case "po_added": return `because purchase order ${reason.poNumber} was added`;
     case "goods_received": return `because goods were received against purchase order ${reason.poNumber} (receipt dated ${reason.receiptDate})`;
+    case "receipt_removed": return `because a goods receipt dated ${reason.receiptDate} was removed from purchase order ${reason.poNumber}`;
     case "manual": return `at ${reason.by}'s request`;
   }
 }
@@ -174,6 +176,13 @@ export async function recheckWaitingForReceipt(po: { id: string; poNumber: strin
     if (RECEIVING_CODES.some((code) => codes.includes(code))) stoppedForReceiving.push(row as { id: string; invoice_number: string });
   }
   return startEach(stoppedForReceiving, { kind: "goods_received", poNumber: po.poNumber, receiptDate, by: AUTOMATIC }, `the receipt for PO ${po.poNumber}`);
+}
+
+/** After a receipt recorded by mistake is removed: every invoice on the PO still waiting on a person is checked again. */
+export async function recheckAfterReceiptRemoved(po: { id: string; poNumber: string }, receiptDate: string, by: string): Promise<Array<{ id: string; invoiceNumber: string }>> {
+  const rows = await getSql()`
+    SELECT id, invoice_number FROM vendor_bills WHERE status = 'exception' AND po_id = ${po.id} ORDER BY received_at LIMIT ${MAX_PER_TRIGGER + 1}`;
+  return startEach(rows as unknown as Array<{ id: string; invoice_number: string }>, { kind: "receipt_removed", poNumber: po.poNumber, receiptDate, by }, `the removed receipt on PO ${po.poNumber}`);
 }
 
 async function startEach(rows: Array<{ id: string; invoice_number: string }>, reason: RecheckReason, what: string): Promise<Array<{ id: string; invoiceNumber: string }>> {

@@ -33,11 +33,19 @@ const ROUTE: Record<Action, string> = {
   block_fraud_flag: "blocked as possible fraud",
 };
 
+/** INR in Indian grouping (1,50,000.00), everything else western (150,000.00). */
+const locale = (currency: string) => (currency === "INR" ? "en-IN" : "en-US");
+
 export function money(amount: number, currency: string): string {
-  return `${currency} ${Math.abs(amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${currency} ${Math.abs(amount).toLocaleString(locale(currency), { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-const pct = (x: number) => `${(x * 100).toLocaleString("en-US", { maximumFractionDigits: 1 })}%`;
+/** A unit price as printed: 0.149 stays 0.149 (two decimals would make it 0.15), 14.9 is 14.90. */
+export function unitMoney(amount: number, currency: string): string {
+  return `${currency} ${Math.abs(amount).toLocaleString(locale(currency), { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+}
+
+const pct = (x: number) => `${(x * 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}%`;
 const qty = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 const quote = (s: string) => `"${s}"`;
 
@@ -49,7 +57,7 @@ export function priceVarianceFact(p: {
   variancePct: number; impact: number; currency: string; action: Action;
 }): string {
   const dir = p.billedPrice > p.poPrice ? "above" : "below";
-  return `PO line ${p.lineNumber} ${quote(p.description)}: billed ${money(p.billedPrice, p.currency)} per ${p.uom} against the order's ${money(p.poPrice, p.currency)}, ${pct(p.variancePct)} ${dir} it (2% is tolerated). ` +
+  return `PO line ${p.lineNumber} ${quote(p.description)}: billed ${unitMoney(p.billedPrice, p.currency)} per ${p.uom} against the order's ${unitMoney(p.poPrice, p.currency)}, ${pct(p.variancePct)} ${dir} it (2% is tolerated). ` +
     `At the billed quantity of ${qty(p.billedQty)} that is ${money(p.impact, p.currency)} ${dir === "above" ? "more" : "less"} than agreed. ` +
     `A difference of 5% or more, or more than ${p.currency} 500, is blocked; a smaller one goes to a reviewer. ${outcome(p.action)}`;
 }
@@ -85,9 +93,12 @@ export function taxVarianceFact(p: {
   description: string; charged: number; actualRate: number; expectedRate: number; expectedTax: number; currency: string; action: Action;
   /** The tax code's name, e.g. "18% GST, as printed on the invoice". */
   codeName?: string | null;
+  /** How many lines this covers; more than one means `description` names the count and the figures are their totals. */
+  lineCount?: number;
 }): string {
   const expects = p.codeName ? `the ${pct(p.expectedRate)} of its tax code (${p.codeName})` : `the ${pct(p.expectedRate)} its tax code expects`;
-  return `Line ${quote(p.description)}: tax charged ${money(p.charged, p.currency)} (${pct(p.actualRate)} of the line) against ${expects} (${money(p.expectedTax, p.currency)}). ` +
+  const which = (p.lineCount ?? 1) > 1 ? `Tax on the ${p.lineCount} lines it applies to` : `Line ${quote(p.description)}`;
+  return `${which}: tax charged ${money(p.charged, p.currency)} (${pct(p.actualRate)} of the line) against ${expects} (${money(p.expectedTax, p.currency)}). ` +
     `More than 2 points of rate, or more than ${p.currency} 100 of tax, is blocked; less goes to a reviewer. ${outcome(p.action)}`;
 }
 
@@ -184,10 +195,10 @@ function priceVarianceShown(p: Parameters<typeof priceVarianceFact>[0]): FactSho
   return {
     title: over ? "Charged more than the agreed price" : "Charged less than the agreed price",
     points: [
-      point("invoice", `Price on the invoice for ${quote(p.description)}`, `${money(p.billedPrice, p.currency)}${per(p.uom)}`, true),
-      point("order", `Agreed on the purchase order (line ${p.lineNumber})`, `${money(p.poPrice, p.currency)}${per(p.uom)}`),
+      point("invoice", `Price on the invoice for ${quote(p.description)}`, `${unitMoney(p.billedPrice, p.currency)}${per(p.uom)}`, true),
+      point("order", `Agreed on the purchase order (line ${p.lineNumber})`, `${unitMoney(p.poPrice, p.currency)}${per(p.uom)}`),
       point("difference", over ? "Overcharged" : "Undercharged",
-        `${money(p.billedPrice - p.poPrice, p.currency)} ${over ? "more" : "less"}${per(p.uom)} (${pctAbs(p.variancePct)}), ${money(p.impact, p.currency)} in total`, true),
+        `${unitMoney(p.billedPrice - p.poPrice, p.currency)} ${over ? "more" : "less"}${per(p.uom)} (${pctAbs(p.variancePct)}), ${money(p.impact, p.currency)} in total`, true),
       point("rule", "Allowed", `Up to 2% either way. 5% or more, or more than ${p.currency} 500, is blocked.`),
     ],
   };
@@ -238,7 +249,7 @@ function taxVarianceShown(p: Parameters<typeof taxVarianceFact>[0]): FactShown {
   return {
     title: over ? "Charged more tax than the rate allows" : "Charged less tax than the rate",
     points: [
-      point("invoice", `Tax charged on ${quote(p.description)}`, `${money(p.charged, p.currency)} (${pct(p.actualRate)})`, true),
+      point("invoice", (p.lineCount ?? 1) > 1 ? `Tax charged on ${p.lineCount} lines` : `Tax charged on ${quote(p.description)}`, `${money(p.charged, p.currency)} (${pct(p.actualRate)})`, true),
       p.codeName?.includes("printed on the invoice")
         ? point("invoice", `At the printed ${pct(p.expectedRate)} rate`, money(p.expectedTax, p.currency))
         : point("records", `Tax at ${pct(p.expectedRate)}${p.codeName ? ` (${p.codeName})` : ""}`, money(p.expectedTax, p.currency)),

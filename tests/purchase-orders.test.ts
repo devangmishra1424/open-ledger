@@ -11,6 +11,7 @@ import { runMatchStage } from "@/lib/pipeline/match-stage";
 import { createPurchaseOrder, recordReceipt, listPurchaseOrders, normalizePurchaseOrder, normalizeReceipt } from "@/lib/purchase-orders";
 import { POST as postPo, GET as getPos } from "@/app/api/purchase-orders/route";
 import { POST as postReceipt } from "@/app/api/purchase-orders/[id]/receipts/route";
+import { DELETE as deleteReceipt } from "@/app/api/purchase-orders/[id]/receipts/[receiptId]/route";
 import { POST as parsePo } from "@/app/api/purchase-orders/parse/route";
 import { POST as ingest } from "@/app/api/invoices/ingest/route";
 import { makePdfDataUrl } from "./helpers/make-pdf";
@@ -114,8 +115,36 @@ describe("recordReceipt", () => {
     const r = { inFull: true, receiptDate: "2026-10-03", receiverName: "Dana" };
     await recordReceipt(po.poId, r);
     await expect(recordReceipt(po.poId, r)).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/already recorded/) });
-    // a different date is a different delivery
-    await expect(recordReceipt(po.poId, { ...r, receiptDate: "2026-10-04" })).resolves.toBeTruthy();
+  });
+
+  it("refuses goods beyond what was ordered: the same delivery recorded twice would hide an over-billing", async () => {
+    const po = await make("D1");
+    await recordReceipt(po.poId, { inFull: true, receiptDate: "2026-10-03" }); // e.g. the PO saved as "Received in full"
+    // ...then its delivery note recorded too, on another date
+    await expect(recordReceipt(po.poId, { lines: [{ lineNumber: 1, quantity: 8 }], receiptDate: "2026-10-02" })).rejects.toMatchObject({
+      status: 409, message: expect.stringMatching(/more goods than were ordered \(line 1 "Widget": ordered 50, already received 50, this adds 8\).*remove it on the Orders page/),
+    });
+    // a damaged delivery is recorded but never counted, so it is not refused
+    await expect(recordReceipt(po.poId, { inFull: true, receiptDate: "2026-10-04", condition: "damaged" })).resolves.toBeTruthy();
+  });
+
+  it("a receipt recorded by mistake can be removed: the goods stop counting, and the right one can then be recorded", async () => {
+    const po = await make("D2");
+    const wrong = await recordReceipt(po.poId, { inFull: true, receiptDate: "2026-10-03" });
+    const res = await deleteReceipt(new Request("http://t/x", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ reviewerName: "Priya" }) }),
+      { params: Promise.resolve({ id: po.poId, receiptId: wrong.receiptId }) });
+    expect(res.status).toBe(200);
+    let listed = (await listPurchaseOrders(200)).find((p) => p.id === po.poId)!;
+    expect(listed.lines.map((l) => l.received)).toEqual([0, 0]);
+    expect(listed.receipts).toEqual([]);
+    await recordReceipt(po.poId, { lines: [{ lineNumber: 1, quantity: 8 }], receiptDate: "2026-10-02" });
+    listed = (await listPurchaseOrders(200)).find((p) => p.id === po.poId)!;
+    expect(listed.lines.map((l) => l.received)).toEqual([8, 0]);
+    expect(listed.receipts).toEqual([expect.objectContaining({ date: "2026-10-02", condition: "accepted", units: 8 })]);
+    // a receipt that is not this PO's is a 404, not a silent no-op
+    const other = await deleteReceipt(new Request("http://t/x", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ reviewerName: "Priya" }) }),
+      { params: Promise.resolve({ id: po.poId, receiptId: "nope" }) });
+    expect(other.status).toBe(404);
   });
 
   it("two identical receipts submitted at once record exactly one", async () => {

@@ -104,7 +104,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 interface ReviewedInvoice {
   vendorName: string; invoiceNumber: string; invoiceDate: string; dueDate: string | null; poNumber: string | null; currency: string;
-  lines: Array<{ description: string; quantity: number; unitPrice: number }>;
+  lines: Array<{ description: string; quantity: number; unitPrice: number; uom: string | null }>;
   charges: Array<{ label: string; amount: number }>;
   taxLines: Array<{ label: string; amount: number }>;
   discount: number; roundOff: number; total: number;
@@ -147,6 +147,7 @@ function parseInvoice(raw: unknown): ReviewedInvoice {
     description: typeof l.description === "string" && l.description.trim() ? l.description.trim().slice(0, 500) : (() => { throw new HttpError(400, `line ${i + 1}: description is required`); })(),
     quantity: num(l.quantity, `line ${i + 1}: quantity`, 0.0001),
     unitPrice: num(l.unitPrice, `line ${i + 1}: unit price`, 0),
+    uom: typeof l.uom === "string" && l.uom.trim() ? l.uom.trim().slice(0, 20) : null,
   }));
   if (lines.length === 0) throw new HttpError(400, "an invoice needs at least one line");
   const labelled = (k: string, min?: number) => list(k).map((c, i) => ({

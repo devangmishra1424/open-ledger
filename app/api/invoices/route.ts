@@ -42,7 +42,7 @@ export const POST = handle("POST /api/invoices", async (req) => {
     invoiceDate: typeof body.invoiceDate === "string" ? body.invoiceDate : null,
     dueDate: typeof body.dueDate === "string" ? body.dueDate : null,
     currency: typeof body.currency === "string" ? body.currency : null,
-    lines: items.map((it: any) => ({ description: it?.description, quantity: it?.qty, unitPrice: it?.rate })),
+    lines: items.map((it: any) => ({ description: it?.description, quantity: it?.qty, unitPrice: it?.rate, uom: typeof it?.uom === "string" ? it.uom : null })),
     tax: typeof body.tax === "number" ? body.tax : null,
     total: typeof body.totalAmount === "number" ? body.totalAmount : null,
     rawSource: typeof body.rawSource === "string" ? body.rawSource : null,

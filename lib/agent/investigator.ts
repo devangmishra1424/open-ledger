@@ -15,6 +15,8 @@ export interface InvestigationSubmission {
    * a person (tightenedByInvestigator in lib/pipeline/orchestrator.ts).
    */
   recommended_action: string;
+  /** The direct answer to a person's challenge, when the input had one. */
+  answer_to_reviewer?: string;
 }
 
 export interface HumanReconsiderationContext {

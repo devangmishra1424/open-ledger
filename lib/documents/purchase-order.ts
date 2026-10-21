@@ -49,7 +49,8 @@ export function readPurchaseOrder(reading: Reading): PoDraft {
   if (!poNumber) missing.push("the PO number");
   if (!orderDate) missing.push("the order date");
   const both = dated ? NUMERIC_DATE.exec(dated.value.trim()) : null;
-  if (orderDate && both && Number(both[1]) <= 12 && Number(both[2]) <= 12 && both[1] !== both[2]) {
+  // Only when nothing on the PO says which order its dates are in: an INR PO is day-first, a USD one month-first.
+  if (orderDate && both && !currency && Number(both[1]) <= 12 && Number(both[2]) <= 12 && both[1] !== both[2]) {
     missing.push(`this was printed as an all-number date ("${dated!.value.trim()}"), which could be day/month either way: check the order date (read as ${orderDate})`);
   }
   if (lines.length === 0) missing.push("the line items");

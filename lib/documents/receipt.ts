@@ -267,7 +267,8 @@ const NOT_A_NAME = /^(?:signature|sign\b|stamp|seal|name\b|date\b|authori[sz]ed|
 const IS_GRN = /\bgoods\s*receipt\s*note\b|\bG\.?\s?R\.?\s?N\.?\b|\binward\s*(?:note|register|entry)\b|\bmaterial\s*receipt\b/i;
 
 function acceptName(s: string): string | null {
-  const v = s.replace(/\s+/g, " ").trim();
+  // A name runs up to the next label on the same line: "R. Yadav (Stores) Condition: Accepted" is "R. Yadav (Stores)".
+  const v = s.replace(/\s+/g, " ").trim().replace(/\s+(?:condition|date|signature|sign|remarks?|time|vehicle(?:\s*no\.?)?)\s*[:.].*$/i, "").trim();
   if (v.length < 2 || v.length > 80 || !/[A-Za-z]{2}/.test(v) || NOT_A_NAME.test(v) || isFieldLabel(v)) return null;
   return v;
 }

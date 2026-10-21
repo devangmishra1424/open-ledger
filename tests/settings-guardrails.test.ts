@@ -18,7 +18,7 @@ async function billOf(amount: number) {
 }
 
 describe("guardrailBreach (pure)", () => {
-  const limits = { autoApprovalConfidence: 95, maxAutoPaymentAmount: 10_000 };
+  const limits = { autoApprovalConfidence: 95, maxAutoPaymentAmount: 10_000, currencyLimits: { INR: 800_000 } };
   it("lets a small, confident auto-approval stand", () => {
     expect(guardrailBreach({ amount: 500, investigatorConfidence: 0.97 }, limits)).toBeNull();
   });
@@ -33,6 +33,15 @@ describe("guardrailBreach (pure)", () => {
   });
   it("does not invent a confidence check when no investigation reported one", () => {
     expect(guardrailBreach({ amount: 500 }, limits)).toBeNull();
+  });
+  it("compares an invoice with its own currency's limit, never the USD number", () => {
+    // INR 1,06,200 is under the INR limit, though over the USD number it used to be compared with.
+    expect(guardrailBreach({ amount: 106_200, currency: "INR", investigatorConfidence: 0.99 }, limits)).toBeNull();
+    expect(guardrailBreach({ amount: 800_000.01, currency: "INR", investigatorConfidence: 0.99 }, limits)).toMatch(/INR 800000\.01 is over the auto-approval limit of 800000\.00 INR/);
+  });
+  it("a currency with no limit set goes to a person, rather than being compared with another currency's number", () => {
+    // GBP 49,000 used to pass a 50,000 limit set for USD.
+    expect(guardrailBreach({ amount: 9_000, currency: "GBP", investigatorConfidence: 0.99 }, limits)).toMatch(/No auto-approval limit is set for GBP/);
   });
 });
 
@@ -146,13 +155,19 @@ describe("settings API", () => {
     expect((await put({ maxAutoPaymentAmount: -1 })).status).toBe(400);
     expect((await put({ autoApprovalConfidence: "high" })).status).toBe(400);
     expect((await put({})).status).toBe(400);
+    expect((await put({ currencyLimits: { inr: 5 } })).status).toBe(400);
+    expect((await put({ currencyLimits: { INR: -5 } })).status).toBe(400);
+    expect((await put({ currencyLimits: ["INR"] })).status).toBe(400);
   });
   it("persists a partial update and GET reports what the policy engine will actually use", async () => {
     await put({ autoApprovalConfidence: 80, maxAutoPaymentAmount: 2500 });
     await put({ maxAutoPaymentAmount: 7000 }); // does not touch the confidence
     const body = await (await getSettings(new Request("http://t/x"), undefined as never)).json();
-    expect(body).toEqual({ autoApprovalConfidence: 80, maxAutoPaymentAmount: 7000 });
+    expect(body).toEqual({ autoApprovalConfidence: 80, maxAutoPaymentAmount: 7000, currencyLimits: { INR: 4_000_000 } });
     expect(await getPolicyLimits()).toEqual(body);
-    await put({ autoApprovalConfidence: DEFAULT_POLICY_LIMITS.autoApprovalConfidence, maxAutoPaymentAmount: DEFAULT_POLICY_LIMITS.maxAutoPaymentAmount });
+    await put({ currencyLimits: { INR: 500_000, EUR: 45_000, USD: 1 } }); // USD lives in maxAutoPaymentAmount, not here
+    expect((await getPolicyLimits()).currencyLimits).toEqual({ INR: 500_000, EUR: 45_000 });
+    expect((await getPolicyLimits()).maxAutoPaymentAmount).toBe(7000);
+    await put({ ...DEFAULT_POLICY_LIMITS });
   });
 });

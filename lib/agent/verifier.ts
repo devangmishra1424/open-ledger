@@ -10,6 +10,8 @@ export interface VerificationSubmission {
   exception_types: string[];
   confidence: number;
   notes: string;
+  /** The direct answer to a person's challenge, when the input had one. */
+  answer_to_reviewer?: string;
 }
 
 /**

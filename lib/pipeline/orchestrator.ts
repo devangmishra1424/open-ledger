@@ -16,6 +16,7 @@ import { hashJson } from "@/lib/agent/hash";
 import { publishPipelineEvent } from "@/lib/pipeline/events";
 import type { Decision, Claim } from "@/lib/types";
 import type { HumanReconsiderationContext } from "@/lib/agent/investigator";
+import { aiClaims } from "@/lib/agent/claim-check";
 
 /**
  * Carried through investigate/verify/policy/audit when a stage is being (re-)invoked as part
@@ -292,7 +293,11 @@ export async function runInvestigateStage(vendorBillId: string, matchDetail: unk
     parentDecisionId, startedAt, endedAt: new Date().toISOString(),
     confidence: result.submission.confidence, actionTaken: result.submission.recommended_action,
     toolCalls: result.toolCalls,
-    claims: [{ text: result.submission.rationale, tag: "grounded" }],
+    claims: aiClaims({
+      text: result.submission.rationale, answer: result.submission.answer_to_reviewer,
+      challenge: humanContext && recon ? { by: recon.triggeredByActor, question: recon.triggeredByQuestion } : null,
+      evidence: { matchDetail, tools: result.toolCalls.map((t) => t.rawResult) },
+    }),
     idempotencyKey, ...reconFields,
   });
   await publish(d);
@@ -338,7 +343,11 @@ export async function runVerifyStage(vendorBillId: string, matchDetail: unknown,
     confidence: result.submission.confidence,
     actionTaken: result.submission.agrees ? investigation.recommended_action : "disagreement",
     toolCalls: result.toolCalls,
-    claims: [{ text: result.submission.notes || "Verifier agreed with the Investigator's conclusion.", tag: "grounded" }],
+    claims: aiClaims({
+      text: result.submission.notes || "Verifier agreed with the Investigator's conclusion.", answer: result.submission.answer_to_reviewer,
+      challenge: humanContext && recon ? { by: recon.triggeredByActor, question: recon.triggeredByQuestion } : null,
+      evidence: { matchDetail, investigation, tools: result.toolCalls.map((t) => t.rawResult) },
+    }),
     idempotencyKey, ...reconFields,
   });
   await publish(d);
@@ -437,8 +446,8 @@ export async function evaluatePolicy(
   const reasonCode = combined.dominantException ?? (heldByInvestigator ? "INVESTIGATOR_HOLD" : "CLEAN_MATCH");
   if (action !== "auto_approve") return { action, reasonCode, claims };
 
-  const billRows = await getSql()`SELECT total_amount FROM vendor_bills WHERE id = ${vendorBillId}`;
-  const breach = guardrailBreach({ amount: Number(billRows[0]?.total_amount ?? 0), investigatorConfidence }, await getPolicyLimits());
+  const billRows = await getSql()`SELECT total_amount, currency FROM vendor_bills WHERE id = ${vendorBillId}`;
+  const breach = guardrailBreach({ amount: Number(billRows[0]?.total_amount ?? 0), currency: billRows[0]?.currency ?? "USD", investigatorConfidence }, await getPolicyLimits());
   if (!breach) return { action, reasonCode, claims };
   return { action: "escalate_l1", reasonCode: "POLICY_LIMIT", claims: [...claims, { text: breach, tag: "grounded" }] };
 }

@@ -191,6 +191,7 @@ export const api = {
   getPurchaseOrders: () => request('/purchase-orders?limit=200'),
   createPurchaseOrder: (po) => request('/purchase-orders', { method: 'POST', body: po }),
   parsePurchaseOrder: (rawText) => request('/purchase-orders/parse', { method: 'POST', body: { rawText }, timeout: LONG_TIMEOUT_MS }),
+  removeReceipt: (poId, receiptId, reviewerName) => request(`/purchase-orders/${encodeURIComponent(poId)}/receipts/${encodeURIComponent(receiptId)}`, { method: 'DELETE', body: { reviewerName } }),
   recordReceipt: (poId, receipt) => request(`/purchase-orders/${encodeURIComponent(poId)}/receipts`, { method: 'POST', body: receipt }),
 
   // --- Human decisions (reviewerName is required by the server: it is recorded in the hash chain) ---
