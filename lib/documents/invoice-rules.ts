@@ -344,7 +344,10 @@ function valueFor(rows: DocRow[], hit: { r: number; c: number; rest: string }, a
     const below = rows[r].positioned
       ? rows[r].cells.find((c) => overlap(c, cell) > 0 || Math.abs(c.x0 - cell.x0) < 25)
       : rows[r].cells[Math.min(hit.c, rows[r].cells.length - 1)];
-    if (!below || isLabel(below.text)) continue;
+    if (!below) continue;
+    // Another field's label below this one: the column belongs to that field now. Reading on would take ITS value
+    // (an empty "Buyer's Order No." box once read "30" out of the "Mode/Terms of Payment: 30 Days" box under it).
+    if (isLabel(below.text)) break;
     const v = accept(below.text);
     if (v) return { value: v, conf: below.conf, row: r };
   }
