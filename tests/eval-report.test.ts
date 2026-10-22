@@ -5,6 +5,7 @@ import {
 } from "@/lib/evals/report";
 import { evaluatePriceVariance, evaluateQuantityVariance, evaluateTaxVariance, ratio } from "@/lib/matching/decision-matrix";
 import { classifyPriceVariance, classifyTaxRateVariance } from "@/lib/matching/tolerance-zones";
+import { invoicePath } from "@/lib/evals/field";
 
 /** The report's verdict rules (lib/evals/report.ts) and the boundary rounding the lab run found missing. Pure. */
 
@@ -74,6 +75,23 @@ describe("change since the last report", () => {
   });
   it("nothing to compare with: no change section", () => {
     expect(changeSince(null, report([]))).toBeNull();
+  });
+});
+
+describe("one invoice's path in the field report", () => {
+  const bill = { id: "b1", status: "paid", invoice_type: "standard", po_id: "po1", has_receipt: true };
+  const d = (node_id: string, action_taken: string, extra: Record<string, unknown> = {}) => ({ node_id, action_taken, started_at: "2026-10-22T00:00:00Z", ended_at: "2026-10-22T00:00:01Z", superseded_by_id: null, claims: null, ...extra });
+
+  it("held, then approved when a re-check found its delivery: approved without a person, and held once", () => {
+    const p = invoicePath(bill, [
+      d("match", "escalate_l1", { superseded_by_id: "x" }), d("policy", "block", { superseded_by_id: "x" }), d("audit", "block", { superseded_by_id: "x" }),
+      d("match", "auto_approve"), d("policy", "auto_approve"), d("audit", "auto_approve"),
+    ]);
+    expect(p).toMatchObject({ autoApproved: true, heldEver: true, personDecided: null, matchedClean: true, ended: "approved" });
+  });
+  it("held and approved by a person: not approved without a person, and it counts toward the override rate", () => {
+    const p = invoicePath(bill, [d("policy", "escalate_l1"), d("audit", "escalate_l1"), d("human_review", "human_approved")]);
+    expect(p).toMatchObject({ autoApproved: false, heldEver: true, personDecided: "human_approved" });
   });
 });
 

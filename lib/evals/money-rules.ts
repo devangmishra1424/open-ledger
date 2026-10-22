@@ -51,12 +51,26 @@ export async function checkMoneyRules(billIds: string[]): Promise<MoneyRuleResul
     FROM vendor_bills vb JOIN journal_entries je ON je.id = vb.journal_entry_id
     WHERE vb.id IN ${sql(billIds)} AND vb.status IN ('exception', 'void', 'processing') AND je.status = 'posted'`;
 
+  // The hold is vendor-wide (bank-change-review.ts detectBankChangeGates): while the newest review of the vendor's current
+  // account lacks a confirmed callback AND a second reviewer, none of its invoices is paid. Checked for the invoice that
+  // brought the change and every invoice received after it. Still open now means any such payment went out while it was
+  // open. (Invoices received before the change are not checked: they may have been paid to the old account.) "After the
+  // change" compares receipt times with the invoice that brought it, both stamped by the database: the review's own
+  // created_at comes from the app's clock, which can differ from the database's by seconds. A review with no source
+  // invoice on record (older data) falls back to that created_at rather than being skipped.
   const paidThroughBankHold = await sql`
-    SELECT DISTINCT vb.id, vb.invoice_number, r.status
+    SELECT vb.id, vb.invoice_number, r.status
     FROM vendor_bills vb
-    JOIN vendor_bank_change_reviews r ON r.source_invoice_id = vb.id
-    JOIN payment_applications pa ON pa.vendor_bill_id = vb.id
-    WHERE vb.id IN ${sql(billIds)} AND r.status <> 'callback_confirmed'`;
+    JOIN vendors v ON v.id = vb.vendor_id
+    JOIN LATERAL (
+      SELECT status, second_reviewer_name, source_invoice_id, created_at FROM vendor_bank_change_reviews
+      WHERE vendor_id = vb.vendor_id AND new_bank_last4 IS NOT DISTINCT FROM v.bank_account_last4
+      ORDER BY created_at DESC LIMIT 1) r ON true
+    LEFT JOIN vendor_bills src ON src.id = r.source_invoice_id
+    WHERE vb.id IN ${sql(billIds)}
+      AND NOT (r.status = 'callback_confirmed' AND r.second_reviewer_name IS NOT NULL)
+      AND vb.received_at::timestamptz >= COALESCE(src.received_at::timestamptz, r.created_at::timestamptz)
+      AND EXISTS (SELECT 1 FROM payment_applications pa WHERE pa.vendor_bill_id = vb.id)`;
 
   // The reason a held invoice gives is its newest decision or closing step's (a crash records R99 on the closing step
   // only). "Clean Match", or no reason at all, on a held invoice contradicts itself.
@@ -99,7 +113,7 @@ export async function checkMoneyRules(billIds: string[]): Promise<MoneyRuleResul
       .filter((r) => !r.journal_entry_id || r.debits == null || Math.abs(r.debits - r.credits) > CENT)
       .map((r) => ({ invoiceId: r.id, invoiceNumber: r.invoice_number, detail: r.journal_entry_id ? `entry does not balance: debits ${r.debits}, credits ${r.credits}` : "approved with no ledger entry" })),
     held_means_not_posted: heldButPosted.map((r) => ({ invoiceId: r.id, invoiceNumber: r.invoice_number, detail: `'${r.status}' but its ledger entry is posted` })),
-    bank_change_holds_payment: paidThroughBankHold.map((r) => ({ invoiceId: r.id, invoiceNumber: r.invoice_number, detail: `paid while the new bank account's check is '${r.status}'` })),
+    bank_change_holds_payment: paidThroughBankHold.map((r) => ({ invoiceId: r.id, invoiceNumber: r.invoice_number, detail: `paid while the vendor's new bank account is not cleared (check '${r.status}', or no second reviewer)` })),
     no_bill_paid_twice: duplicates,
     held_says_why: heldWithoutReason.map((r) => ({ invoiceId: r.id, invoiceNumber: r.invoice_number, detail: `held, but its recorded reason is '${r.reason_code ?? "none"}'` })),
   };

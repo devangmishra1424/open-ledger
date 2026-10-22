@@ -50,6 +50,11 @@ async function main() {
 
   if (ai && !process.env.GROQ_API_KEY) throw new Error("--ai needs GROQ_API_KEY: without it every AI review fails and the run measures nothing about the AI");
   if (!ai) process.env.GROQ_API_KEY = ""; // rules only: nothing in the run may reach the AI, even by a path not yet known
+  // Lab invoices are made up: a "needs review" alert for one must never reach the owner's Telegram.
+  process.env.TELEGRAM_BOT_TOKEN = "";
+  process.env.TELEGRAM_CHAT_ID = "";
+  // A run of some cases is not a lab run: saved, it would become the "latest" report and its pass would look like the whole suite's.
+  if (only && saveTo) throw new Error("--only cannot be combined with --save-to: a partial run is not saved as a lab report");
   const schema = assertLabSchema();
   const sql = getSql();
   await migrateSchema(sql);
