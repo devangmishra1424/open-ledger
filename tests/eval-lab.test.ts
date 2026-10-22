@@ -86,6 +86,28 @@ describe("the money rules", () => {
     expect(rules.credit_never_paid).toEqual([]);
   });
 
+  it("a vendor's new bank account holds every invoice received after the change, until it is cleared", async () => {
+    const TAG = `EB-${randomUUID().slice(0, 6)}`;
+    const make = (n: number, bankLast4?: string) => createBill({ vendorName: `${TAG} Vendor`, invoiceNumber: `${TAG}-${n}`, bankLast4, strictTotals: true, lines: [{ description: "Service", quantity: 1, unitPrice: 100 }] });
+    const pay = async (billId: string) => {
+      await sql`UPDATE vendor_bills SET status = 'paid' WHERE id = ${billId}`;
+      const id = randomUUID();
+      await sql`INSERT INTO payments (id, payment_date, total_amount) VALUES (${id}, ${new Date().toISOString().slice(0, 10)}, 100)`;
+      await sql`INSERT INTO payment_applications (id, payment_id, vendor_bill_id, applied_amount) VALUES (${randomUUID()}, ${id}, ${billId}, 100)`;
+    };
+    const before = await make(1, "1111");
+    const changed = await make(2, "2222"); // opens the review
+    const later = await make(3); // names no account: still the same vendor, still held
+    for (const b of [before, changed, later]) await pay(b.billId);
+    const flagged = async () => (await checkMoneyRules([before.billId, changed.billId, later.billId])).find((r) => r.key === "bank_change_holds_payment")!.breaches.map((b) => b.invoiceNumber).sort();
+
+    expect(await flagged()).toEqual([`${TAG}-2`, `${TAG}-3`]); // the one before the change may have gone to the old account
+    await sql`UPDATE vendor_bank_change_reviews SET status = 'callback_confirmed' WHERE source_invoice_id = ${changed.billId}`;
+    expect(await flagged()).toEqual([`${TAG}-2`, `${TAG}-3`]); // a confirmed callback alone does not clear it: a second reviewer must sign
+    await sql`UPDATE vendor_bank_change_reviews SET second_reviewer_name = 'Sam' WHERE source_invoice_id = ${changed.billId}`;
+    expect(await flagged()).toEqual([]);
+  });
+
   it("an empty set is checked without touching the database, and every rule is still listed", async () => {
     expect((await checkMoneyRules([])).map((r) => r.breaches.length)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
   });

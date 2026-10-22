@@ -37,6 +37,55 @@ const MORE_TITLES: Record<string, string> = {
 export const REASON_WORDS: Record<string, string> = { ...TITLE, ...MORE_TITLES };
 export const reasonWords = (code: string) => REASON_WORDS[code] ?? code;
 
+export interface InvoicePath {
+  id: string;
+  journey: "credit" | "no_po" | "ordered" | "ordered_not_received";
+  validated: boolean | null;
+  matchedClean: boolean | null;
+  /** Its current decision (after any re-check) approved it, with no person involved. */
+  autoApproved: boolean;
+  /** Any decision on it, including one a re-check later replaced, held it for a person. */
+  heldEver: boolean;
+  personDecided: string | null;
+  ended: "approved" | "held" | "rejected" | "inProgress";
+  machineMs: number;
+  waitMs: number | null;
+  found: string[];
+}
+
+/**
+ * Where one invoice went, from its decisions in recorded order (`decisions`, all of them, including ones a re-check
+ * superseded). The current outcome reads the live decisions only: an invoice held, then approved when a re-check found
+ * its delivery, was approved without a person. "Held" reads them all: it was held once. Pure.
+ */
+export function invoicePath(b: Row, decisions: Row[]): InvoicePath {
+  const live = decisions.filter((d) => !d.superseded_by_id);
+  const lastLive = (node: string) => [...live].reverse().find((d) => d.node_id === node);
+  const claimsOf = (d: Row | undefined): Array<{ text: string; tag: string }> => (d?.claims ? JSON.parse(d.claims) : []);
+  const ms = (d: Row) => (d.ended_at ? new Date(d.ended_at).getTime() - new Date(d.started_at).getTime() : NaN);
+  const validate = lastLive("validate");
+  const match = lastLive("match");
+  const policy = lastLive("policy");
+  const firstHuman = decisions.find((d) => d.node_id === "human_review" && d.action_taken !== "human_contested");
+  const heldAudit = decisions.find((d) => d.node_id === "audit" && d.action_taken !== "auto_approve" && !["no_payment", "paid_less_credit", "error", "payment_failed"].includes(d.action_taken));
+  const machine = decisions.filter((d) => d.node_id !== "human_review").map(ms).filter(Number.isFinite);
+  const found = [...new Set(claimsOf(match).map((c) => /^(EXC-[A-Z_]+): /.exec(c.text)?.[1]).filter((c): c is string => Boolean(c)))];
+  if (validate && validate.action_taken !== "pass" && validate.reason_code) found.unshift(validate.reason_code);
+  return {
+    id: b.id,
+    journey: b.invoice_type === "credit_memo" ? "credit" : !b.po_id ? "no_po" : b.has_receipt ? "ordered" : "ordered_not_received",
+    validated: validate ? validate.action_taken === "pass" : null,
+    matchedClean: match ? match.action_taken === "auto_approve" : null,
+    autoApproved: policy?.action_taken === "auto_approve" && !firstHuman,
+    heldEver: decisions.some((d) => d.node_id === "policy" && d.action_taken !== "auto_approve"),
+    personDecided: firstHuman?.action_taken ?? null,
+    ended: b.status === "void" ? "rejected" : b.status === "posted" || b.status === "paid" ? "approved" : b.status === "processing" ? "inProgress" : "held",
+    machineMs: machine.reduce((s, x) => s + x, 0),
+    waitMs: heldAudit?.ended_at && firstHuman ? new Date(firstHuman.started_at).getTime() - new Date(heldAudit.ended_at).getTime() : null,
+    found,
+  };
+}
+
 /** Validated at the edge (the API route): `from` and `to` are YYYY-MM-DD with from <= to. */
 export async function buildFieldReport(opts: { from: string; to: string; targets?: Targets; codeVersion?: string | null; now?: Date }): Promise<EvalReport> {
   if (!ISO_DATE.test(opts.from) || !ISO_DATE.test(opts.to) || opts.from > opts.to) throw new Error(`buildFieldReport: bad period ${opts.from}..${opts.to}`);
@@ -60,38 +109,12 @@ export async function buildFieldReport(opts: { from: string; to: string; targets
     FROM decisions WHERE invoice_id IN ${sql(ids)} ORDER BY seq`;
   const byBill = new Map<string, Row[]>();
   for (const d of decisions) byBill.set(d.invoice_id, [...(byBill.get(d.invoice_id) ?? []), d]);
-  const live = (id: string) => (byBill.get(id) ?? []).filter((d) => !d.superseded_by_id);
-  const lastOf = (id: string, node: string) => [...live(id)].reverse().find((d) => d.node_id === node);
-  const firstOf = (id: string, node: string) => (byBill.get(id) ?? []).find((d) => d.node_id === node);
+  const lastOf = (id: string, node: string) => [...(byBill.get(id) ?? [])].reverse().find((d) => d.node_id === node && !d.superseded_by_id);
   const claimsOf = (d: Row | undefined): Array<{ text: string; tag: string }> => (d?.claims ? JSON.parse(d.claims) : []);
   const ms = (d: Row) => (d.ended_at ? new Date(d.ended_at).getTime() - new Date(d.started_at).getTime() : NaN);
 
   // --- per invoice: where it went ---
-  interface Path { id: string; journey: string; validated: boolean | null; matchedClean: boolean | null; autoApproved: boolean; heldEver: boolean; personDecided: string | null; ended: "approved" | "held" | "rejected" | "inProgress"; machineMs: number; waitMs: number | null; found: string[] }
-  const paths: Path[] = bills.map((b) => {
-    const validate = lastOf(b.id, "validate");
-    const match = lastOf(b.id, "match");
-    const policy = firstOf(b.id, "policy");
-    const human = (byBill.get(b.id) ?? []).filter((d) => d.node_id === "human_review" && d.action_taken !== "human_contested");
-    const firstHuman = human[0];
-    const heldAudit = (byBill.get(b.id) ?? []).find((d) => d.node_id === "audit" && d.action_taken !== "auto_approve" && !["no_payment", "paid_less_credit", "error", "payment_failed"].includes(d.action_taken));
-    const machine = (byBill.get(b.id) ?? []).filter((d) => d.node_id !== "human_review").map(ms).filter(Number.isFinite);
-    const found = [...new Set(claimsOf(match).map((c) => /^(EXC-[A-Z_]+): /.exec(c.text)?.[1]).filter((c): c is string => Boolean(c)))];
-    if (validate && validate.action_taken !== "pass" && validate.reason_code) found.unshift(validate.reason_code);
-    return {
-      id: b.id,
-      journey: b.invoice_type === "credit_memo" ? "credit" : !b.po_id ? "no_po" : b.has_receipt ? "ordered" : "ordered_not_received",
-      validated: validate ? validate.action_taken === "pass" : null,
-      matchedClean: match ? match.action_taken === "auto_approve" : null,
-      autoApproved: policy?.action_taken === "auto_approve",
-      heldEver: Boolean(policy && policy.action_taken !== "auto_approve"),
-      personDecided: firstHuman?.action_taken ?? null,
-      ended: b.status === "void" ? "rejected" : b.status === "posted" || b.status === "paid" ? "approved" : b.status === "processing" ? "inProgress" : "held",
-      machineMs: machine.reduce((s, x) => s + x, 0),
-      waitMs: heldAudit?.ended_at && firstHuman ? new Date(firstHuman.started_at).getTime() - new Date(heldAudit.ended_at).getTime() : null,
-      found,
-    };
-  });
+  const paths = bills.map((b) => invoicePath(b, byBill.get(b.id) ?? []));
 
   // --- money rules, stuck invoices, the record's own integrity ---
   const ruleResults = await checkMoneyRules(ids);
@@ -240,7 +263,7 @@ export async function buildFieldReport(opts: { from: string; to: string; targets
   const caveats = [
     "Real invoices carry no right answers, so this report cannot say which decisions were wrong; the lab run does that. It reports what the record shows.",
     "'Held, then approved by a person' counts holds a person overruled. Some of those holds were still worth a look, so read it as an upper bound on unneeded holds.",
-    "Machine time adds up the recorded duration of each automatic step; it leaves out time spent waiting for a person.",
+    "Machine time adds up the recorded duration of every automatic step on the invoice, including re-checks and re-reviews; it leaves out time spent waiting for a person.",
     "Days in the period are UTC days (05:30 IST to 05:30 IST the next day).",
   ];
   if (truncated) caveats.unshift(`Only the newest ${MAX_FIELD_INVOICES} invoices of the period are included. Choose a shorter period for the rest.`);

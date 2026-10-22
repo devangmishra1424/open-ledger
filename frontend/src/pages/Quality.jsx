@@ -157,7 +157,7 @@ function ReportView({ report: r, titles = {}, linkInvoices = false }) {
         </table>
       </Section>
 
-      {r.change && <Change change={r.change} />}
+      {r.change && <Change change={r.change} targets={r.targets} />}
 
       <Section title="Money" hint="Rules money must always obey, checked in the database itself, not by re-running the code that should obey them.">
         <div className="vb-kpis">
@@ -279,13 +279,14 @@ function Kpi({ label, value, sub, bad }) {
   );
 }
 
-function Change({ change }) {
+function Change({ change, targets }) {
+  const label = (key) => targets.find((t) => t.key === key)?.label ?? key.replace(/_/g, ' ');
   const nothing = change.targets.length === 0 && change.newlyFailing.length === 0 && change.newlyPassing.length === 0;
   return (
     <Section title="Since the last saved report" hint={`Compared with the report saved ${when(change.previousAt)}.`}>
       {nothing && <p className="vb-muted" style={{ margin: 0 }}>No change in any target.</p>}
       <ul style={{ margin: 0, paddingLeft: 18 }}>
-        {change.targets.map((t) => <li key={t.key}>{t.key.replace(/_/g, ' ')}: {t.before} → <b>{t.now}</b></li>)}
+        {change.targets.map((t) => <li key={t.key}>{label(t.key)}: {t.before} → <b>{t.now}</b></li>)}
         {change.newlyFailing.length > 0 && <li className="vb-quality-bad">Now failing: {change.newlyFailing.join(', ')}</li>}
         {change.newlyPassing.length > 0 && <li>Now passing: {change.newlyPassing.join(', ')}</li>}
       </ul>
