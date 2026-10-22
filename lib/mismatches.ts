@@ -43,7 +43,7 @@ export interface MismatchInput {
 const FINDING_LINE = /^(EXC-[A-Z_]+|R99_AGENT_ERROR|CLEAN_MATCH|POLICY_LIMIT|INVESTIGATOR_HOLD):\s*([a-z_0-9]+)$/;
 
 /** A title for a finding whose figures could not be shown (an older record nothing could be worked out for). */
-const TITLE: Record<string, string> = {
+export const TITLE: Record<string, string> = {
   "EXC-PRICE_VAR": "Price differs from the order",
   "EXC-QTY_VAR": "Billed for more than was delivered",
   "EXC-UNMATCHED_LINE": "Billed for things not on the order",
@@ -135,7 +135,9 @@ function gateMismatch(check: string, reason: string): MismatchView | null {
   const ocr = /OCR confidence (\d+)%/.exec(reason)?.[1];
   const plain: Record<string, { code: string; title: string; point: FactPoint }> = {
     readability: { code: "EXC-LAYOUT", title: TITLE["EXC-LAYOUT"], point: { source: "records", label: "How sure the reader was", value: ocr ? `${ocr}%; at least 85% is needed` : reason, wrong: true } },
-    duplicate: { code: "EXC-DUPLICATE", title: TITLE["EXC-DUPLICATE"], point: { source: "records", label: "On file", value: "This vendor already sent an invoice with this number", wrong: true } },
+    duplicate: reason.startsWith("Looks like")
+      ? { code: "EXC-DUPLICATE", title: "Looks like one already received", point: { source: "records", label: "On file", value: reason.replace(/^Looks like invoice (\S+) already on file: /, "Invoice $1: "), wrong: true } }
+      : { code: "EXC-DUPLICATE", title: TITLE["EXC-DUPLICATE"], point: { source: "records", label: "On file", value: "This vendor already sent an invoice with this number", wrong: true } },
     vendor_status: { code: "VENDOR_FLAGGED", title: "The vendor is flagged", point: { source: "records", label: "Vendor", value: "Flagged: nothing is processed automatically until it is cleared", wrong: true } },
     currency: { code: "EXC-CURRENCY", title: "Currency not supported", point: { source: "invoice", label: "Currency", value: reason.replace(/^Currency /, ""), wrong: true } },
     invoice_date: { code: "INVOICE_DATE", title: "Invoice date out of range", point: { source: "invoice", label: "Invoice date", value: reason.replace(/^Invoice date /, ""), wrong: true } },

@@ -52,6 +52,8 @@ export interface PreMatchInput {
   };
   vendor: { trustTier: "trusted" | "new" | "flagged" };
   duplicateExists: boolean; // caller already checked vendor_id + invoice_number
+  /** Set when another invoice on file looks like this one (lib/matching/duplicate-key.ts): held, not rejected. */
+  nearDuplicate?: { invoiceNumber: string; why: string } | null;
   today: string; // ISO date string, injected for deterministic testing rather than Date.now()
 }
 
@@ -86,7 +88,18 @@ function checkReadability(invoice: PreMatchInput["invoice"]): PreMatchFinding {
   };
 }
 
-function checkDuplicate(duplicateExists: boolean): PreMatchFinding {
+function checkDuplicate(duplicateExists: boolean, nearDuplicate?: PreMatchInput["nearDuplicate"]): PreMatchFinding {
+  if (!duplicateExists && nearDuplicate) {
+    // Spec §2 EXC-05's fuzzy duplicate. Blocked for a person rather than auto-rejected: unlike an exact number match,
+    // a near match can be a genuine second bill, and voiding it would lose it.
+    return {
+      check: "duplicate",
+      passed: false,
+      action: "block",
+      exceptionCode: "EXC-DUPLICATE",
+      reason: `Looks like invoice ${nearDuplicate.invoiceNumber} already on file: ${nearDuplicate.why}`,
+    };
+  }
   if (!duplicateExists) return { check: "duplicate", passed: true };
   return {
     check: "duplicate",
@@ -144,10 +157,20 @@ function checkMandatoryFields(present: boolean): PreMatchFinding {
   };
 }
 
+/**
+ * The reason code a failed check is recorded under. Two checks are not in the spec's exception taxonomy (a flagged
+ * vendor, an invoice date out of range); without their own code a held invoice's reason read "Clean Match".
+ */
+const GATE_REASON: Partial<Record<PreMatchCheck, string>> = { invoice_date: "INVOICE_DATE", vendor_status: "VENDOR_FLAGGED" };
+
+export function gateReasonCode(finding: PreMatchFinding): string | undefined {
+  return finding.exceptionCode ?? GATE_REASON[finding.check];
+}
+
 export function runPreMatchValidation(input: PreMatchInput): PreMatchResult {
   const findings: PreMatchFinding[] = [
     checkReadability(input.invoice),
-    checkDuplicate(input.duplicateExists),
+    checkDuplicate(input.duplicateExists, input.nearDuplicate),
     checkVendorStatus(input.vendor),
     checkCurrency(input.invoice.currency),
     checkInvoiceDate(input.invoice.invoiceDate, input.today),

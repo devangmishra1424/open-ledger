@@ -18,7 +18,8 @@
     "bench:llm": "tsx --env-file=.env scripts/llm-bench.ts",
     "typecheck": "tsc --noEmit",
     "reader": "node scripts/run-reader.cjs",
-    "eval:documents": "tsx --env-file=.env eval/documents/run.ts"
+    "eval:documents": "tsx --env-file=.env eval/documents/run.ts",
+    "eval:decisions": "tsx --env-file=.env eval/decisions/run.ts"
   },
   "dependencies": {
     "@types/pdfkit": "^0.17.6",

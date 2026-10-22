@@ -29,7 +29,8 @@ export type Zone = "green" | "yellow" | "red";
 
 function pctVariance(actual: number, expected: number): number {
   if (expected === 0) return actual === 0 ? 0 : Infinity;
-  return Math.abs(actual - expected) / Math.abs(expected);
+  // Rounded like decision-matrix.ratio(): exactly 2% must be 2%, not 2.0000000000000018% (spec §4.5 tie-breaking).
+  return Math.round((Math.abs(actual - expected) / Math.abs(expected)) * 1e9) / 1e9;
 }
 
 /** Unit price variance: pure percentage against the PO's unit price. */
@@ -75,7 +76,7 @@ export function classifyGrandTotalVariance(invoiceGrandTotal: number, poTotalAmo
 
 /** Tax rate variance: absolute percentage-point difference, not a relative percentage. */
 export function classifyTaxRateVariance(invoiceTaxRate: number, expectedTaxRate: number): { zone: Zone; varianceAbs: number } {
-  const varianceAbs = Math.abs(invoiceTaxRate - expectedTaxRate);
+  const varianceAbs = Math.round(Math.abs(invoiceTaxRate - expectedTaxRate) * 1e9) / 1e9;
   if (varianceAbs <= 0.005) return { zone: "green", varianceAbs };
   if (varianceAbs <= 0.02) return { zone: "yellow", varianceAbs };
   return { zone: "red", varianceAbs };

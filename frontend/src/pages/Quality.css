@@ -1,0 +1,40 @@
+/* Quality page (Quality.jsx): the evaluation report. Uses the workbench tokens; prints as a plain document. */
+.vb-quality-bar { gap: 10px; flex-wrap: wrap; align-items: flex-end; margin: 12px 0; }
+.vb-quality-bar .vb-btn { white-space: nowrap; }
+.vb-quality-report { display: flex; flex-direction: column; gap: 14px; }
+.vb-quality-section { overflow-x: auto; }
+.vb-quality-section .vb-table { margin-top: 4px; min-width: 520px; }
+.vb-quality-bad { color: var(--vb-danger); font-weight: 600; }
+
+.vb-quality-rules { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.vb-quality-rules > li > span { display: inline-block; width: 1.2em; color: var(--vb-accent); font-weight: 700; }
+.vb-quality-rules > li.broken > span,
+.vb-quality-rules > li.broken b { color: var(--vb-danger); }
+.vb-quality-rules ul { margin: 4px 0 0 1.2em; padding-left: 14px; }
+
+.vb-quality-journeys { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.vb-quality-journey { border: 1px solid var(--vb-border-soft); border-radius: var(--vb-radius-sm); padding: 10px 12px; }
+.vb-quality-step { display: grid; grid-template-columns: 150px minmax(0, 1fr) 32px; align-items: center; gap: 8px; margin-top: 6px; }
+.vb-quality-track { height: 8px; background: var(--vb-border-soft); border-radius: 4px; overflow: hidden; }
+.vb-quality-track > span { display: block; height: 100%; background: var(--vb-accent); border-radius: 4px; }
+
+.vb-quality-found { table-layout: fixed; min-width: 760px; }
+.vb-quality-found td { vertical-align: top; overflow-wrap: anywhere; }
+.vb-quality-ai { margin: 0; padding-left: 18px; line-height: 1.7; }
+
+@media (max-width: 640px) {
+  .vb-quality-step { grid-template-columns: 110px minmax(0, 1fr) 28px; }
+}
+
+/* Print / save as PDF: the report alone, dark text on white, no menus or buttons. */
+@media print {
+  .vb-side, .vb-top, .vb-noprint, .vb-toasts { display: none !important; }
+  .vb-app, .vb-main, .vb-content, .vb-page { display: block !important; margin: 0 !important; padding: 0 !important; background: #fff !important; }
+  body { background: #fff !important; color: #111 !important; }
+  .vb-quality .vb-card { background: #fff !important; color: #111 !important; border: 1px solid #ccc !important; box-shadow: none !important; break-inside: avoid; }
+  .vb-quality .vb-dim, .vb-quality .vb-muted, .vb-quality .vb-kpi-label, .vb-quality .vb-kpi-sub { color: #555 !important; }
+  .vb-quality .vb-table th, .vb-quality .vb-table td { color: #111 !important; border-color: #ddd !important; }
+  .vb-quality a { color: #111 !important; text-decoration: none; }
+  .vb-quality-track { background: #eee !important; }
+  .vb-quality-track > span { background: #555 !important; }
+}

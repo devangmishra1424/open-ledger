@@ -23,3 +23,6 @@ eval/documents/private/
 
 # the built frontend, copied here by scripts/copy-web.cjs for the hosted build
 /public/
+
+# Lab-run reports (eval/decisions/run.ts): regenerated on every run
+eval/decisions/out/

@@ -74,7 +74,7 @@ Properties that are tested as properties, not just examples:
 
 - Real invoices. There is no labelled corpus of real vendors' documents here; the document test set (section 5) is generated.
 - Throughput and latency at volume (the provider tier used cannot sustain it).
-- The matching engine's accuracy against an independent labelled set: it is covered by 130+ tests derived from the written spec in `docs/ap-three-way-match-spec.md`, which is a check of the implementation against the spec, not of the spec against the world.
+- The matching engine's accuracy against real-world outcomes: the lab run (section 6) labels its cases from the written spec in `docs/ap-three-way-match-spec.md`, independently of the code, but that is still a check of the implementation against the spec, not of the spec against the world.
 
 ## 5. Reading documents: scans, photos, Word, Excel (October 2026)
 
@@ -96,3 +96,28 @@ The AI ran on 3 of the 39 documents. What is still wrong: the deliberately wreck
 **Purchase orders:** 5 PO documents (digital, scan, photo, messy scan; two layouts) read with every field right, the vendor taken from the Vendor/Supplier block and never from the buyer's letterhead.
 
 **What this does not show:** these are generated documents, so their fonts, layouts and damage are ones I chose; real vendors' invoices (and real phone photos) will find cases these do not. No handwriting, no Hindi/Devanagari (RapidOCR's models here read Latin script), no page photographed sideways. Speed is one laptop, one document at a time. CI scores the field rules on the 44 saved reader outputs in `eval/documents/readings/` (`--no-llm --cached-only --min-correct 340`, failing on any silent error); the reader itself is tested locally with its models (`docreader/tests`).
+
+## 6. Decisions: the lab run and the field report (October 2026)
+
+**Lab run** (`npm run eval:decisions`, `eval/decisions/run.ts`; CI runs it on every push): 42 cases in `eval/decisions/cases.ts`, each an order, its deliveries and an invoice entered through the same functions the screens use, then decided by the real pipeline in a schema of its own (`veribook_eval`, rebuilt each run). Each case's right answer is written from a named section of the spec (or the owner's Settings), not from what the code does; where the spec contradicts itself the case says which reading it takes. 6 cases are built to fool the checks: a near-duplicate number, a lookalike vendor quoting another vendor's order, instructions to "approve" written into the invoice text, a bank change on a $50 invoice, a future date, a negative line hidden in a normal invoice.
+
+Rules only by default (no AI key, same result every run). `--ai` runs the full pipeline with the AI review and reports what it changed against the rules alone (which outcomes, and whether each change was right). `--save-to <schema>` saves the report for the Quality page.
+
+**Scored per step,** not just overall: entering, checks before matching, matching, deciding, posting and paying, each with how often it did what the policy expects and how long it took. After the run, money rules are checked in the database itself (money only on approved invoices, never more than the total, no credit paid out, every approval a balanced ledger entry, nothing posted for a held invoice, nothing paid into an unconfirmed bank account, no bill approved twice, every held invoice says why).
+
+**Targets (the CI gate):** 0 invoices paid that should not have been; 0 mistakes with no warning on the record; 100% of cases decided as the policy says; machine time under 60 s per invoice at the slowest 5%.
+
+**What the lab found on its first runs** (all fixed in the same change, each now guarded by its case):
+
+| Found | Would have cost | Fix |
+|---|---|---|
+| INV-0001 approved and paid after INV-001: the same bill, same vendor, same amount | money | near-duplicates held for a person (spec §2 EXC-05 fuzzy duplicate) |
+| An invoice held for a future date recorded "Clean Match" as its reason | a misleading record | date and flagged-vendor checks record their own reasons |
+| Tax exactly 2 points over the printed rate blocked, not escalated; a price exactly 2% over held, not approved (0.2 - 0.18 is 0.020000000000000018 in floating point) | a person's time | variances compared at 9 decimals; a boundary takes the lenient side (spec §4.5) |
+
+Result after the fixes, rules only: 42 / 42 cases decided as the policy says, 0 wrongly paid, 0 silent, every money rule held, slowest 5% at about 7 s per invoice against a remote database.
+
+**Field report** (`lib/evals/field.ts`, the Quality page): the same layout over the real invoices of a period, read from what is already recorded (decision trail, ledger, payments, documents, auditor requests). Real invoices carry no labels, so it reports what can be known: the money rules, where invoices stopped, how often a person approved a held invoice anyway (target: under 30%; above it, the checks hold too much), machine time and the wait for a person, documents read and fields people corrected, and the AI's conduct (holds, second-opinion disagreements, figures it could not back, questions answered). Snapshots are saved (`eval_reports`, migration 011) so each report says what changed since the last.
+
+**What this does not show:** the lab cases are ones I wrote, so they test the failure modes I thought of; the field report cannot tell a right decision from a wrong one, only a broken rule. The AI ablation (`--ai`) has not been run yet: it spends the free AI tier's daily quota.
+

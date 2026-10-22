@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Inbox as InboxIcon, ShieldCheck, Activity, SlidersHorizontal, Network, Plus, ClipboardList, LogOut } from 'lucide-react';
+import { Inbox as InboxIcon, ShieldCheck, Activity, SlidersHorizontal, Network, Plus, ClipboardList, LogOut, Gauge } from 'lucide-react';
 import { api } from '../services/api';
 import { useInvoices } from '../state/Invoices';
 import { useReviewer } from '../state/Reviewer';
@@ -15,6 +15,7 @@ const TITLES = {
   '/audit': ['Audit', 'Auditor requests and the tamper-evident decision trail'],
   '/pipeline': ['Pipeline', 'How each automated step is performing'],
   '/network': ['Network', 'Vendors around the pipeline'],
+  '/quality': ['Quality', 'How well VeriBook is deciding: targets, money safety, each step, and what testing found'],
   '/settings': ['Settings', 'Guardrails and how this system is configured'],
 };
 
@@ -54,6 +55,7 @@ export default function Shell() {
           <NavLink to="/app/audit" title="Audit: auditor evidence requests, and proof the decision trail is untouched" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><ShieldCheck size={18} /> <span className="vb-nav-label">Audit</span></NavLink>
           <NavLink to="/app/pipeline" title="Pipeline: the seven automatic steps and how each is performing" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Activity size={18} /> <span className="vb-nav-label">Pipeline</span></NavLink>
           <NavLink to="/app/network" title="Network: how vendors, the pipeline, payments and the ledger connect" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Network size={18} /> <span className="vb-nav-label">Network</span></NavLink>
+          <NavLink to="/app/quality" title="Quality: is VeriBook deciding well? Targets, money safety and each step, on real invoices and on the lab cases" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><Gauge size={18} /> <span className="vb-nav-label">Quality</span></NavLink>
           <NavLink to="/app/settings" title="Settings: the auto-approval limits, and how this system is configured" className={({ isActive }) => `vb-nav-link ${isActive ? 'active' : ''}`}><SlidersHorizontal size={18} /> <span className="vb-nav-label">Settings</span></NavLink>
         </div>
         <div className="vb-side-spacer" />
