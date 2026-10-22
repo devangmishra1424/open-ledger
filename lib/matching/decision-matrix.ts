@@ -103,6 +103,15 @@ export const DOLLAR_THRESHOLD_TABLE: Partial<Record<ExceptionCode, { upTo100: Ac
  * the spec's own wording so each function is directly traceable to its source paragraph.
  */
 
+/**
+ * A variance ratio rounded to 9 decimals before it is compared with a threshold. Without it, 20% charged against 18%
+ * is 0.020000000000000018 in floating point, "over 2%", and was blocked where the spec says escalate (found by the
+ * lab run). Spec §4.5: a variance exactly at a boundary takes the lenient side; 1e-9 is far below any real difference.
+ */
+export function ratio(x: number): number {
+  return Number.isFinite(x) ? Math.round(x * 1e9) / 1e9 : x;
+}
+
 export function evaluateNoPo(): Action {
   return "escalate_l2"; // §3.1: always Escalate L2, no dollar override table entry
 }
@@ -123,14 +132,14 @@ export function evaluatePriceVariance(variancePct: number, amountImpact: number)
   // this. Resolved as >= (inclusive on the block side): it matches the concrete worked
   // example, and it's the more conservative choice for a financial control (when a boundary
   // is ambiguous, escalate to the stricter action, not the more lenient one).
-  const pctRule: Action = variancePct >= 0.05 ? "block" : "escalate_l1"; // 2-5% OR <=$500 -> L1; >=5% OR >$500 -> Block
+  const pctRule: Action = ratio(variancePct) >= 0.05 ? "block" : "escalate_l1"; // 2-5% OR <=$500 -> L1; >=5% OR >$500 -> Block
   const dollarRule: Action = amountImpact > 500 ? "block" : pctRule;
   const combined = moreRestrictive(pctRule, dollarRule);
   return moreRestrictive(combined, dollarThresholdAction("EXC-PRICE_VAR", amountImpact) ?? combined);
 }
 
 export function evaluateQuantityVariance(variancePct: number, varianceUnits: number, amountImpact: number): Action {
-  const pctRule: Action = variancePct > 0.05 || varianceUnits > 2 ? "block" : "escalate_l1";
+  const pctRule: Action = ratio(variancePct) > 0.05 || varianceUnits > 2 ? "block" : "escalate_l1";
   return moreRestrictive(pctRule, dollarThresholdAction("EXC-QTY_VAR", amountImpact) ?? pctRule);
 }
 
@@ -177,12 +186,12 @@ export function evaluateCurrency(unsupported: boolean, rateVariancePct: number, 
   // precisely specified, internally-referenced source of truth, and the narrative example
   // appears to invent an unreferenced threshold — likely a writing error in the source spec,
   // not an intentional override. At 1.3% this implementation returns escalate_l2, not L1.
-  const pctRule: Action = rateVariancePct > 0.01 ? "escalate_l2" : "escalate_l1";
+  const pctRule: Action = ratio(rateVariancePct) > 0.01 ? "escalate_l2" : "escalate_l1";
   return moreRestrictive(pctRule, dollarThresholdAction("EXC-CURRENCY", amountImpact) ?? pctRule);
 }
 
 export function evaluateTaxVariance(rateDiffPct: number, amountDiff: number): Action {
-  const pctRule: Action = rateDiffPct > 0.02 || amountDiff > 100 ? "block" : "escalate_l1";
+  const pctRule: Action = ratio(rateDiffPct) > 0.02 || amountDiff > 100 ? "block" : "escalate_l1";
   return moreRestrictive(pctRule, dollarThresholdAction("EXC-TAX_VAR", amountDiff) ?? pctRule);
 }
 
@@ -196,7 +205,7 @@ export function evaluateFraudBank(): Action {
 
 /** ALGORITHMS.md §7 — new, not in the original 12-code spec file. */
 export function evaluateBlanketExceeded(overagePct: number): Action {
-  return overagePct > 0.1 ? "block" : "escalate_l2";
+  return ratio(overagePct) > 0.1 ? "block" : "escalate_l2";
 }
 
 export function evaluateUomMismatch(conversionPlausible: boolean): Action {

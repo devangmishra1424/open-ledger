@@ -13,6 +13,7 @@ import AuditTrail from './pages/AuditTrail';
 import Pipeline from './pages/Pipeline';
 import EcosystemMap from './pages/EcosystemMap';
 import SettingsPage from './pages/SettingsPage';
+import Quality from './pages/Quality';
 
 import './styles/workbench.css';
 
@@ -37,6 +38,7 @@ export default function App() {
               <Route path="audit" element={<AuditTrail />} />
               <Route path="pipeline" element={<Pipeline />} />
               <Route path="network" element={<EcosystemMap />} />
+              <Route path="quality" element={<Quality />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="*" element={<Navigate to="/app" replace />} />
             </Route>

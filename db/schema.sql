@@ -208,6 +208,15 @@ CREATE TABLE app_settings (
   erp_webhook_url TEXT,
   updated_at TEXT NOT NULL DEFAULT now()::text
 );
+-- Saved evaluation reports (lib/evals): a lab run of the labelled cases, or a field report over a period, kept so the
+-- Quality page can show what changed since the last one. The report itself is one JSON document (lib/evals/report.ts).
+CREATE TABLE eval_reports (
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('lab','field')), mode TEXT NOT NULL CHECK (mode IN ('rules','rules+ai','field')),
+  verdict TEXT NOT NULL CHECK (verdict IN ('pass','fail','not_enough_data')), summary TEXT NOT NULL,
+  period_from TEXT, period_to TEXT, code_version TEXT, created_by TEXT,
+  report JSONB NOT NULL, created_at TEXT NOT NULL DEFAULT now()::text
+);
+CREATE INDEX idx_eval_reports_kind_created ON eval_reports(kind, created_at DESC);
 CREATE INDEX idx_decisions_invoice ON decisions(invoice_id);
 CREATE INDEX idx_decisions_seq ON decisions(seq);
 CREATE INDEX idx_vendor_bills_vendor ON vendor_bills(vendor_id);

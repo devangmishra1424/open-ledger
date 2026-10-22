@@ -203,6 +203,10 @@ export const api = {
     a.click();
     URL.revokeObjectURL(url);
   },
+  // --- Quality: evaluation reports (lib/evals) ---
+  getQuality: (query) => request(`/quality?${new URLSearchParams(query)}`, { timeout: LONG_TIMEOUT_MS }),
+  saveQualitySnapshot: (period) => request('/quality/reports', { method: 'POST', body: period, timeout: LONG_TIMEOUT_MS }),
+  getQualityReport: (id) => request(`/quality/reports/${encodeURIComponent(id)}`),
   recordReceipt: (poId, receipt) => request(`/purchase-orders/${encodeURIComponent(poId)}/receipts`, { method: 'POST', body: receipt }),
 
   // --- Human decisions (reviewerName is required by the server: it is recorded in the hash chain) ---

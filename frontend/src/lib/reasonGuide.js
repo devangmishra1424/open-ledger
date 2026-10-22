@@ -119,6 +119,23 @@ export const REASON_GUIDE = {
     usually: 'Approve if every field matches the original; otherwise reject it.',
     engine: 'Always blocked: nothing read with low confidence is paid without a person.',
   },
+  INVOICE_DATE: {
+    means: 'The invoice is dated in the future, or more than a year ago.',
+    why: 'A future date can slip a bill into a later payment run; a very old one may already have been paid or be out of time.',
+    check: [
+      'Compare the date on this page with the original under Source document: was it misread?',
+      'For an old invoice, look on the Invoices page for one already paid with the same amount.',
+    ],
+    usually: 'If the date was misread, correct it and use "Check it again". Otherwise approve it if the bill is genuine, or reject it.',
+    engine: 'Always held for a person before any matching.',
+  },
+  VENDOR_FLAGGED: {
+    means: 'This vendor is flagged, so nothing from it is processed automatically.',
+    why: 'A flag means someone saw a reason not to trust this vendor’s bills without a look.',
+    check: ['Read the billed lines and the original under Source document.'],
+    usually: 'Approve it only if you know why the vendor was flagged and the bill is genuine; otherwise reject it.',
+    engine: 'Always held for a person before any matching.',
+  },
   'EXC-FRAUD_BANK': {
     means: 'The vendor’s bank account details changed recently.',
     why: 'Redirecting payments to a new account is the most common way payment fraud works. A real vendor will not mind a phone call.',

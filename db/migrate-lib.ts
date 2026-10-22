@@ -7,7 +7,7 @@ type Sql = ReturnType<typeof postgres>;
 
 /** Drop order for the default (`public`) schema, where we can't just drop the schema itself. */
 export const TABLES_IN_DROP_ORDER = [
-  "app_settings", "pbc_evidence_files", "pbc_requests", "reviews", "decisions", "reason_codes",
+  "eval_reports", "app_settings", "pbc_evidence_files", "pbc_requests", "reviews", "decisions", "reason_codes",
   "credit_applications", "payment_applications", "payments", "vendor_bill_lines", "vendor_bills",
   "journal_entry_lines", "journal_entries",
   "goods_receipt_lines", "goods_receipts", "purchase_order_lines", "purchase_orders", "source_documents",
@@ -67,6 +67,8 @@ const REASON_CODES: Array<[string, string, string]> = [
   ["EXC-UNMATCHED_LINE", "Line Not on Purchase Order", "One or more invoice lines match no line on the referenced purchase order, for example an added fee or an item that was never ordered."],
   ["POLICY_LIMIT", "Auto-Approval Limit", "A clean match was held for a person because it exceeds the Settings amount limit or the Investigator's confidence is below the Settings threshold."],
   ["INVESTIGATOR_HOLD", "Held by AI Reviewer", "The rules found a clean match, but the Investigator recommended a stricter outcome, or wrote free text instead of one of the system's routes. An AI opinion can only tighten a decision, never loosen it, so a person reviews this invoice."],
+  ["INVOICE_DATE", "Invoice Date Out of Range", "The invoice date is in the future or more than a year old: held for a person before any matching (spec §1.2, anti-fraud)."],
+  ["VENDOR_FLAGGED", "Vendor Flagged", "The vendor is flagged: nothing from it is processed automatically until a person clears it."],
   ["R99_AGENT_ERROR", "Agent Error", "A pipeline stage failed after its bounded retry — surfaced for human attention, never silently dropped."],
 ];
 

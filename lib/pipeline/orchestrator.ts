@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { getSql } from "@/db/client";
 import { writeDecision } from "@/lib/ledger/decisions";
-import { runPreMatchValidation, type PreMatchInput, type PreMatchResult } from "@/lib/matching/pre-match-validation";
+import { gateReasonCode, runPreMatchValidation, type PreMatchInput, type PreMatchResult } from "@/lib/matching/pre-match-validation";
+import { nearDuplicateOf, type DuplicateCandidate } from "@/lib/matching/duplicate-key";
 import { runMatchStage, type MatchStageResult } from "@/lib/pipeline/match-stage";
 import { moreRestrictive, parseRecommendedAction, type Action, type CombinedDecision } from "@/lib/matching/decision-matrix";
 import { investigate, type InvestigationSubmission } from "@/lib/agent/investigator";
@@ -185,6 +186,7 @@ export async function runValidateStage(vendorBillId: string, parentDecisionId?: 
   const vendor = vendorRows[0];
   const lineCountRows = await sql`SELECT COUNT(*)::int as n FROM vendor_bill_lines WHERE vendor_bill_id = ${vendorBillId}`;
   const dupRows = await sql`SELECT id FROM vendor_bills WHERE vendor_id = ${bill.vendor_id} AND invoice_number = ${bill.invoice_number} AND id != ${bill.id}`;
+  const nearDuplicate = dupRows.length > 0 ? null : await findNearDuplicate(bill);
 
   // Was this invoice read off a document (extractor output + its confidence) or handed to us
   // structured? The extract stage's own decision is the source of truth: "parsed" means
@@ -205,6 +207,7 @@ export async function runValidateStage(vendorBillId: string, parentDecisionId?: 
     },
     vendor: { trustTier: vendor.trust_tier },
     duplicateExists: dupRows.length > 0,
+    nearDuplicate,
     today: new Date().toISOString().slice(0, 10),
   };
 
@@ -218,13 +221,31 @@ export async function runValidateStage(vendorBillId: string, parentDecisionId?: 
     invoiceId: vendorBillId, nodeId: "validate", agentId: "deterministic-validator",
     parentDecisionId, startedAt, endedAt: new Date().toISOString(),
     actionTaken: result.passed ? "pass" : result.blockingFinding!.action,
-    reasonCode: result.blockingFinding?.exceptionCode,
+    reasonCode: result.blockingFinding ? gateReasonCode(result.blockingFinding) : undefined,
     claims: [...leadClaims, ...claims],
     idempotencyKey: idemKey(vendorBillId, "validate", recon ? `:${recon.attemptTag}` : ""),
     ...rerunFields(recon),
   });
   await publish(d);
   return { decision: d, result };
+}
+
+/** Candidates for spec §2 EXC-05's fuzzy duplicate: the vendor's other invoices of the same type within $1 of this one. */
+const NEAR_DUPLICATE_CANDIDATES = 50;
+
+async function findNearDuplicate(bill: any): Promise<{ invoiceNumber: string; why: string } | null> {
+  const sql = getSql();
+  const rows = await sql`
+    SELECT id, invoice_number, invoice_date, total_amount FROM vendor_bills
+    WHERE vendor_id = ${bill.vendor_id} AND id != ${bill.id} AND invoice_type = ${bill.invoice_type}
+      AND abs(total_amount - ${bill.total_amount}) <= 1
+    ORDER BY received_at DESC LIMIT ${NEAR_DUPLICATE_CANDIDATES}`;
+  if (rows.length === 0) return null;
+  const ids = [bill.id, ...rows.map((r) => r.id)];
+  const lines = await sql`SELECT vendor_bill_id, description, qty_invoiced, unit_price FROM vendor_bill_lines WHERE vendor_bill_id IN ${sql(ids)}`;
+  const linesOf = (id: string) => lines.filter((l) => l.vendor_bill_id === id).map((l) => ({ description: l.description, qty: Number(l.qty_invoiced), unitPrice: Number(l.unit_price) }));
+  const asCandidate = (r: any): DuplicateCandidate => ({ invoiceNumber: r.invoice_number, invoiceDate: r.invoice_date, total: Number(r.total_amount), lines: linesOf(r.id) });
+  return nearDuplicateOf(asCandidate(bill), rows.map(asCandidate));
 }
 
 // --- match ---
@@ -460,7 +481,7 @@ export async function runPolicyStage(params: {
   investigatorConfidence?: number;
   /** The Investigator's recommended action; it can only tighten the outcome, and text that is not an action holds the invoice for a person. */
   investigatorRecommendation?: string | null;
-  /** Set when the stop is NOT a finding about the invoice but a failure of the system itself (R99_AGENT_ERROR). */
+  /** Set when the reason is not an exception code: a failure of the system itself (R99_AGENT_ERROR), or a check outside the exception taxonomy (INVOICE_DATE, VENDOR_FLAGGED). */
   reasonCodeOverride?: string;
   parentDecisionId?: string;
   recon?: ReconsiderationInput;
@@ -661,7 +682,9 @@ async function runFromValidate(vendorBillId: string, extractDecisionId: string, 
     // not just the 4 codes decision-matrix.ts's own CASCADE_STOP_CODES formally names.
     const blocking = validateResult.blockingFinding!;
     const combined = asCascadedDecision(blocking.action as Action, blocking.exceptionCode ?? null);
-    const policyDecision = await runPolicyStage({ vendorBillId, combined, parentDecisionId: validateDecision.id, recon });
+    // A check outside the exception taxonomy (date, flagged vendor) still names itself, never "Clean Match".
+    const reasonCodeOverride = blocking.exceptionCode ? undefined : gateReasonCode(blocking);
+    const policyDecision = await runPolicyStage({ vendorBillId, combined, reasonCodeOverride, parentDecisionId: validateDecision.id, recon });
     await runAuditStage(vendorBillId, policyDecision, recon);
     return;
   }
