@@ -109,6 +109,8 @@ export interface AiValue {
   aiExplanations: number;
   challengesAnswered: number;
   challengesUnanswered: number;
+  /** AI steps that failed (e.g. the provider's daily quota ran out): the invoice was held for a person, as designed. Not an AI judgement. */
+  aiFailed: number;
   notes: string[];
 }
 

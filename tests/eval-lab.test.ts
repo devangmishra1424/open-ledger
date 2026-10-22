@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { getSql } from "@/db/client";
 import { createBill } from "@/lib/bills";
-import { assertLabSchema, runLab, type LabCase } from "@/lib/evals/lab";
+import { aiHonesty, assertLabSchema, runLab, type LabCase } from "@/lib/evals/lab";
+import { writeDecision } from "@/lib/ledger/decisions";
 import { checkMoneyRules } from "@/lib/evals/money-rules";
 import { CASES } from "../eval/decisions/cases";
 import { GET as quality } from "@/app/api/quality/route";
@@ -81,6 +82,17 @@ describe("the money rules", () => {
 
   it("an empty set is checked without touching the database, and every rule is still listed", async () => {
     expect((await checkMoneyRules([])).map((r) => r.breaches.length)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+});
+
+describe("the AI's record", () => {
+  it("a failed AI step (the free quota ran out) is counted as a failure, never as an AI explanation or judgement", async () => {
+    const TAG = `EA-${randomUUID().slice(0, 6)}`;
+    const bill = await createBill({ vendorName: `${TAG} Vendor`, invoiceNumber: `${TAG}-1`, strictTotals: true, lines: [{ description: "Service", quantity: 1, unitPrice: 100 }] });
+    const now = new Date().toISOString();
+    await writeDecision({ invoiceId: bill.billId, nodeId: "investigate", agentId: "investigator", model: "openai/gpt-oss-120b", startedAt: now, endedAt: now, actionTaken: "error", reasonCode: "R99_AGENT_ERROR",
+      claims: [{ text: "Investigator failed: The AI provider's daily usage limit was reached.", tag: "grounded" }], idempotencyKey: `${TAG}-inv` });
+    expect(await aiHonesty([bill.billId])).toMatchObject({ aiFailed: 1, aiExplanations: 0, aiHolds: 0 });
   });
 });
 

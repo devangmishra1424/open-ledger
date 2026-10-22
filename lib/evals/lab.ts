@@ -410,23 +410,25 @@ async function buildLabReport(
   const ai: AiValue = {
     changedOutcome: null, changedRight: null, changedWrong: null,
     aiHolds: 0, aiHoldsPersonRejected: 0, aiHoldsPersonApproved: 0, verifierDisagreed: 0,
-    uncheckedFigureNotes: 0, aiExplanations: 0, challengesAnswered: 0, challengesUnanswered: 0,
+    uncheckedFigureNotes: 0, aiExplanations: 0, challengesAnswered: 0, challengesUnanswered: 0, aiFailed: 0,
     notes: opts.ai ? [] : ["Rules-only run: the AI review was not run. Run with --ai to measure what it changes."],
   };
   if (opts.ai) {
-    const changed = results.filter((r) => r.rulesOutcome && r.got.outcome !== r.rulesOutcome && !r.error);
+    // A case whose AI step failed (R99, e.g. quota) was held by the failure, not by the AI's judgement: not a change.
+    const changed = results.filter((r) => r.rulesOutcome && r.got.outcome !== r.rulesOutcome && !r.error && r.got.reason !== "R99_AGENT_ERROR");
     ai.changedOutcome = changed.length;
     ai.changedRight = changed.filter((r) => r.got.outcome === r.expected.outcome).length;
     ai.changedWrong = changed.filter((r) => r.got.outcome !== r.expected.outcome).length;
     Object.assign(ai, await aiHonesty(billIds));
-    if (results.some((r) => r.got.reason === "R99_AGENT_ERROR")) {
-      ai.notes.push("Some AI calls failed (R99_AGENT_ERROR): those invoices were held for a person, as designed. Check the AI quota before reading the AI numbers.");
+    const failed = results.filter((r) => r.got.reason === "R99_AGENT_ERROR").length;
+    if (failed > 0) {
+      ai.notes.push(`${failed} case(s) could not be judged by the AI because its call failed (usually the free tier's daily quota): each was held for a person, as designed, and is not counted as an AI change. Re-run them with --only once the quota resets.`);
     }
   }
 
   const failures: FailureItem[] = results.filter((r) => !(r.outcomeOk && r.reasonOk) || r.error || silent.has(r.id)).map((r) => ({
     id: r.id, title: r.title, invoiceId: r.invoiceId ?? undefined,
-    kind: r.error ? "crash" : r.got.outcome === "approved" && r.expected.outcome !== "approved" ? "wrongly_paid"
+    kind: r.error || r.got.reason === "R99_AGENT_ERROR" ? "crash" : r.got.outcome === "approved" && r.expected.outcome !== "approved" ? "wrongly_paid"
       : r.expected.outcome === "approved" && r.got.outcome !== "approved" ? "wrongly_held"
       : !r.outcomeOk ? "wrong_reason" : !r.reasonOk ? "wrong_reason" : "money_rule",
     expected: `${r.expected.outcome}${r.expected.reason ? ` (${r.expected.reason})` : ""} — ${r.rule}`,
@@ -473,8 +475,8 @@ export async function stageMsFromDecisions(billIds: string[], nodes: string[]): 
 }
 
 /** What the trail says about the AI's own conduct on these invoices. Shared with the field report. */
-export async function aiHonesty(billIds: string[]): Promise<Pick<AiValue, "aiHolds" | "aiHoldsPersonRejected" | "aiHoldsPersonApproved" | "verifierDisagreed" | "uncheckedFigureNotes" | "aiExplanations" | "challengesAnswered" | "challengesUnanswered">> {
-  const empty = { aiHolds: 0, aiHoldsPersonRejected: 0, aiHoldsPersonApproved: 0, verifierDisagreed: 0, uncheckedFigureNotes: 0, aiExplanations: 0, challengesAnswered: 0, challengesUnanswered: 0 };
+export async function aiHonesty(billIds: string[]): Promise<Pick<AiValue, "aiHolds" | "aiHoldsPersonRejected" | "aiHoldsPersonApproved" | "verifierDisagreed" | "uncheckedFigureNotes" | "aiExplanations" | "challengesAnswered" | "challengesUnanswered" | "aiFailed">> {
+  const empty = { aiHolds: 0, aiHoldsPersonRejected: 0, aiHoldsPersonApproved: 0, verifierDisagreed: 0, uncheckedFigureNotes: 0, aiExplanations: 0, challengesAnswered: 0, challengesUnanswered: 0, aiFailed: 0 };
   if (billIds.length === 0) return empty;
   const sql = getSql();
   const rows = await sql`
@@ -487,6 +489,11 @@ export async function aiHonesty(billIds: string[]): Promise<Pick<AiValue, "aiHol
     const claims: Array<{ text: string; tag: string }> = r.claims ? JSON.parse(r.claims) : [];
     if (r.node_id === "policy" && r.reason_code === "INVESTIGATOR_HOLD") aiHeld.add(r.invoice_id);
     if (r.node_id === "policy" && claims.some((c) => c.text.startsWith("Verifier disagreed"))) out.verifierDisagreed++;
+    // orchestrator.ts records a failed AI step as "Investigator failed: ..." / "Verifier failed: ...": not an explanation.
+    if ((r.node_id === "investigate" || r.node_id === "verify") && claims.some((c) => /^(Investigator|Verifier) failed: /.test(c.text))) {
+      out.aiFailed++;
+      continue;
+    }
     if ((r.node_id === "investigate" || r.node_id === "verify") && r.model) {
       out.aiExplanations++;
       // claim-check.ts adds this note when an AI explanation carries a figure found nowhere in its evidence.

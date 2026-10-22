@@ -232,6 +232,7 @@ function ReportView({ report: r, titles = {}, linkInvoices = false }) {
           <li>Second opinion disagreed <b>{r.ai.verifierDisagreed}</b> time(s) (each sent the invoice to a person).</li>
           <li><b>{r.ai.uncheckedFigureNotes}</b> of {r.ai.aiExplanations} AI explanation(s) contained a figure not found in its records (marked unchecked on the invoice).</li>
           <li>Questions from people: <b>{r.ai.challengesAnswered}</b> answered, <b className={r.ai.challengesUnanswered ? 'vb-quality-bad' : ''}>{r.ai.challengesUnanswered}</b> not answered.</li>
+          {r.ai.aiFailed > 0 && <li><b>{r.ai.aiFailed}</b> AI step(s) failed (for example, the free AI quota ran out); each invoice was held for a person.</li>}
           {r.ai.notes.map((n, i) => <li key={i} className="vb-dim">{n}</li>)}
         </ul>
       </Section>

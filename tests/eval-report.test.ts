@@ -59,7 +59,7 @@ describe("change since the last report", () => {
     version: REPORT_VERSION, kind: "lab", mode: "rules", generatedAt: "2026-10-22T00:00:00Z", period: null, codeVersion: null,
     verdict: "pass", summary: "", targets: targets as TargetResult[], money: money(), operations: [], journeys: [],
     logistics: { invoices: 0, machineSeconds: { p50: null, p95: null, max: null }, personWaitHours: { p50: null, p95: null, decided: 0, stillWaiting: 0 }, aiCalls: 0, stageMs: [] },
-    ai: { changedOutcome: null, changedRight: null, changedWrong: null, aiHolds: 0, aiHoldsPersonRejected: 0, aiHoldsPersonApproved: 0, verifierDisagreed: 0, uncheckedFigureNotes: 0, aiExplanations: 0, challengesAnswered: 0, challengesUnanswered: 0, notes: [] },
+    ai: { changedOutcome: null, changedRight: null, changedWrong: null, aiHolds: 0, aiHoldsPersonRejected: 0, aiHoldsPersonApproved: 0, verifierDisagreed: 0, uncheckedFigureNotes: 0, aiExplanations: 0, challengesAnswered: 0, challengesUnanswered: 0, aiFailed: 0, notes: [] },
     failures: [], change: null, caveats: [],
     cases: cases.map(([id, ok]) => ({ id, title: id, journey: "ordered", rule: "", trick: false, expected: { outcome: "approved" }, got: { outcome: ok ? "approved" : "held", reason: null, action: null, found: [], caughtBy: null }, outcomeOk: ok, reasonOk: true, actionOk: null, ms: 1, invoiceId: null })),
   });
