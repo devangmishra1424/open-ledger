@@ -13,7 +13,7 @@ import {
 import { breachedInvoiceIds, checkMoneyRules, moneyRulesSection } from "./money-rules";
 import {
   DEFAULT_TARGETS, REPORT_VERSION, evaluateTargets, percentile, summaryOf, verdictOf,
-  type AiValue, type CaseResult, type EvalReport, type FailureItem, type JourneyRow, type OperationRow, type Outcome, type Targets,
+  caseRight, type AiValue, type CaseResult, type EvalReport, type FailureItem, type JourneyRow, type OperationRow, type Outcome, type Targets,
 } from "./report";
 
 /**
@@ -40,6 +40,11 @@ export interface LabCase {
   why: string;
   /** An input built to fool the checks. */
   trick?: boolean;
+  /**
+   * Set when the case was changed after a run disagreed with it, saying what changed and why. A suite edited until it
+   * passes proves less than one that was not, so every such edit is shown on the report.
+   */
+  edited?: string;
   expect: {
     outcome: Outcome;
     /** The reason the record must give (the dominant reason code). Omitted when the policy does not pin one. */
@@ -289,6 +294,10 @@ export async function runLab(opts: LabOptions): Promise<EvalReport> {
       }
       machineMs = performance.now() - m0;
       got = await readOutcome(billId);
+      // Held because the AI step failed (R99), not because anything judged it: the case was not tested.
+      if (opts.ai && !error && got.reason === "R99_AGENT_ERROR") {
+        error = "not judged: the AI step failed (usually the free AI tier's daily quota), so the invoice was held for a person without a review";
+      }
     }
 
     const g = got ?? { outcome: "held" as Outcome, reason: null, action: null, found: [], caughtBy: null, rulesOutcome: null };
@@ -299,10 +308,11 @@ export async function runLab(opts: LabOptions): Promise<EvalReport> {
       id: c.id, title: c.title, journey: c.journey, rule: c.rule, trick: Boolean(c.trick),
       expected: { outcome: c.expect.outcome, reason: c.expect.reason, action: c.expect.action },
       got: { outcome: g.outcome, reason: g.reason, action: g.action, found: g.found, caughtBy: g.caughtBy },
-      outcomeOk, reasonOk, actionOk, ms: Math.round(performance.now() - t0), invoiceId: billId, error,
+      outcomeOk, reasonOk, actionOk, ms: Math.round(performance.now() - t0), invoiceId: billId, error, edited: c.edited,
       rulesOutcome: g.rulesOutcome, machineMs,
     });
-    log(`${outcomeOk && reasonOk ? "ok  " : "FAIL"} ${c.id.padEnd(30)} expected ${c.expect.outcome}${c.expect.reason ? ` (${c.expect.reason})` : ""}, got ${error ? `ERROR: ${error}` : `${g.outcome}${g.reason ? ` (${g.reason})` : ""}`}`);
+    const levelNote = actionOk === false ? `; level ${g.action}, the policy says ${c.expect.action}` : "";
+    log(`${caseRight({ outcomeOk, reasonOk, actionOk, error }) ? "ok  " : "FAIL"} ${c.id.padEnd(30)} expected ${c.expect.outcome}${c.expect.reason ? ` (${c.expect.reason})` : ""}, got ${error ? `ERROR: ${error}` : `${g.outcome}${g.reason ? ` (${g.reason})` : ""}${levelNote}`}`);
   }
 
   return buildLabReport(opts, results, times);
@@ -329,7 +339,7 @@ async function buildLabReport(
     ...results.filter((r) => r.invoiceId && breached.has(r.invoiceId)).map((r) => r.id),
   ]);
 
-  const right = results.filter((r) => r.outcomeOk && r.reasonOk && !r.error);
+  const right = results.filter(caseRight);
   const p95Machine = percentile(results.filter((r) => r.invoiceId).map((r) => r.machineMs / 1000), 0.95);
 
   const money = {
@@ -345,27 +355,43 @@ async function buildLabReport(
   // --- per operation: did each step do what the policy expects of it? ---
   const stageOf = (r: CaseResult) => byId.get(r.id)!.expect.stage;
   const reached = results.filter((r) => !r.error && r.got.outcome !== "refused");
-  const op = (key: string, label: string, does: string, judgedRows: CaseResult[], isRight: (r: CaseResult) => boolean, notes: string[] = []): OperationRow => {
+  const timing = (key: string) => {
     const ms = times.get(key) ?? [];
-    return {
-      key, label, does, runs: ms.length || judgedRows.length, judged: judgedRows.length, correct: judgedRows.filter(isRight).length,
-      p50Ms: round(percentile(ms, 0.5)), p95Ms: round(percentile(ms, 0.95)), notes,
-    };
+    return { runs: ms.length, p50Ms: round(percentile(ms, 0.5)), p95Ms: round(percentile(ms, 0.95)) };
   };
+  /**
+   * A step that stops invoices is scored in two halves: of the cases it should stop, how many it stopped (with the
+   * right reason), and of the cases it should let through, how many it let through. One combined "right" count let a
+   * step that stops nothing look nearly perfect, since most cases should pass most steps.
+   */
+  const gate = (key: string, label: string, does: string, rows: CaseResult[], shouldStop: (r: CaseResult) => boolean, stopped: (r: CaseResult) => boolean, stoppedRightly: (r: CaseResult) => boolean): OperationRow => {
+    const stop = rows.filter(shouldStop);
+    const pass = rows.filter((r) => !shouldStop(r));
+    const caught = { n: stop.filter((r) => stopped(r) && stoppedRightly(r)).length, of: stop.length };
+    const letThrough = { n: pass.filter((r) => !stopped(r)).length, of: pass.length };
+    return { key, label, does, ...timing(key), judged: rows.length, correct: caught.n + letThrough.n, caught, letThrough, notes: [] };
+  };
+  const reasonOf = (r: CaseResult) => byId.get(r.id)!.expect.reason;
   const operations: OperationRow[] = [
-    op("intake", "Entering documents", "Checks what is typed or read before an invoice exists: totals add up, no repeated number, no negative lines.",
-      results.filter((r) => !r.error), (r) => (stageOf(r) === "intake") === (r.got.outcome === "refused")),
-    op("validate", "Checks before matching", "Readable, not a duplicate, supported currency, sensible date, vendor not flagged.",
-      reached, (r) => (stageOf(r) === "validate") === (r.got.caughtBy === "validate") && (stageOf(r) !== "validate" || r.reasonOk)),
-    op("match", "Matching order, delivery and invoice", "Pairs lines and compares price, quantity, tax, units, currency, limits, credits and bank details.",
-      reached.filter((r) => r.got.caughtBy !== "validate" && stageOf(r) !== "validate"),
-      (r) => (stageOf(r) === "match" ? r.got.found.includes(byId.get(r.id)!.expect.reason ?? "") || byId.get(r.id)!.expect.reason === undefined : r.got.found.length === 0 || r.got.outcome === r.expected.outcome)),
-    op("decide", "Deciding", "Turns the findings into one outcome (most restrictive wins) and applies the owner's limits.",
-      reached, (r) => r.outcomeOk && r.reasonOk && r.actionOk !== false,
-      results.some((r) => r.actionOk === false) ? [`${results.filter((r) => r.actionOk === false).length} case(s) reached the right outcome at a different level (e.g. L1 instead of Block).`] : []),
-    op("post_pay", "Posting and paying", "Approved invoices go to the ledger and are paid (less any credit); nothing else moves money.",
-      reached.filter((r) => r.invoiceId), (r) => !breached.has(r.invoiceId!)),
+    gate("intake", "Entering documents", "Checks what is typed or read before an invoice exists: totals add up, no repeated number, no negative lines.",
+      results.filter((r) => !r.error), (r) => stageOf(r) === "intake", (r) => r.got.outcome === "refused", () => true),
+    gate("validate", "Checks before matching", "Readable, not a duplicate, supported currency, sensible date, vendor not flagged.",
+      reached, (r) => stageOf(r) === "validate", (r) => r.got.caughtBy === "validate", (r) => r.reasonOk),
+    gate("match", "Matching order, delivery and invoice", "Pairs lines and compares price, quantity, tax, units, currency, limits, credits and bank details.",
+      reached.filter((r) => r.got.caughtBy !== "validate" && stageOf(r) !== "validate"), (r) => stageOf(r) === "match",
+      (r) => r.got.caughtBy === "match", (r) => reasonOf(r) === undefined || r.got.found.includes(reasonOf(r)!)),
+    {
+      key: "decide", label: "Deciding", does: "Turns the findings into one outcome (most restrictive wins) and applies the owner's limits.",
+      ...timing("decide"), judged: reached.length, correct: reached.filter(caseRight).length, scoredAs: "right outcome, reason and level",
+      notes: results.some((r) => r.actionOk === false) ? [`${results.filter((r) => r.actionOk === false).length} case(s) reached the right outcome at a different level (e.g. Block instead of L1).`] : [],
+    },
+    {
+      key: "post_pay", label: "Posting and paying", does: "Approved invoices go to the ledger and are paid (less any credit); nothing else moves money.",
+      ...timing("post_pay"), judged: reached.filter((r) => r.invoiceId).length, correct: reached.filter((r) => r.invoiceId && !breached.has(r.invoiceId)).length,
+      scoredAs: "no money rule broken", notes: [],
+    },
   ];
+  for (const o of operations) if (o.runs === 0) o.runs = o.judged;
   if (opts.ai) {
     const aiMs = await stageMsFromDecisions(billIds, ["investigate", "verify"]);
     operations.splice(3, 0, {
@@ -397,7 +423,7 @@ async function buildLabReport(
         refused: rows.filter((r) => r.got.outcome === "refused").length,
         inProgress: rows.filter((r) => r.error).length,
       },
-      correct: rows.filter((r) => r.outcomeOk && r.reasonOk && !r.error).length,
+      correct: rows.filter(caseRight).length,
     };
   }).filter((j) => j.entered > 0);
 
@@ -426,13 +452,13 @@ async function buildLabReport(
     }
   }
 
-  const failures: FailureItem[] = results.filter((r) => !(r.outcomeOk && r.reasonOk) || r.error || silent.has(r.id)).map((r) => ({
+  const failures: FailureItem[] = results.filter((r) => !caseRight(r) || silent.has(r.id)).map((r) => ({
     id: r.id, title: r.title, invoiceId: r.invoiceId ?? undefined,
     kind: r.error || r.got.reason === "R99_AGENT_ERROR" ? "crash" : r.got.outcome === "approved" && r.expected.outcome !== "approved" ? "wrongly_paid"
       : r.expected.outcome === "approved" && r.got.outcome !== "approved" ? "wrongly_held"
-      : !r.outcomeOk ? "wrong_reason" : !r.reasonOk ? "wrong_reason" : "money_rule",
-    expected: `${r.expected.outcome}${r.expected.reason ? ` (${r.expected.reason})` : ""} — ${r.rule}`,
-    got: r.error ?? `${r.got.outcome}${r.got.reason ? ` (${r.got.reason})` : ""}${r.got.found.length ? `; found ${r.got.found.join(", ")}` : ""}`,
+      : !r.outcomeOk || !r.reasonOk ? "wrong_reason" : r.actionOk === false ? "wrong_level" : "money_rule",
+    expected: `${r.expected.outcome}${r.expected.reason ? ` (${r.expected.reason})` : ""}${r.actionOk === false ? `, level ${r.expected.action}` : ""} — ${r.rule}`,
+    got: r.error ?? `${r.got.outcome}${r.got.reason ? ` (${r.got.reason})` : ""}${r.actionOk === false ? `, level ${r.got.action}` : ""}${r.got.found.length ? `; found ${r.got.found.join(", ")}` : ""}`,
     operation: r.got.caughtBy ?? "decide",
   }));
 
@@ -441,7 +467,9 @@ async function buildLabReport(
     `${opts.cases.length} cases, ${opts.cases.filter((c) => c.trick).length} of them built to fool the checks. A pass means these cases are decided as the policy says, not that every invoice will be.`,
     "Timings come from one run on one machine against a remote database; read them as a trend between runs, not as a promise.",
   ];
-  if (!opts.ai) caveats.push("The AI review was left out (rules-only). Its effect is measured only with --ai, which spends AI quota.");
+  if (!opts.ai) caveats.push("The AI review was left out (rules-only). Its effect is measured only with --ai, which spends AI quota. Machine time here is without the AI review, which adds tens of seconds an invoice.");
+  const edited = opts.cases.filter((c) => c.edited).length;
+  if (edited > 0) caveats.push(`${edited} of the ${opts.cases.length} cases were changed after a run disagreed with them (marked 'edited', each saying what changed and why). A suite edited until it passes proves less than one that was not.`);
 
   return {
     version: REPORT_VERSION, kind: "lab", generatedAt: new Date().toISOString(), mode: opts.ai ? "rules+ai" : "rules",

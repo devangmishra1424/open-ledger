@@ -40,7 +40,9 @@ describe("the lab run", () => {
     vi.stubEnv("GROQ_API_KEY", "");
     const mislabelled: LabCase = { ...pick("price-8pct")[0], id: "mislabelled-8pct", expect: { outcome: "approved", stage: null } };
     const broken: LabCase = { ...pick("clean-full")[0], id: "broken-setup", build: async () => { throw new Error("no such fixture"); } };
-    const report = await runLab({ cases: [...pick("clean-full", "trick-near-duplicate", "duplicate-exact", "bank-changed"), mislabelled, broken], ai: false });
+    // Right outcome and reason, wrong level: the first version of the gate passed this (it did not compare levels).
+    const wrongLevel: LabCase = { ...pick("price-3pct")[0], id: "wrong-level", expect: { ...pick("price-3pct")[0].expect, action: "block" } };
+    const report = await runLab({ cases: [...pick("clean-full", "trick-near-duplicate", "duplicate-exact", "bank-changed"), mislabelled, broken, wrongLevel], ai: false });
 
     const byId = Object.fromEntries(report.cases!.map((c) => [c.id, c]));
     expect(byId["clean-full"]).toMatchObject({ outcomeOk: true, reasonOk: true, actionOk: true, got: { outcome: "approved", reason: "CLEAN_MATCH" } });
@@ -51,12 +53,16 @@ describe("the lab run", () => {
     expect(byId["broken-setup"]).toMatchObject({ outcomeOk: false, error: "setup failed: no such fixture" });
 
     expect(report.verdict).toBe("fail");
-    expect(report.targets.find((t) => t.key === "policy_agreement")).toMatchObject({ met: false, actual: "66.7% (4 of 6)" });
+    expect(byId["wrong-level"]).toMatchObject({ outcomeOk: true, reasonOk: true, actionOk: false, got: { action: "escalate_l1" } });
+    expect(report.targets.find((t) => t.key === "policy_agreement")).toMatchObject({ met: false, actual: "57.1% (4 of 7)" });
     expect(report.money).toMatchObject({ wronglyPaid: 0, wronglyHeld: 1, silentErrors: 0 });
     expect(report.money.rules.every((r) => r.broken === 0)).toBe(true);
-    expect(report.failures.map((f) => [f.id, f.kind])).toEqual([["mislabelled-8pct", "wrongly_held"], ["broken-setup", "crash"]]);
+    expect(report.failures.map((f) => [f.id, f.kind])).toEqual([["mislabelled-8pct", "wrongly_held"], ["broken-setup", "crash"], ["wrong-level", "wrong_level"]]);
     expect(report.journeys.find((j) => j.key === "duplicates")).toMatchObject({ entered: 2, correct: 2, ended: { refused: 1, held: 1 } });
-    expect(report.operations.find((o) => o.key === "validate")).toMatchObject({ correct: expect.any(Number), judged: expect.any(Number) });
+    // Steps that stop invoices are scored in two halves, so letting everything through cannot look perfect.
+    expect(report.operations.find((o) => o.key === "intake")).toMatchObject({ caught: { n: 1, of: 1 }, letThrough: { n: 5, of: 5 } });
+    expect(report.operations.find((o) => o.key === "validate")).toMatchObject({ caught: { n: 1, of: 1 }, letThrough: { n: 4, of: 4 } });
+    expect(report.operations.find((o) => o.key === "decide")).toMatchObject({ scoredAs: "right outcome, reason and level" });
   }, 180_000);
 
   it("every lab case has a unique id and names the policy section its answer comes from", () => {
@@ -82,6 +88,16 @@ describe("the money rules", () => {
 
   it("an empty set is checked without touching the database, and every rule is still listed", async () => {
     expect((await checkMoneyRules([])).map((r) => r.breaches.length)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+  });
+});
+
+describe("the field report over a period with no invoices", () => {
+  it("marks every rule 'not checked' instead of kept, and says there was nothing to check", async () => {
+    const { buildFieldReport } = await import("@/lib/evals/field");
+    const r = await buildFieldReport({ from: "2030-01-01", to: "2030-01-02" });
+    expect(r.verdict).toBe("not_enough_data");
+    expect(r.money.rules.filter((x) => x.key !== "record_untampered").every((x) => x.notChecked === true && x.broken === 0)).toBe(true);
+    expect(r.operations.find((o) => o.key === "post_pay")!.notes).toEqual(["Nothing to check: no invoices in this period."]);
   });
 });
 

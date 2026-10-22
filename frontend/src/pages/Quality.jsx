@@ -105,7 +105,7 @@ export default function Quality() {
 
       {data && tab === 'field' && <ReportView report={data.field} titles={data.reasonTitles} linkInvoices />}
       {data && tab === 'lab' && (data.latestLab
-        ? <ReportView report={data.latestLab.report} titles={data.reasonTitles} />
+        ? <><AiRunNote ai={data.latestLabAi?.report} rules={data.latestLab.report} /><ReportView report={data.latestLab.report} titles={data.reasonTitles} /></>
         : <Empty title="No lab run saved yet">The lab run puts about 40 labelled cases through the real checks and scores them against the written policy. It is saved here each time it runs on the server.</Empty>)}
       {data && tab === 'saved' && (opened?.report
         ? <><button type="button" className="vb-link-btn vb-noprint" onClick={() => setOpened(null)}>← All saved reports</button><ReportView report={opened.report} titles={data.reasonTitles} linkInvoices={opened.report.kind === 'field'} /></>
@@ -166,22 +166,26 @@ function ReportView({ report: r, titles = {}, linkInvoices = false }) {
           <Kpi label={lab ? 'Held that should have been paid' : 'Held, then approved by a person'} value={r.money.wronglyHeld} />
           <Kpi label="Mistakes with no warning" value={r.money.silentErrors} bad={r.money.silentErrors > 0} />
         </div>
-        <ul className="vb-quality-rules">{r.money.rules.map((rule) => (
-          <li key={rule.key} className={rule.broken ? 'broken' : ''}>
-            <span aria-hidden="true">{rule.broken ? '✗' : '✓'}</span> {rule.rule}{rule.broken > 0 && <b> — broken {rule.broken}×</b>}
+        {r.money.checked === 0 && <p className="vb-muted" style={{ marginTop: 0 }}>No {lab ? 'case' : 'invoice'} to check yet, so no rule below is marked kept.</p>}
+        <ul className="vb-quality-rules">{r.money.rules.map((rule) => {
+          const unchecked = rule.notChecked || (r.money.checked === 0 && rule.key !== 'record_untampered');
+          return (
+          <li key={rule.key} className={rule.broken ? 'broken' : unchecked ? 'unchecked' : ''}>
+            <span aria-hidden="true">{rule.broken ? '✗' : unchecked ? '–' : '✓'}</span> {rule.rule}{rule.broken > 0 && <b> — broken {rule.broken}×</b>}{unchecked && !rule.broken && <span className="vb-dim"> (not checked: nothing to look at)</span>}
             {rule.examples.length > 0 && <ul>{rule.examples.map((e, i) => <li key={i} className="vb-small">{inv(e.invoiceId, e.invoiceNumber || 'record')}: {e.detail}</li>)}</ul>}
           </li>
-        ))}</ul>
+          );
+        })}</ul>
       </Section>
 
       <Section title="Each step" hint={lab ? 'Did each step do what the policy expects of it, and how long it took.' : 'What each step did with real invoices. Real invoices carry no right answers, so steps are described, not scored.'}>
         <div className="vb-scroll-x"><table className="vb-table">
-          <thead><tr><th>Step</th><th className="num">Runs</th>{lab && <th className="num">Right</th>}<th className="num">Typical</th><th className="num">Slowest 5%</th></tr></thead>
+          <thead><tr><th>Step</th><th className="num">Runs</th>{lab && <th>Did what the policy expects</th>}<th className="num">Typical</th><th className="num">Slowest 5%</th></tr></thead>
           <tbody>{r.operations.map((o) => (
             <tr key={o.key}>
               <td><b>{o.label}</b><div className="vb-dim vb-small">{o.does}</div>{o.notes.map((n, i) => <div key={i} className="vb-small" style={{ marginTop: 2 }}>{n}</div>)}</td>
               <td className="num">{o.runs}</td>
-              {lab && <td className="num">{o.correct === null ? '—' : <span className={o.correct < o.judged ? 'vb-quality-bad' : ''}>{o.correct}/{o.judged}</span>}</td>}
+              {lab && <td className="vb-small"><StepScore o={o} /></td>}
               <td className="num">{fmt(o.p50Ms, ' ms')}</td>
               <td className="num">{fmt(o.p95Ms, ' ms')}</td>
             </tr>
@@ -289,24 +293,28 @@ function Change({ change }) {
   );
 }
 
+const caseRight = (c) => !c.error && c.outcomeOk && c.reasonOk && c.actionOk !== false;
+
 function Cases({ cases, titles }) {
   const words = (code) => titles[code] ?? code;
   const [all, setAll] = useState(false);
-  const wrong = cases.filter((c) => !(c.outcomeOk && c.reasonOk) || c.error);
+  const wrong = cases.filter((c) => !caseRight(c));
+  const edited = cases.filter((c) => c.edited).length;
   const rows = all ? cases : wrong;
   return (
     <Section title={`Lab cases (${cases.length - wrong.length} of ${cases.length} right)`} hint="Each case's right answer comes from the section of the written policy named next to it.">
+      {edited > 0 && <p className="vb-small" style={{ marginTop: 0 }}>{edited} case{edited === 1 ? ' was' : 's were'} changed after a run disagreed with {edited === 1 ? 'it' : 'them'}, marked <span className="vb-chip vb-chip-neutral">edited</span>; each says what changed and why.</p>}
       <button type="button" className="vb-link-btn vb-noprint" onClick={() => setAll(!all)}>{all ? 'Show only the wrong ones' : `Show all ${cases.length}`}</button>
       {rows.length === 0 ? <p className="vb-muted">Every case was decided as the policy says.</p> : (
         <div className="vb-scroll-x"><table className="vb-table">
           <thead><tr><th>Case</th><th>Policy says</th><th>VeriBook did</th><th className="num">Time</th></tr></thead>
           <tbody>{rows.map((c) => {
-            const right = c.outcomeOk && c.reasonOk && !c.error;
+            const right = caseRight(c);
             return (
               <tr key={c.id}>
-                <td>{c.trick && <span className="vb-chip vb-chip-needs_attention" style={{ marginRight: 6 }}>trick</span>}{c.title}<div className="vb-dim vb-small">{c.rule}</div></td>
-                <td>{OUTCOME_WORDS[c.expected.outcome]}{c.expected.reason ? <div className="vb-dim vb-small">{words(c.expected.reason)}</div> : null}</td>
-                <td className={right ? '' : 'vb-quality-bad'}>{c.error ?? OUTCOME_WORDS[c.got.outcome]}{c.got.reason ? <div className="vb-dim vb-small">{words(c.got.reason)}</div> : null}</td>
+                <td>{c.trick && <span className="vb-chip vb-chip-needs_attention" style={{ marginRight: 6 }}>trick</span>}{c.edited && <span className="vb-chip vb-chip-neutral" style={{ marginRight: 6 }}>edited</span>}{c.title}<div className="vb-dim vb-small">{c.rule}</div>{c.edited && <div className="vb-small" style={{ marginTop: 2 }}>{c.edited}</div>}</td>
+                <td>{OUTCOME_WORDS[c.expected.outcome]}{c.expected.reason ? <div className="vb-dim vb-small">{words(c.expected.reason)}</div> : null}{c.expected.action ? <div className="vb-dim vb-small">level: {c.expected.action.replace(/_/g, ' ')}</div> : null}</td>
+                <td className={right ? '' : 'vb-quality-bad'}>{c.error ?? OUTCOME_WORDS[c.got.outcome]}{c.got.reason ? <div className="vb-dim vb-small">{words(c.got.reason)}</div> : null}{c.expected.action && c.got.action ? <div className="vb-dim vb-small">level: {c.got.action.replace(/_/g, ' ')}</div> : null}</td>
                 <td className="num">{c.ms} ms</td>
               </tr>
             );
@@ -343,11 +351,11 @@ function FoundList({ rows }) {
   return (
     <section className="vb-card vb-pad">
       <p className="vb-muted" style={{ marginTop: 0, maxWidth: 760, lineHeight: 1.5 }}>
-        Bugs found by testing VeriBook against realistic invoices, what each would have cost, and the fix. Each one now has a test or a lab case that would catch it again.
+        Bugs found by testing VeriBook against realistic invoices, what each would have cost, and the fix. "Guarded by" names the test written for the fix, or says plainly that none exists.
       </p>
       <div className="vb-scroll-x"><table className="vb-table vb-quality-found">
         <colgroup><col style={{ width: 150 }} /><col style={{ width: '38%' }} /><col style={{ width: '34%' }} /><col /></colgroup>
-        <thead><tr><th>Found</th><th>What went wrong</th><th>Fix</th><th>Guarded by</th></tr></thead>
+        <thead><tr><th>Fixed</th><th>What went wrong</th><th>Fix</th><th>Guarded by</th></tr></thead>
         <tbody>{rows.map((f, i) => (
           <tr key={i}>
             <td className="vb-small">{f.date}<div className="vb-dim">{f.how}</div><span className={`vb-chip ${f.risk === 'money' ? 'vb-chip-rejected' : 'vb-chip-needs_attention'}`}>{RISK_WORDS[f.risk]}</span></td>
@@ -358,5 +366,37 @@ function FoundList({ rows }) {
         ))}</tbody>
       </table></div>
     </section>
+  );
+}
+
+/** A step's lab score in two halves, so a step that stops nothing cannot look perfect. */
+function StepScore({ o }) {
+  if (o.correct === null) return '—';
+  if (o.caught) {
+    const bad = (x) => (x.n < x.of ? 'vb-quality-bad' : '');
+    return (
+      <>
+        <div>Stopped <b className={bad(o.caught)}>{o.caught.n} of {o.caught.of}</b> it should stop</div>
+        <div>Let through <b className={bad(o.letThrough)}>{o.letThrough.n} of {o.letThrough.of}</b> it should pass</div>
+      </>
+    );
+  }
+  return <><b className={o.correct < o.judged ? 'vb-quality-bad' : ''}>{o.correct} of {o.judged}</b>{o.scoredAs ? <div className="vb-dim">{o.scoredAs}</div> : null}</>;
+}
+
+/** The latest lab run WITH the AI review, beside the rules-only one, so a rules-only pass is not read as the whole result. */
+function AiRunNote({ ai, rules }) {
+  if (!ai) {
+    return <Banner kind="info">This is the rules-only run (no AI review). No run with the AI review has been saved yet, so these numbers say nothing about the AI.</Banner>;
+  }
+  const t = (k) => ai.targets.find((x) => x.key === k);
+  const failed = ai.ai.aiFailed ?? ai.cases?.filter((c) => c.got.reason === 'R99_AGENT_ERROR').length ?? 0;
+  return (
+    <Banner kind={ai.verdict === 'pass' ? 'info' : 'warn'}>
+      Below is the rules-only run. With the AI review (run {when(ai.generatedAt)}): {t('policy_agreement')?.actual} decided as the policy says,
+      machine time {t('p95_machine_seconds')?.actual} at the slowest 5% (target {t('p95_machine_seconds')?.target}).
+      {failed > 0 ? ` ${failed} case(s) were not judged by the AI because its calls failed (the free daily quota ran out).` : ''}
+      {' '}Open it under Saved reports.{rules.verdict === 'pass' && ai.verdict !== 'pass' ? ' The rules-only pass does not mean the AI path meets every target.' : ''}
+    </Banner>
   );
 }

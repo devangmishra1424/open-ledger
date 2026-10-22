@@ -99,13 +99,15 @@ export async function buildFieldReport(opts: { from: string; to: string; targets
   const moneyBreached = new Set(ruleResults.filter((r) => MONEY_RULES.has(r.key)).flatMap((r) => r.breaches.map((b) => b.invoiceId)));
   const stuck = bills.filter((b) => b.stuck);
   const chain = await getChainStatus(now.getTime());
-  const rules = moneyRulesSection(ruleResults);
+  // With no invoices a rule has nothing to look at: "not checked", never a tick (an empty period read as all-clear).
+  const rules = moneyRulesSection(ruleResults).map((r) => (ids.length === 0 ? { ...r, notChecked: true } : r));
   rules.push({
-    key: "no_invoice_stuck", rule: `No invoice is left mid-way (still processing after ${STUCK_MINUTES} minutes)`, broken: stuck.length,
+    key: "no_invoice_stuck", rule: `No invoice is left mid-way (still processing after ${STUCK_MINUTES} minutes)`, broken: stuck.length, notChecked: ids.length === 0,
     examples: stuck.slice(0, 5).map((b) => ({ invoiceId: b.id, invoiceNumber: b.invoice_number, detail: `processing since ${b.received_at}` })),
   });
   rules.push({
-    key: "record_untampered", rule: "The decision record is unchanged since it was written (hash chain)", broken: chain.valid ? 0 : 1,
+    // The chain covers every decision ever recorded, not only this period's; with none recorded there is nothing to verify.
+    key: "record_untampered", rule: "The decision record is unchanged since it was written (hash chain, whole record)", broken: chain.valid ? 0 : 1, notChecked: chain.checked === 0,
     examples: chain.valid ? [] : [{ invoiceId: "", invoiceNumber: "", detail: `the chain breaks at decision ${chain.brokenAt} (of ${chain.checked} checked)` }],
   });
 
@@ -190,7 +192,7 @@ export async function buildFieldReport(opts: { from: string; to: string; targets
     opRow("person", "People's decisions", "A person approves, rejects or challenges what was held.", "human_review", decidedHolds.length,
       decidedHolds.length ? [`Approved ${overridden.length} of ${decidedHolds.length} held invoices they decided.`] : ["No held invoice has been decided yet."]),
     opRow("post_pay", "Posting and paying", "Approved invoices go to the ledger and are paid (less any credit); nothing else moves money.", "audit", paths.filter((p) => p.ended === "approved").length,
-      [ruleResults.every((r) => r.breaches.length === 0) ? "Every money rule held." : `${breached.size} invoice(s) broke a rule: see Money.`]),
+      [ids.length === 0 ? "Nothing to check: no invoices in this period." : ruleResults.every((r) => r.breaches.length === 0) ? "Every money rule held." : `${breached.size} invoice(s) broke a rule: see Money.`]),
     opRow("audit_requests", "Auditor requests", "Requests an auditor makes, the evidence handed over, and how long it took.", null, pbc.length,
       pbc.length ? [`${pbc.filter((r) => r.closed).length} of ${pbc.length} closed${closeDays.length ? `; typical time to close ${percentile(closeDays, 0.5)!.toFixed(1)} days` : ""}.`] : ["No auditor request in this period."]),
   ];

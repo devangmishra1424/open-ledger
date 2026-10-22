@@ -14,7 +14,9 @@ export const GET = handle("GET /api/quality", async (req) => {
   const { from, to } = qualityPeriod(new URL(req.url));
   const field = await buildFieldReport({ from, to });
   field.change = changeSince(await latestReport("field", "field"), field);
-  const [saved, lab] = await Promise.all([listReports({ limit: 30 }), latestReport("lab", "rules")]);
+  // The Lab tab leads with the rules-only run (the CI gate) and shows the latest run with the AI review beside it, so a
+  // rules-only pass is never read as the whole system's result.
+  const [saved, lab, labAi] = await Promise.all([listReports({ limit: 30 }), latestReport("lab", "rules"), latestReport("lab", "rules+ai")]);
   // Reason codes in words, so the page never shows a bare code.
-  return Response.json({ field, saved, latestLab: lab ? { id: lab.id, report: lab.report } : null, foundByEvals: FOUND_BY_EVALS, reasonTitles: REASON_WORDS });
+  return Response.json({ field, saved, latestLab: lab ? { id: lab.id, report: lab.report } : null, latestLabAi: labAi ? { id: labAi.id, report: labAi.report } : null, foundByEvals: FOUND_BY_EVALS, reasonTitles: REASON_WORDS });
 });

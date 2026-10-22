@@ -10,6 +10,7 @@
 .vb-quality-rules > li > span { display: inline-block; width: 1.2em; color: var(--vb-accent); font-weight: 700; }
 .vb-quality-rules > li.broken > span,
 .vb-quality-rules > li.broken b { color: var(--vb-danger); }
+.vb-quality-rules > li.unchecked > span { color: var(--vb-dim); }
 .vb-quality-rules ul { margin: 4px 0 0 1.2em; padding-left: 14px; }
 
 .vb-quality-journeys { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }

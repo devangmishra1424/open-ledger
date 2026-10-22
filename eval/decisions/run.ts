@@ -74,7 +74,12 @@ async function main() {
   console.log(`\n${report.verdict.toUpperCase()}: ${report.summary}`);
   for (const t of report.targets) console.log(`  ${t.met === null ? "-" : t.met ? "ok" : "MISSED"}  ${t.label}: ${t.actual} (target ${t.target})`);
   console.log("\nBy operation:");
-  for (const o of report.operations) console.log(`  ${o.label.padEnd(38)} ${o.correct === null ? "not scored" : `${o.correct}/${o.judged} right`}${o.p95Ms !== null ? `, p95 ${o.p95Ms} ms` : ""}`);
+  for (const o of report.operations) {
+    const score = o.correct === null ? "not scored"
+      : o.caught && o.letThrough ? `stopped ${o.caught.n}/${o.caught.of} it should stop, let through ${o.letThrough.n}/${o.letThrough.of}`
+      : `${o.correct}/${o.judged} ${o.scoredAs ?? "right"}`;
+    console.log(`  ${o.label.padEnd(38)} ${score}${o.p95Ms !== null ? `, p95 ${o.p95Ms} ms` : ""}`);
+  }
   console.log("\nMoney rules:");
   for (const r of report.money.rules) console.log(`  ${r.broken === 0 ? "ok" : `BROKEN x${r.broken}`}  ${r.rule}`);
   if (report.failures.length) {
