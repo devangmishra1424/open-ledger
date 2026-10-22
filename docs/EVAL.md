@@ -103,21 +103,27 @@ The AI ran on 3 of the 39 documents. What is still wrong: the deliberately wreck
 
 Rules only by default (no AI key, same result every run). `--ai` runs the full pipeline with the AI review and reports what it changed against the rules alone (which outcomes, and whether each change was right). `--save-to <schema>` saves the report for the Quality page.
 
-**Scored per step,** not just overall: entering, checks before matching, matching, deciding, posting and paying, each with how often it did what the policy expects and how long it took. After the run, money rules are checked in the database itself (money only on approved invoices, never more than the total, no credit paid out, every approval a balanced ledger entry, nothing posted for a held invoice, nothing paid into an unconfirmed bank account, no bill approved twice, every held invoice says why).
+**Scored per step,** not just overall. A step that stops invoices (entering, checks before matching, matching) is scored in two halves: of the cases it should stop, how many it stopped with the right reason, and of the cases it should let through, how many it let through. (A first version added these into one "right" count, which let a step that stops nothing score 40 of 42.) Deciding is scored on outcome, reason and level together; posting and paying on whether any money rule broke. After the run, money rules are checked in the database itself (money only on approved invoices, never more than the total, no credit paid out, every approval a balanced ledger entry, nothing posted for a held invoice, nothing paid into an unconfirmed bank account, no bill approved twice, every held invoice says why).
 
-**Targets (the CI gate):** 0 invoices paid that should not have been; 0 mistakes with no warning on the record; 100% of cases decided as the policy says; machine time under 60 s per invoice at the slowest 5%.
+**Targets (the CI gate):** 0 invoices paid that should not have been; 0 mistakes with no warning on the record; 100% of cases decided as the policy says, meaning the outcome, the reason and, where the policy fixes it, the level (escalate or block); machine time under 60 s per invoice at the slowest 5%. The first version left the level out of the gate: with the tax bug below put back, the run still passed. Corrected.
 
-**What the lab found on its first runs** (all fixed in the same change, each now guarded by its case):
+**What the lab found on its first runs** (all fixed in the same change; "guarded" means the case was checked to fail with the old code put back):
 
 | Found | Would have cost | Fix |
 |---|---|---|
 | INV-0001 approved and paid after INV-001: the same bill, same vendor, same amount | money | near-duplicates held for a person (spec §2 EXC-05 fuzzy duplicate) |
 | An invoice held for a future date recorded "Clean Match" as its reason | a misleading record | date and flagged-vendor checks record their own reasons |
-| Tax exactly 2 points over the printed rate blocked, not escalated; a price exactly 2% over held, not approved (0.2 - 0.18 is 0.020000000000000018 in floating point) | a person's time | variances compared at 9 decimals; a boundary takes the lenient side (spec §4.5) |
+| Tax exactly 2 points over the printed rate blocked, not escalated (0.2 - 0.18 is 0.020000000000000018 in floating point) | a person's time | variances compared at 9 decimals; a boundary takes the lenient side (spec §4.5) |
 
-Result after the fixes, rules only: 42 / 42 cases decided as the policy says, 0 wrongly paid, 0 silent, every money rule held, slowest 5% at about 7 s per invoice against a remote database.
+A correction: this table and PR #29 first also listed "a price exactly 2% over was held". That was never observed and is not true (2 / 100 is exact in floating point); putting the old code back, the price case still passes. The `price-exactly-2pct` case stays as a check of the 2% line, marked edited.
+
+Result after the fixes, rules only: 42 / 42 cases decided as the policy says, 0 wrongly paid, 0 silent, every money rule held, slowest 5% at about 7 s per invoice against a remote database (1.1 s on the server, next to its database).
+
+Read the 42 / 42 with this: 11 cases were changed after a run disagreed with them, and each is marked `edited` in `eval/decisions/cases.ts` and on the report with what changed and why. One label was loosened (the instructions-in-the-text case: expected a price hold, got a "line not on the order" hold, relaxed to any hold); one was tightened (the future-date case now requires its own reason); one case was added after a fix; 8 cases had their earlier invoice moved 8 days back, because the new near-duplicate check rightly held setups that billed the same lines, amount and date twice.
+
+**With the AI review** (`--ai`, first run 2026-10-22): the free AI tier's daily quota ran out after 38 of 42 cases, so 4 (bank-same, same-number-other-vendor, trick-lookalike-vendor, trick-instructions-in-text) were held for a person without a review and count as not judged: 38 of 42. Nothing was wrongly paid. Slowest 5% machine time with the AI: 70.9 s, which misses the 60 s target; the AI review itself took 31 s typical, 67 s slowest 5%. The AI did not change any judged outcome. The 4 have not yet been run with the AI, including the one that tests whether instructions in an invoice can talk the AI into approving.
 
 **Field report** (`lib/evals/field.ts`, the Quality page): the same layout over the real invoices of a period, read from what is already recorded (decision trail, ledger, payments, documents, auditor requests). Real invoices carry no labels, so it reports what can be known: the money rules, where invoices stopped, how often a person approved a held invoice anyway (target: under 30%; above it, the checks hold too much), machine time and the wait for a person, documents read and fields people corrected, and the AI's conduct (holds, second-opinion disagreements, figures it could not back, questions answered). Snapshots are saved (`eval_reports`, migration 011) so each report says what changed since the last.
 
-**What this does not show:** the lab cases are ones I wrote, so they test the failure modes I thought of; the field report cannot tell a right decision from a wrong one, only a broken rule. The AI ablation (`--ai`) has not been run yet: it spends the free AI tier's daily quota.
+**What this does not show:** the lab cases are ones I wrote, so they test the failure modes I thought of; the field report cannot tell a right decision from a wrong one, only a broken rule, and with no invoices in a period it checks nothing (shown as "not checked", never as a tick). The AI run is incomplete (above).
 

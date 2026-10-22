@@ -55,7 +55,8 @@ export interface MoneySafety {
   wronglyHeld: number;
   silentErrors: number;
   /** The rules money must always obey, each with how many invoices broke it. */
-  rules: Array<{ key: string; rule: string; broken: number; examples: Array<{ invoiceId: string; invoiceNumber: string; detail: string }> }>;
+  /** `notChecked`: there was nothing for the rule to look at, so it is neither kept nor broken (never shown as a tick). */
+  rules: Array<{ key: string; rule: string; broken: number; notChecked?: boolean; examples: Array<{ invoiceId: string; invoiceNumber: string; detail: string }> }>;
 }
 
 /** One step of the work, how often it was right (when that can be known) and how long it took. */
@@ -71,6 +72,15 @@ export interface OperationRow {
   p50Ms: number | null;
   p95Ms: number | null;
   notes: string[];
+  /**
+   * Lab: the two halves of `correct`, kept apart so a step that lets everything through cannot look perfect:
+   * `caught` = cases this step should stop that it stopped (with the right reason); `letThrough` = cases it should
+   * let pass that it let pass. Absent for a step scored another way (see `scoredAs`).
+   */
+  caught?: { n: number; of: number };
+  letThrough?: { n: number; of: number };
+  /** What `correct` counts, in words, when it is not caught + let through. */
+  scoredAs?: string;
 }
 
 /** A kind of invoice followed from entry to its end. `steps` are counts still on the path after each step. */
@@ -109,6 +119,8 @@ export interface AiValue {
   aiExplanations: number;
   challengesAnswered: number;
   challengesUnanswered: number;
+  /** AI steps that failed (e.g. the provider's daily quota ran out): the invoice was held for a person, as designed. Not an AI judgement. */
+  aiFailed: number;
   notes: string[];
 }
 
@@ -137,11 +149,18 @@ export interface CaseResult {
   actionOk: boolean | null;
   ms: number;
   invoiceId: string | null;
+  /** Set when the case was changed after a run disagreed with it: what changed and why. */
+  edited?: string;
   /** Set when the case could not be run at all (setup broke): never counted as a pass. */
   error?: string;
 }
 
 export type Outcome = "approved" | "held" | "rejected" | "refused";
+
+/** A case is right only when its outcome, its reason and (where the policy fixes it) its level all match. */
+export function caseRight(c: Pick<CaseResult, "outcomeOk" | "reasonOk" | "actionOk" | "error">): boolean {
+  return !c.error && c.outcomeOk && c.reasonOk && c.actionOk !== false;
+}
 
 export interface ChangeSinceLast {
   previousId: string;
@@ -268,11 +287,11 @@ export function changeSince(previous: { id: string; generatedAt: string; report:
   const targets = now.targets
     .filter((t) => before.has(t.key) && before.get(t.key) !== t.actual)
     .map((t) => ({ key: t.key, before: before.get(t.key)!, now: t.actual }));
-  const wasRight = new Map((previous.report.cases ?? []).map((c) => [c.id, c.outcomeOk && c.reasonOk && !c.error]));
+  const wasRight = new Map((previous.report.cases ?? []).map((c) => [c.id, caseRight(c)]));
   const newlyFailing: string[] = [];
   const newlyPassing: string[] = [];
   for (const c of now.cases ?? []) {
-    const right = c.outcomeOk && c.reasonOk && !c.error;
+    const right = caseRight(c);
     const was = wasRight.get(c.id);
     if (was === true && !right) newlyFailing.push(c.id);
     if (was === false && right) newlyPassing.push(c.id);
