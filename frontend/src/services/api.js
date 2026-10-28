@@ -14,6 +14,8 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const LONG_TIMEOUT_MS = 120_000;
 // Reading a scanned or photographed document (OCR) and, when needed, the AI reader: the server allows 300 s.
 const DOCUMENT_TIMEOUT_MS = 300_000;
+/** A recording of a spoken question: the server gives up on the voice service at 30 s. */
+const VOICE_TIMEOUT_MS = 40_000;
 
 export class ApiError extends Error {
   constructor(status, message) {
@@ -96,7 +98,7 @@ async function request(path, { method = 'GET', body, timeout = DEFAULT_TIMEOUT_M
  * A file upload (multipart/form-data): same sign-in header, timeout and error handling as request().
  * The browser sets the multipart boundary itself, so no Content-Type is set here.
  */
-async function upload(path, form, { timeout = DOCUMENT_TIMEOUT_MS } = {}) {
+async function upload(path, form, { timeout = DOCUMENT_TIMEOUT_MS, timeoutMessage = 'Reading the document took too long. Try a smaller file or fewer pages.' } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   const headers = {};
@@ -106,7 +108,7 @@ async function upload(path, form, { timeout = DOCUMENT_TIMEOUT_MS } = {}) {
   try {
     res = await fetch(`${BASE_URL}${path}`, { method: 'POST', headers, body: form, signal: controller.signal });
   } catch (err) {
-    if (err.name === 'AbortError') throw new ApiError(0, 'Reading the document took too long. Try a smaller file or fewer pages.');
+    if (err.name === 'AbortError') throw new ApiError(0, timeoutMessage);
     throw new ApiError(0, 'Could not reach the server. Is the backend running?');
   } finally {
     clearTimeout(timer);
@@ -220,6 +222,14 @@ export const api = {
   signOffBankChange: (reviewId, reviewerName) => request(`/reviews/${encodeURIComponent(reviewId)}/sign-off`, { method: 'POST', body: { reviewerName } }),
 
   // --- Explain / integrity ---
+  // Voice: whether the server can turn a recording into text (for browsers that cannot recognise speech), and doing it.
+  voiceStatus: () => request('/voice/transcribe'),
+  transcribeRecording: async (recording) => {
+    const form = new FormData();
+    form.append('file', recording, 'recording');
+    const answer = await upload('/voice/transcribe', form, { timeout: VOICE_TIMEOUT_MS, timeoutMessage: 'Transcribing took too long. Type the question instead.' });
+    return answer.text;
+  },
   explainInvoice: (id, question, decisionId) => request(`/invoices/${encodeURIComponent(id)}/explain`, { method: 'POST', body: { question, decisionId }, timeout: LONG_TIMEOUT_MS }),
   verifyInvoiceTrail: (id) => request(`/invoices/${encodeURIComponent(id)}/seal`, { method: 'POST' }),
   verifyChain: () => request('/audit/verify'),

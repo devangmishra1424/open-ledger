@@ -262,6 +262,9 @@ const ERROR_WORDS: Record<string, string> = {
   "audio-capture": "No microphone was found. Plug one in, or type the question.",
   "no-speech": "I didn't hear anything. Press the microphone and speak after it says Listening.",
   network: "The browser's speech service could not be reached. Check the connection, or type the question.",
+  // recorded listening (recordedRecognition.ts): the microphone worked, the server could not turn the recording into text
+  "transcription-unavailable": "Voice transcription isn't working right now. Type the question instead.",
+  "transcription-busy": "Voice transcription is busy. Try again in a moment, or type the question.",
   "language-not-supported": "This browser can't recognise that language. Type the question instead.",
   "bad-grammar": "The speech service rejected the request. Type the question instead.",
   // speaking
