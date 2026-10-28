@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createSpeechController, pickNaturalVoice } from './speech';
+import { createRecordedRecognition } from './recordedRecognition';
 import { naturalTone } from './naturalTone';
+import { api } from '../services/api';
 
 /** What this browser provides. Read once, when the hook first runs; the page is client-only so `window` always exists. */
 function detectEnvironment() {
@@ -16,6 +18,21 @@ function detectEnvironment() {
 
 const PREFERRED_LANG = 'en-IN';
 
+/** Can this browser record the microphone? (Needs a secure page, like recognition does.) */
+function canRecord() {
+  return window.isSecureContext !== false && typeof window.MediaRecorder === 'function' && Boolean(navigator.mediaDevices?.getUserMedia);
+}
+
+/** The recorded-audio recogniser (recordedRecognition.ts) wired to this browser and to the server's transcription. */
+function recordedRecognitionCtor() {
+  return createRecordedRecognition({
+    getUserMedia: () => navigator.mediaDevices.getUserMedia({ audio: true }),
+    createRecorder: (stream) => new window.MediaRecorder(stream),
+    makeBlob: (parts, type) => new Blob(parts, { type }),
+    transcribe: (recording) => api.transcribeRecording(recording),
+  });
+}
+
 /**
  * The browser's speech objects, wired to React state. All the behaviour (and its failure handling) lives in speech.ts, which is
  * tested with fakes; this file only hands it the real `window` objects and mirrors its state into the page.
@@ -24,7 +41,21 @@ const PREFERRED_LANG = 'en-IN';
  * development) cancels any speech and releases the microphone.
  */
 export function useSpeech() {
-  const [env] = useState(detectEnvironment);
+  const [native] = useState(detectEnvironment);
+  // A browser with no speech recognition of its own (Firefox, most of Safari) can still listen by recording, when the server
+  // has a voice service to turn the recording into text. The page asks once; on any failure the microphone is simply not
+  // offered and typing works as before.
+  const [recorded, setRecorded] = useState(null);
+  useEffect(() => {
+    if (native.recognitionCtor || !canRecord()) return undefined;
+    let cancelled = false;
+    api.voiceStatus().then(
+      (status) => { if (!cancelled && status?.enabled) setRecorded(() => recordedRecognitionCtor()); },
+      (e) => console.warn(`voice: could not ask the server whether recording is available (${e.message}); typing only`),
+    );
+    return () => { cancelled = true; };
+  }, [native]);
+  const env = useMemo(() => ({ ...native, recognitionCtor: native.recognitionCtor || recorded }), [native, recorded]);
   const controllerRef = useRef(null);
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState('');
@@ -121,6 +152,8 @@ export function useSpeech() {
 
   return {
     supportsListening: typeof env.recognitionCtor === 'function',
+    /** True when listening is by recording (the person presses the microphone again to finish), not by the browser. */
+    listensByRecording: !native.recognitionCtor && typeof recorded === 'function',
     supportsSpeaking: Boolean(env.synth) && typeof env.utteranceCtor === 'function',
     listening,
     interim,

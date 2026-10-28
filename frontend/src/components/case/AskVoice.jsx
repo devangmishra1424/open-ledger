@@ -134,7 +134,11 @@ export default function AskVoice({ invoice }) {
   };
 
   const shown = speech.listening ? speech.interim : question;
-  const status = speech.listening ? 'Listening… speak your question, then pause.'
+  // By recording (browsers without their own speech recognition) nothing can tell when the person stops, so they press stop.
+  const listeningStatus = speech.listensByRecording
+    ? (speech.interim ? 'Sending the recording to be turned into text…' : 'Recording… speak your question, then press the stop button.')
+    : 'Listening… speak your question, then pause.';
+  const status = speech.listening ? listeningStatus
     : busy ? 'Looking through the recorded decisions…'
       : speech.speakingId === ANSWER_ID ? 'Reading the answer aloud.'
         : '';
